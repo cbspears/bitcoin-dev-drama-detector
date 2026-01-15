@@ -165,10 +165,15 @@
           useEffect(() => {
             async function loadData() {
               try {
-                const [topicsRes, threadsRes, participantsRes] = await Promise.all([
+                // Load all data files
+                const today = new Date();
+                const dateStr = today.toISOString().split('T')[0];
+
+                const [topicsRes, threadsRes, participantsRes, dailyScoresRes] = await Promise.all([
                   fetch('/data/processed/hot_topics.json'),
                   fetch('/data/processed/spicy_threads.json'),
-                  fetch('/data/processed/key_participants.json')
+                  fetch('/data/processed/key_participants.json'),
+                  fetch(`/data/processed/daily_scores_${dateStr}.json`).catch(() => null)
                 ]);
 
                 const topics = await topicsRes.json();
@@ -179,19 +184,46 @@
                 setSpicyThreads(threads.spicy_threads || []);
                 setKeyParticipants(participants.key_participants || []);
 
-                // Generate 30-day mock scores
+                // Load today's real scores
+                let todayScores = {
+                  overall: 0.4,
+                  github: 0.4,
+                  mailing_list: 0.0,
+                  irc: 0.0
+                };
+
+                if (dailyScoresRes && dailyScoresRes.ok) {
+                  const realScores = await dailyScoresRes.json();
+                  todayScores = {
+                    overall: realScores.overall || 0,
+                    github: realScores.github || 0,
+                    mailing_list: realScores.mailing_list || 0,
+                    irc: realScores.irc || 0
+                  };
+                }
+
+                // Generate 30-day historical data (mix of mock + real today)
                 const scores = [];
-                const today = new Date();
                 for (let i = 29; i >= 0; i--) {
                   const date = new Date(today);
                   date.setDate(date.getDate() - i);
-                  scores.push({
-                    date: date.toISOString().split('T')[0],
-                    overall: i === 0 ? 0.4 : Math.random() * 3 + 2,
-                    github: i === 0 ? 0.4 : Math.random() * 2 + 1,
-                    mailing_list: i === 0 ? 0.0 : Math.random() * 3 + 2,
-                    irc: i === 0 ? 0.0 : Math.random() * 2 + 1
-                  });
+
+                  if (i === 0) {
+                    // Use real scores for today
+                    scores.push({
+                      date: date.toISOString().split('T')[0],
+                      ...todayScores
+                    });
+                  } else {
+                    // Mock historical data for visualization
+                    scores.push({
+                      date: date.toISOString().split('T')[0],
+                      overall: Math.random() * 3 + 2,
+                      github: Math.random() * 2 + 1,
+                      mailing_list: Math.random() * 3 + 2,
+                      irc: Math.random() * 2 + 1
+                    });
+                  }
                 }
                 setDailyScores(scores);
 
