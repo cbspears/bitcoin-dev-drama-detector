@@ -1,0 +1,104 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bips",
+  "fetched_at": "2026-01-15T21:29:05.623118+00:00",
+  "date": "2025-03-17",
+  "pull_requests": [
+    {
+      "number": 1793,
+      "title": "BIP 443: OP_CHECKCONTRACTVERIFY",
+      "body": "Hi all,\r\n\r\nThis is a draft for the formal specifications of the `OP_CHECKCONTRACTVERIFY` (`CCV`) opcode.\r\n\r\n`CCV` enables to build Script-based state machines that span across multiple transactions, by providing an ergonomic tool to commit to - and introspect - the Script and possibly some _data_ that is committed inside inputs or outputs.\r\n\r\nRelated to this PR:\r\n- [Implementation in bitcoin-core](https://github.com/bitcoin/bitcoin/pull/32080)\r\n- [Post on delving bitcoin](https://delvingbitcoin.org/t/op-checkcontractverify-and-its-amount-semantic/1527), focusing on the amount logic of the opcode.\r\n\r\nNot covered in this draft:\r\n- sigops budget (benchmarks needed)\r\n- activation logic\r\n- policy considerations (if any)\r\n\r\nI recommend delving bitcoin for high level discussions about alternative implementations, applications, etc.",
+      "state": "closed",
+      "user": "bigspider",
+      "created_at": "2025-03-17T05:58:38Z",
+      "updated_at": "2025-06-03T04:58:20Z",
+      "comments": 15,
+      "url": "https://github.com/bitcoin/bips/pull/1793",
+      "labels": [
+        "New BIP"
+      ],
+      "comment_list": [
+        {
+          "user": "Sjors",
+          "body": "Some initial questions that come to mind:\r\n\r\n1. Do you really need inputs to check other inputs? What does that enable? Otherwise my sense is that evaluating each input independently of others makes life easier (but you'll find out when implementing).\r\n\r\n2. Can you make it so the output ordering doesn't matter?\r\n\r\n3. You bring up \"vector commitments\" with no further comment, but it would be good to at least briefly explain what they're good for.\r\n\r\nAnd see inline.\r\n\r\n---\r\n\r\nupdate:\r\n1) maybe it's not too bad, because you're only checking the `scriptPubKey` other inputs are spending",
+          "created_at": "2025-03-18T17:25:05Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "> 1. Do you really need inputs to check other inputs? What does that enable? Otherwise my sense is that evaluating each input independently of others makes life easier (but you'll find out when implementing).\r\n\r\nI don't think it would make it easier; in fact, apart from the amount semantic (amounts are not checked when you CCV-check and input), the opcode's behavior is currently very symmetric. So in a way, I think the current formulation is simpler by not restricting to just the current input (while staying more general).\r\n\r\nIn everything I worked on so far (even in combinations with other opcodes, e.g. see [pymatt](https://github.com/Merkleize/pymatt)), checking just the current input is indeed sufficient. However, I think it's likely that it would be useful in some more advanced constructions. For example, you could create a separate _sentinel_ UTXO, and have some spending condition (possibly for many UTXOs at the same time) be only available if the sentinel UTXO is present in the transaction. Once the sentinel is spent, those spending conditions become unavailable for all the remaining. That seems similar in spirit to the _connector outputs_  used in Ark, but without presigned transactions, so I suspect it's useful.\r\n\r\n> 2. Can you make it so the output ordering doesn't matter?\r\n\r\nYou can leave flexibility as to where outputs must be by either\r\n- using -1 for the output index (meaning, the corresponding output must be in the same position as the input index); this would for example allow batching multiple 1-input-1-output CCV-encumbered spends (where each input must \"produce\" its own output, without aggregation) in the same transaction\r\n- passing the `<index>` parameter in the witness of the transaction. E.g. in the [vault example](https://github.com/bitcoin/bitcoin/pull/32080/files#diff-e796b699bc9cf1f5b7f2eb10c2d88f5c47b7701d5835ca7734fbfafd7d72e87c), the _revault index_ and the _trigger index_ of the `trigger_and_revault` clause are arbitrary in this way.\r\n\r\n> 3. You bring up \"vector commitments\" with no further comment, but it would be good to at least briefly explain what they're good for.\r\n\r\nI'll add a footnote, thanks!\r\n",
+          "created_at": "2025-03-22T18:57:44Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Do you have any thoughts on what this could look like in terms of descriptors? Either in the general case of anything that can be expressed in miniscript, or more narrowly for something like a vault?\r\n\r\nE.g. fresh vault deposit addresses could be generated from something like `tr(cold,{trigger_leaf})`, where `trigger_leaf` could be something like `ccv(-1,{withdraw_leaf,recover_leaf},0,...)`, and `recover_leaf` is `tr(cold)`, etc.\r\n\r\nSince programs can take arbitrary data, e.g. a withdrawal address for a vault, I could imagine that when a wallet signs (or detects an unauthorized) a trigger transaction it generates a descriptor for that, so that it knows how to spend it (and when).\r\n\r\nFor the first part the wallet software doesn't even need to know what a vault is. For the second part it probably does need to \"understand\" it in order to know what descriptors to generate, and in order to prompt the user for the right action.\r\n\r\nBut how generalisable is that?",
+          "created_at": "2025-03-24T20:17:40Z"
+        },
+        {
+          "user": "Sjors",
+          "body": ">> Do you really need inputs to check other inputs? What does that enable?\r\n\r\n> However, I think it's likely that it would be useful in some more advanced constructions. For example, you could create a separate sentinel UTXO,\r\n\r\nJust saw the mailinglist thread about this from 2023: https://gnusha.org/pi/bitcoindev/CALZpt+F251k7gSpogwFYHxFtGxc_tZjB4UU4SVEr=WvrsyMVMQ@mail.gmail.com/\r\n\r\nThe BIP should probably address the pros and cons of \"cross-input inspection\".",
+          "created_at": "2025-03-25T14:37:02Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "> Do you have any thoughts on what this could look like in terms of descriptors? Either in the general case of anything that can be expressed in miniscript, or more narrowly for something like a vault?\r\n\r\n@sanket1729 has given several great talks on generalizing miniscript for covenant use cases, you can look for those if you're interested.\r\n\r\nMy general take is that descriptors are the wrong tool for this purpose: a spend from UTXO X to UTXO Y where f(Y) = X needs to somehow encode the relation between X and Y as a _predicate_. While you could do that (every program is a predicate, and every program expressible in Script is a predicate that can be expressed in a tree structure like miniscript...) it quickly becomes unmanageable.\r\n\r\nFor CCV, what works well (kinda by design) is to think in terms of _states_ and _state transitions_. You can check [these docs](https://github.com/Merkleize/pymatt/blob/master/docs/contracts.md) and the code examples in the [pymatt](https://github.com/Merkleize/pymatt) repo if you're interested in more details in how I'm framing it - the PR in bitcoin-core strips most of those useful abstractions for the sake of conciseness, but that's certainly not how one would write those contracts in practice.\r\n\r\nThe framework has some nice properties: once you define the contracts, all you need to know is the contract definition, and the initial parameters. Everything else can be deterministically derived from that, and the blockchain. You can scan for the initial UTXOs matching that contract, and given a transaction spending those UTXOs, you can deterministically deduce what are the next states, parameters (and data, if any) of the new UTXOs that are produced. That's even when someone else in the contract made transactions, as it's easy to 'decode' the witness to understand what _clause_ (tapleaf) was used, and with what arguments. \r\n\r\n> Just saw the mailinglist thread about this from 2023: https://gnusha.org/pi/bitcoindev/CALZpt+F251k7gSpogwFYHxFtGxc_tZjB4UU4SVEr=WvrsyMVMQ@mail.gmail.com/\r\n> \r\n> The BIP should probably address the pros and cons of \"cross-input inspection\".\r\n\r\nI personally think speculation on all the possible ways people might use (and abuse) the opcode is out of scope, and it quickly gets unmanageable - because there is an infinite number of ways of (per-)using the opcode. For example, both [`OP_CAT`](https://github.com/bitcoin/bips/blob/master/bip-0347.mediawiki) and [`OP_TXHASH`](https://github.com/bitcoin/bips/pull/1500) both enable fine-grained introspection of other inputs, and would therefore raise the same concern - if one thinks that is a valid concern; yet the BIPs don't discuss this.\r\n\r\nIMHO that kind of discussion would be more fitting for a BIP describing a proposal to activate a certain package of opcodes as a soft-fork. OP_CCV is not meant to be activated as a stand-alone opcode (that would be kinda silly for a number of reasons). Such a BIP could in fact focus on the _capabilities_, ignoring the exact details of the opcodes (that are not interesting in that context).",
+          "created_at": "2025-03-25T23:52:31Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "\r\n> @sanket1729 has given several great talks on generalizing miniscript for covenant use cases, you can look for those if you're interested.\r\n\r\nFound one, which I'll watch: https://www.youtube.com/watch?v=xNAn9LTzk2g\r\n\r\n> My general take is that descriptors are the wrong tool for this purpose:\r\n\r\n> You can check [these docs](https://github.com/Merkleize/pymatt/blob/master/docs/contracts.md) and the code examples in the [pymatt](https://github.com/Merkleize/pymatt) repo if you're interested in more details in how I'm framing it\r\n\r\nI'll look into that. With previous soft forks like SegWit and Taproot it took many years after activation for enough tooling to be developed to fully take advantage. I'm trying to get a sense of that in this case. It seems fine keep the actual Bitcoin Core implementation simpler.\r\n\r\n> IMHO that kind of discussion would be more fitting for a BIP describing a proposal to activate a certain package of opcodes as a soft-fork\r\n\r\nThat makes sense. My impression so far is that there exists some sort of covenant threshold beyond which we open the pandora's box, and it doesn't really matter how we cross the threshold.\r\n\r\nPerhaps there could be a BIP that discusses several combinations of op codes, explain which combinations cross the threshold, and then explain why that's fine, or not.\r\n\r\nIf it's fine to cross the threshold, I tend to think we should go for the most powerful tool(s) with simplest and safest implementation. \r\n\r\nIf it's not fine, we would be limited to extremely restricted op codes that give us desired functionality without crossing the threshold.",
+          "created_at": "2025-03-26T08:42:46Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Let’s refer to this proposal as **BIP 443**. Could you please rename the file, add an entry to the table, and update the number and created date in the preamble?",
+          "created_at": "2025-05-08T16:38:42Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "Updated header per number assignment, and split the long lines in bec994f70c48de2c0f5b475c6d6c32e55a242fd0; however, that breaks for lists, so I partially undid it c950a1e4fcbb5a415dfdc3cd18ed9963d590e1fc.\r\n\r\n@murchandamus would it be a good time to squash all commits? I think there are no unaddressed review comments at this time.",
+          "created_at": "2025-05-09T15:03:18Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "> I see a few todos in the document, could you describe in a couple sentences how you see the status of this document?\r\n\r\nRegarding the TODOs for the sigops budget and policy changed: they both deserve more thought at this stage - so I think it's worth keeping the TODO as a reminder.\r\n- _sigops budget_: proper benchmarks are necessary to assess how to price it properly; a slight concern is that some natural looking scripts might have very few witness bytes, so they might run out of the sigops budget if a linear pricing is used (unless one stuffs more bytes in the witness just for the sake of gaining more budget). Also, some evaluations of CCV are cheaper and it might be worth pricing them accordingly.\r\n- _Policy changes_: BIP-345 included some [policy changes](https://github.com/bitcoin/bips/blob/master/bip-0345.mediawiki#policy-changes) to make some Scripts that do not use signatures (as the covenant already enforces the required constraints) compatible with the relay policies. It would be worth assessing whether those same considerations apply to CCV, and analogous or more generalized standardness rules would make certain signature-less scripts using CCV useful in practice.",
+          "created_at": "2025-05-09T15:16:04Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "> @murchandamus would it be a good time to squash all commits? I think there are no unaddressed review comments at this time.\r\n\r\nSure that sounds reasonable",
+          "created_at": "2025-05-13T00:49:35Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "Squashed all commits and rebased.",
+          "created_at": "2025-05-13T07:30:04Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Can you expand the BIP to mention that fees have to be paid exogenously?https://github.com/bitcoin/bips/pull/1793#discussion_r2045289706\r\n\r\nThat said, a mode similar to `default` that allows any amount to be missing as long as it goes to fees, could be useful.\r\n\r\nIn particular there's a privacy advantage when you don't have to use coins from some other wallet to initiate and/or cancel a vault withdrawal.\r\n\r\nThe trade-off there is that an attacker can (threaten to) burn your wallet, but they can't take it.",
+          "created_at": "2025-05-21T15:36:13Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "> Can you expand the BIP to mention that fees have to be paid exogenously?[#1793 (comment)](https://github.com/bitcoin/bips/pull/1793#discussion_r2045289706)\r\n> \r\n> That said, a mode similar to `default` that allows any amount to be missing as long as it goes to fees, could be useful.\r\n> \r\n> In particular there's a privacy advantage when you don't have to use coins from some other wallet to initiate and/or cancel a vault withdrawal.\r\n> \r\n> The trade-off there is that an attacker can (threaten to) burn your wallet, but they can't take it.\r\n\r\n@bigspider would you like to follow up on @Sjors' feedback?",
+          "created_at": "2025-06-02T20:22:37Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "> Can you expand the BIP to mention that fees have to be paid exogenously?[#1793 (comment)](https://github.com/bitcoin/bips/pull/1793#discussion_r2045289706)\r\n\r\nI can add a comment about it if you think it's useful. However, I believe this is not specific to CCV: for any covenant that constrains an output Script, it would be highly unusual to not constrain amounts, as sending 0 to an output is equivalent to not having a covenant at all. [CTV](https://github.com/bitcoin/bips/blob/master/bip-0119.mediawiki) and [VAULT](https://github.com/bitcoin/bips/blob/master/bip-0345.mediawiki) reached the same conclusion.\r\n\r\n> That said, a mode similar to `default` that allows any amount to be missing as long as it goes to fees, could be useful.\r\n> \r\n> In particular there's a privacy advantage when you don't have to use coins from some other wallet to initiate and/or cancel a vault withdrawal.\r\n> \r\n> The trade-off there is that an attacker can (threaten to) burn your wallet, but they can't take it.\r\n\r\nIf the attacker is a miner, they can take the money. I'm not sure it would be a good idea to enshrine in the opcode a semantic that is inherently vulnerable to miner's theft.\r\n\r\nBesides, I don't see a way of defining a semantic that is not ambiguous, once you take other inputs into account: it wouldn't be unequivocally determined _whose_ amount is 'going' to fees, and whose is 'going' to the corresponding output.",
+          "created_at": "2025-06-02T21:29:17Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> If the attacker is a miner, they can take the money. I'm not sure it would be a good idea to enshrine in the opcode a semantic that is inherently vulnerable to miner's theft.\r\n\r\nOr colludes with a miner. One could even imagine a malevolent accelerator that pays out its users half the fee for any transaction wasn't already in their mempool.\r\n\r\nI do think it's good to clarify this, since not everyone reading this BIP will have read CTV and VAULT.",
+          "created_at": "2025-06-03T04:58:19Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 1,
+    "issues": 0
+  }
+}

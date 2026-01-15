@@ -1,0 +1,121 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bips",
+  "fetched_at": "2026-01-15T21:40:54.362931+00:00",
+  "date": "2025-06-30",
+  "pull_requests": [
+    {
+      "number": 1885,
+      "title": "BIP77: Propose to encode `+` as `%2B` in pj param of Bitcoin URIs",
+      "body": "This PR proposes to percent-encode the `+` character used in the Payjoin mailbox URI (pj parameter) as `%2B` when included in a query parameter of a Bitcoin URI. \r\n\r\nThe reason is the same as the `#` fragment char that is encoded as `%23` to avoid it being parsed as a fragment of the Bitcoin URI instead of the payjoin URI. The `+` character also has reserved meaning in query parameter contexts (Bitcoin URI), different  from in path contexts (payjoin URI), and improper encoding can break parsing in standards-compliant URI parsers.\r\n\r\nThis change ensures:\r\n\r\n- Compatibility across wallets, libraries, and copy-paste behavior.\r\n- That the Payjoin endpoint and its session parameters are interpreted as intended.\r\n- Continued support for QR alphanumeric mode if `%2B` is used (`%2b` shouldn't be used as clarified in the change to the bip)",
+      "state": "closed",
+      "user": "kumulynja",
+      "created_at": "2025-06-30T17:29:13Z",
+      "updated_at": "2025-07-16T20:05:01Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bips/pull/1885",
+      "labels": [
+        "Proposed BIP modification",
+        "Pending acceptance"
+      ],
+      "comment_list": [
+        {
+          "user": "kumulynja",
+          "body": "@DanGould @nothingmuch Happy to hear your thoughts and discuss.\r\n\r\nAlso sharing this stackoverflow from @ethicnology which shows the problem with the current unencoded `+`:\r\nhttps://stackoverflow.com/questions/79684803/rfc-3986-bip21-how-to-handle-in-query-parameter-containing-a-nested-uri",
+          "created_at": "2025-06-30T17:35:47Z"
+        },
+        {
+          "user": "nothingmuch",
+          "body": "NACK, this change is unnecessary.\r\n\r\n`+` was selected *because* it's a sub-delimiter. ` ` was avoided to prevent any conflicts or ambiguities arising from this ad-hoc convention of interpreting `+` as ` `. \r\n\r\nIt's safe (by design in the context of BIP77) to convert ` ` back to `+` before handing off to any mailbox URL parsing code, BIP 21 parsing code (though I don't see why this mangling would be an issue in this setting), or to simply split the fragment on ` ` instead of `+` if implementing the fragment parameter parsing independently while relying on a URI library that does this.\r\n\r\nThe reason this is safe is that the spec avoids `+` and ` ` anywhere else in the entire URL, including the path components.\r\n\r\nThe problem originates not with the spec but the specific golang & dart URI libraries, which afaict automatically and destructively modify the `pj` param to substitute `+` with ` `. As far as I know this substitution rule is not specified anywhere, certainly not RFC 3986, and is ad hoc behavior from 90s era browsers. Although is arguably a bug in those libraries, or at least a deviation from the spec, because this is a well established convention accommodations for it are desirable, but I believe the spec already accommodates for this sufficiently.\r\n\r\nNote that all of the fields are included in `queryParameters['pj']` (from the stack overflow question), i.e. the entire field is parsed correctly it's just then additional transformed in this (in general destructive) way but is safe to transform back with knowledge that mailbox endpoint URLs will only contain this:\r\n\r\n```dart\r\n    print(uri.queryParameters['pj']);\r\n    // HTTPS://PAYJO.IN/Z55YEYZ3N0RFJ#RK1QVWFRUJ48GT052V0VRJF9RR7R8LXYSLWJEGK0JZZ5YYP8WJ87SKH6 OH1QYP87E2AVMDKXDTU6R25WCPQ5ZUF02XHNPA65JMD8ZA2W4YRQN6UUWG EX1Z3EKY6Q\r\n```\r\n\r\nAlso note that it's already valid to encode this as `%2B` instead of a literal `+`, but both should be supported by any RFC 3986 compliant implementations. RFC 3986 does not introduce any semantic distinction between these, both would be valid in a BIP 21 URL containing a `pj` parameter with a URL which contains strings. Double encoding should also be valid, i.e. if for some reason the `pj` parameter URL is encoded with `%2B`, then the `%` now would necessarily need to be escaped as well, so the BIP 21 URI would instead contain a `%372B`, but as far as obtaining a fragment string with the parameters fully intact and delimited by a `+` after unescaping, these should all result in the same parsed parameter values.\r\n\r\nSo based on all of these arguments, I think it would be better to not change the spec in this way. Requiring that all implementations always escape in this way would impose exactly the same kind of burden of having to work around generic URI libraries that don't implement escaping of + (i suspect most would not), necessitating the transformation of the encoded strings. This seems worse than only requiring implementations that rely on libraries that unconditionally do this mangling to work around that behavior, or switch to a library that more closely follows the spec.\r\n\r\nAn alternative might be to select a different character that is still in the QR alphanumeric set, perhaps `:` or `-`, but I don't think there's sufficient motivation to change that after software has already been released (and the motivation seemed insufficient when we considered this a few months ago).\r\n\r\nIn the particular example of bb mobile, is there anything that prevents using the `payjoin` crate's extension of the `bitcoin_uri` crate (the payjoin extras stuff) in parallel or instead of the generic URI library? If so we should discuss elsewhere (pdk discord or issues), but that seems like the easiest way to avoid any stringly typed workarounds.",
+          "created_at": "2025-06-30T19:28:52Z"
+        },
+        {
+          "user": "kumulynja",
+          "body": "Thanks for the thorough explanation. And after going through the RFC3986 specs again, I think I do understand now that `+` is only specified to have special meaning in the scheme component. But, nevertheless, as you say, a lot of general/standard library Uri parsers in different programming languages wrongly interpret and replace it as a space, so from a practical point of view it would have been nice if those parsers (that are probably used by a lot of wallets) could still be used without any needed extra manipulations. I guess now a lot of users/wallets that do, will bump in an error because of this replacement with spaces, which the pdk sender can not interpret. But I understand the nack.",
+          "created_at": "2025-06-30T20:33:37Z"
+        },
+        {
+          "user": "nothingmuch",
+          "body": "> I guess now a lot of users/wallets that do, will bump in an error because of this replacement with spaces, which the pdk sender can not interpret. But I understand the nack.\r\n\r\nYeah it's not ideal, and I mainly chose `+` over the equally plausible alternatives because it looked a bit familiar and seemed the least likely to get % encoded unnecessarily but that's not a very compelling (for context, most of these changes over the previous approach were done to optimize QR encoding for better scanning UX)... We could still bikeshed this to e.g. `:` or `-`, and just keep backwards compatible stuff in the PDK implementation to handle `+`.\r\n\r\nWe had a similar question with regards to the ordering of these parameters not realizing they should probably have a defined order, and ended up just specifying the order that we implemented without much thought (which turned out to be reverse lexicographical, which is also a bit of a gotcha).\r\n\r\nTaken together maybe these two gotchas motivate a change even though the spec has been merged? The Core implementation is not yet at the stage of dealing with these things so the consequences should be minimal.\r\n\r\n@DanGould, what do you think?",
+          "created_at": "2025-06-30T21:36:17Z"
+        },
+        {
+          "user": "DanGould",
+          "body": "If those production implementors are comfortable with another breaking change, especially since we're able to offer a transition period with PDK, I'm ok with making one. It sounds like both Bull and Cake are ok with this path forward.\r\n\r\nI would want to make sure the parsers don't complain about `:` or `-` before making a commitment. Might you also consider just using the HRP deliminators in the fragment?.\r\n\r\nFor the time being I would recommend they take you up on your suggestion so that at least the current implementations are not broken.",
+          "created_at": "2025-07-01T00:11:08Z"
+        },
+        {
+          "user": "kumulynja",
+          "body": "Even though it's a breaking change, my first thought (depends on the implementation though) is that users aren't really affected as they don't process the pj parameter themselves, they just pass it on to PDK as extracted from the Bitcoin URI. So from a user's point-of-view, it doesn't really matter or shouldn't require any changes as long as parsing the Bitcoin URI doesn't break the pj parameter. Of course inconsistencies in versions will make it incompatible, but currently no two production implementations are on the same version anyways.\r\n\r\nBoth `:` and `-` should work, but maybe `-` is the safest, as this isn't a reserved char in any component, while `:` is still a reserved char in scheme, port and authority components?",
+          "created_at": "2025-07-01T10:58:36Z"
+        },
+        {
+          "user": "kumulynja",
+          "body": "Or, another way to go about it, would be keeping the `+`, but have PDK process both a pj uri string with spaces as with `+`, so accept the following both correct instead of throwing an error on the one with spaces:\r\n\r\n`HTTPS://PAYJO.IN/TXJCGKTKXLUUZ%23RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV+OH1QYPM59NK2LXXS4890SUAXXYT25Z2VAPHP0X7YEYCJXGWAG6UG9ZU6NQ+EX1WKV8CEC`\r\n\r\n`HTTPS://PAYJO.IN/TXJCGKTKXLUUZ%23RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV OH1QYPM59NK2LXXS4890SUAXXYT25Z2VAPHP0X7YEYCJXGWAG6UG9ZU6NQ EX1WKV8CEC`\r\n\r\nInstead of every user having to take care of replacing ` ` with `+` after parsing, PDK could maybe do this itself?\r\n\r\n(But yeah, this feels hacky and maybe again error prone, so better to have only one specified way)",
+          "created_at": "2025-07-01T11:09:52Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Closing this, as my understanding is that the motivation for this PR has been resolved by #1890.",
+          "created_at": "2025-07-16T20:05:00Z"
+        }
+      ]
+    },
+    {
+      "number": 1884,
+      "title": "BIP-0388: Fix test vector",
+      "body": "fix: descriptor in \"Taproot wallet policy with sortedmulti_a and a miniscript leaf\" test vector which incorrectly uses `@0` from keys info without key origin derivation",
+      "state": "closed",
+      "user": "scgbckbone",
+      "created_at": "2025-06-30T10:45:12Z",
+      "updated_at": "2025-07-02T07:36:48Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bips/pull/1884",
+      "labels": [
+        "Proposed BIP modification"
+      ],
+      "comment_list": [
+        {
+          "user": "murchandamus",
+          "body": "@bigspider: could you please take a look?",
+          "created_at": "2025-06-30T18:17:41Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "ACK db8bad7ac9ed3ac858fdfadab7df77a77d55608b\r\n\r\nWell spotted, thanks @scgbckbone!",
+          "created_at": "2025-07-01T06:28:40Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "> off-topic Q: @bigspider was it considered to drop `/**` syntax completely, forbid non-ranged keys and instead `@0` would be shortcut for `@0/<0;1>/*` ? Is there any use case for non-ranged keys in descriptor anyways ?\r\n\r\nI sympathize with possibly dropping `/**`, since the main rationale was to make it more readable in the common case for small screens - but in the long term, I expect the solution will be to find ways of not showing the descriptor template at all, at least in most cases.\r\n\r\nThe rest of the suggestion (make `@0` immediately imply `@0/<0;1>/*`) would unfortunately lose an important feature: wallets like Liana are already using `@0/<0;1>/*`, `@0/<2;3>/*`, etc. in the same wallet policy to identify different spending paths without having to repeat the same root xpub multiple times (which indeed wallet policies forbid). This allows wallets to semantically distinguish between cosigners (= entries in the vector of key info) vs spending conditions (= occurrences of the same key placeholder in different parts of the Script, e.g. different tapleaves). I expect this to be extremely handy in practice, versus the alternative of using multiple xpubs for the same cosigner.\r\n\r\nMoreover, I think keeping the syntax similar to descriptors, minimizing the differences between the two standards, helps keeping things more easily extensible.\r\nFor example, Blockstream Jade added support for `/*` as a custom valid derivation, which they need for wallets that were already in use at the time wallet policies were proposed. Not having this kind of flexibility might have made it challenging for them to adopt the standard.\r\n",
+          "created_at": "2025-07-01T13:35:58Z"
+        },
+        {
+          "user": "scgbckbone",
+          "body": "> The rest of the suggestion (make @0 immediately imply @0/<0;1>/*) would unfortunately lose an important feature: wallets like Liana are already using @0/<0;1>/*, @0/<2;3>/*, etc. in the same wallet policy to identify different spending paths without having to repeat the same root xpub multiple times (which indeed wallet policies forbid). This allows wallets to semantically distinguish between cosigners (= entries in the vector of key info) vs spending conditions (= occurrences of the same key placeholder in different parts of the Script, e.g. different tapleaves). I expect this to be extremely handy in practice, versus the alternative of using multiple xpubs for the same cosigner.\r\n\r\n\r\nhow does BIP-388 forbid `@0/<0;1>/*, @0/<2;3>/*` ? After reading it few times it seemed that it is allowed. My current implementation supports `@0/<0;1>/*, @0/<2;3>/*` in wallet policy, heh\r\n\r\nI do not see how symbolizing `@0/<0;1>/*` with `@0` instead of currently used `@0/**` (with condition that only ranged extended keys are allowed in policy) prohibits liana from doing it.",
+          "created_at": "2025-07-01T16:13:16Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "> off-topic Q:\r\n\r\nFeel free to continue this discussion here.\r\n",
+          "created_at": "2025-07-01T20:21:23Z"
+        },
+        {
+          "user": "bigspider",
+          "body": "> how does BIP-388 forbid `@0/<0;1>/*, @0/<2;3>/*` ? After reading it few times it seemed that it is allowed. My current implementation supports `@0/<0;1>/*, @0/<2;3>/*` in wallet policy, heh\r\n\r\nOh yes, it does allow that, in fact it's expected; what's forbidden is to have the same xpub in different keys in the key information vector.\r\nI thought you meant that `@i` would never have an additional derivation in the descriptor template, while I now understand that you mean something like:\r\n- `@i` refers to just the xpub if it's followed by one or more derivation steps;\r\n- `@i` refers to `xpub/<0;1>/*` otherwise.\r\n\r\n> I do not see how symbolizing `@0/<0;1>/*` with `@0` instead of currently used `@0/**` (with condition that only ranged extended keys are allowed in policy) prohibits liana from doing it.\r\n\r\nChanging the meaning of `@i` based on where it appears would make the grammar more complicated and confusing; for example, you lose the property that you can go from the descriptor template to the descriptor by just replacing each `@i` with its xpub (and `/**` ==> `/<0;1>/*`.\r\n\r\nNote that `@0` without derivation is already used today, for example, in a key expression like `musig(@0,@1,...)/<0;1>/*`.\r\n\r\nThe goal of `/**` was in fact to have a clean, easy to parse shortcut for `/<0;1>/*` with the least visual impact possible, without risking such syntactical quirks.",
+          "created_at": "2025-07-02T02:17:10Z"
+        },
+        {
+          "user": "scgbckbone",
+          "body": "> Changing the meaning of @i based on where it appears would make the grammar more complicated and confusing\r\n\r\nagreed... thanks for the info!",
+          "created_at": "2025-07-02T07:36:48Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 2,
+    "issues": 0
+  }
+}
