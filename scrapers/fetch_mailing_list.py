@@ -102,58 +102,53 @@ class MailingListScraper:
             logger.error(f"Error fetching {url}: {e}")
             return None
     
-    # ==================== PIPERMAIL/GNUSHA METHODS ====================
-    
-    def _get_pipermail_month_url(self, year: int, month: int) -> str:
-        """Get URL for a specific month's archive on gnusha.org."""
-        month_name = datetime(year, month, 1).strftime('%Y-%B')
-        return f"{self.PIPERMAIL_URL}/{month_name}/"
-    
-    def _parse_pipermail_index(self, soup: BeautifulSoup, base_url: str) -> List[dict]:
+    # ==================== GNUSHA MESSAGE-ID METHODS ====================
+
+    def _parse_gnusha_index(self, soup: BeautifulSoup) -> List[dict]:
         """
-        Parse the thread index page from pipermail archive.
-        
+        Parse the gnusha.org index page for message-ID based links.
+
         Args:
             soup: BeautifulSoup of the index page
-            base_url: Base URL for resolving relative links
-        
+
         Returns:
-            List of thread metadata dicts
+            List of message metadata dicts
         """
-        threads = []
-        
-        # Find all message links in the thread index
-        # gnusha.org format has links to individual messages
+        messages = []
+
+        # Find all message links - they have message-ID in href and end with /T/#t or /T/#u
         for link in soup.find_all('a', href=True):
             href = link.get('href', '')
-            
-            # Message links typically end in .html and contain a hash
-            if '.html' in href and href != 'thread.html' and href != 'date.html':
-                thread_url = urljoin(base_url, href)
+
+            # Message links contain /T/#t or /T/#u
+            if '/T/#' in href:
+                # Remove the /T/#t or /T/#u suffix to get the raw message URL
+                message_id = href.split('/T/')[0]
+                message_url = urljoin(self.PIPERMAIL_URL + '/', message_id)
                 title = link.get_text(strip=True)
-                
-                if title and len(title) > 5:  # Filter out navigation links
-                    threads.append({
-                        'url': thread_url,
+
+                if title and len(title) > 10:  # Filter out short navigation links
+                    messages.append({
+                        'url': message_url,
                         'title': title
                     })
-        
-        return threads
+
+        return messages
     
-    def _parse_pipermail_message(self, url: str) -> Optional[dict]:
+    def _parse_gnusha_message(self, url: str) -> Optional[dict]:
         """
-        Parse an individual message from pipermail archive.
-        
+        Parse an individual message from gnusha.org archive.
+
         Args:
             url: URL to the message
-        
+
         Returns:
             Parsed message dict or None on error
         """
         soup = self._fetch_page(url)
         if not soup:
             return None
-        
+
         message = {
             'url': url,
             'title': '',
@@ -161,80 +156,80 @@ class MailingListScraper:
             'date': '',
             'body': '',
         }
-        
-        # Try to find title
+
+        # Try to find title from page
         title_elem = soup.find('title')
         if title_elem:
             message['title'] = title_elem.get_text(strip=True)
-        
-        # Look for the pre tag containing the message
-        pre = soup.find('pre')
-        if pre:
-            text = pre.get_text()
-            
+
+        # The message content is in the second pre tag (index 1)
+        pre_tags = soup.find_all('pre')
+        if len(pre_tags) >= 2:
+            text = pre_tags[1].get_text()
+
             # Parse headers from the message
-            header_match = re.search(r'From:\s*(.+?)(?:\n|$)', text)
-            if header_match:
-                message['author'] = header_match.group(1).strip()
-            
-            date_match = re.search(r'Date:\s*(.+?)(?:\n|$)', text)
+            from_match = re.search(r'From:\s*(.+?)(?:\n|$)', text)
+            if from_match:
+                # Clean up author (remove bullet characters used in emails)
+                author = from_match.group(1).strip()
+                author = author.replace('•', '@')  # gnusha replaces @ with •
+                message['author'] = author
+
+            date_match = re.search(r'Date:\s*(.+?)\t', text)  # Date ends with tab
             if date_match:
                 message['date'] = date_match.group(1).strip()
-            
+
             subject_match = re.search(r'Subject:\s*(.+?)(?:\n|$)', text)
             if subject_match:
                 message['title'] = subject_match.group(1).strip()
-            
-            # Get body (everything after headers)
+
+            # Get body (everything after the headers section, which ends with blank line)
+            # Headers end with "In-Reply-To:" or similar, then blank line, then body
             body_match = re.search(r'\n\n(.+)', text, re.DOTALL)
             if body_match:
-                message['body'] = body_match.group(1).strip()
-        
+                body = body_match.group(1).strip()
+                # Remove quoted text and signature for cleaner analysis
+                # Keep first 2000 chars to avoid huge messages
+                message['body'] = body[:2000]
+
         # Calculate drama signals
         full_text = f"{message['title']} {message['body']}"
         message['drama_signals'] = calculate_basic_drama_signals(full_text)
-        
+
         return message
     
-    def _fetch_pipermail_month(self, year: int, month: int) -> List[dict]:
+    def _fetch_recent_messages(self, limit: int = 50) -> List[dict]:
         """
-        Fetch all messages from a specific month.
-        
+        Fetch recent messages from the gnusha.org index.
+
         Args:
-            year: Year (e.g., 2025)
-            month: Month (1-12)
-        
+            limit: Maximum number of messages to fetch
+
         Returns:
             List of message dicts
         """
-        # Try thread index first
-        base_url = self._get_pipermail_month_url(year, month)
-        thread_url = urljoin(base_url, 'thread.html')
-        
-        logger.info(f"Fetching mailing list index: {thread_url}")
-        
-        soup = self._fetch_page(thread_url)
+        logger.info(f"Fetching mailing list index: {self.PIPERMAIL_URL}")
+
+        soup = self._fetch_page(self.PIPERMAIL_URL)
         if not soup:
-            # Try date index as fallback
-            date_url = urljoin(base_url, 'date.html')
-            soup = self._fetch_page(date_url)
-            if not soup:
-                logger.warning(f"Could not fetch mailing list for {year}-{month:02d}")
-                return []
-        
-        # Parse the index to get thread URLs
-        thread_links = self._parse_pipermail_index(soup, base_url)
-        logger.info(f"Found {len(thread_links)} message links")
-        
+            logger.warning("Could not fetch mailing list index")
+            return []
+
+        # Parse the index to get message URLs
+        message_links = self._parse_gnusha_index(soup)
+        logger.info(f"Found {len(message_links)} message links on index page")
+
         # Fetch individual messages (limit to avoid hammering the server)
         messages = []
-        for i, thread in enumerate(thread_links[:50]):  # Limit to 50 messages per run
-            logger.debug(f"Fetching message {i+1}/{min(len(thread_links), 50)}: {thread['title'][:50]}")
-            
-            msg = self._parse_pipermail_message(thread['url'])
+        fetch_count = min(len(message_links), limit)
+
+        for i, msg_link in enumerate(message_links[:fetch_count]):
+            logger.info(f"Fetching message {i+1}/{fetch_count}: {msg_link['title'][:60]}...")
+
+            msg = self._parse_gnusha_message(msg_link['url'])
             if msg:
                 messages.append(msg)
-        
+
         return messages
     
     # ==================== MAIN FETCH METHODS ====================
@@ -322,43 +317,31 @@ class MailingListScraper:
     
     def fetch_all(self, days_back: int = 1) -> dict:
         """
-        Fetch mailing list data for the specified time period.
-        
+        Fetch mailing list data for recent messages.
+
         Args:
-            days_back: Number of days to look back
-        
+            days_back: Number of days to look back (used to calculate message limit)
+
         Returns:
             Dictionary containing all fetched data
         """
         since, until = get_date_range(days_back)
-        
-        logger.info(f"Fetching mailing list data from {since.date()} to {until.date()}")
-        
-        # Determine which months we need to fetch
-        months_to_fetch = set()
-        current = since
-        while current <= until:
-            months_to_fetch.add((current.year, current.month))
-            current += timedelta(days=32)
-            current = current.replace(day=1)
-        
-        # Fetch messages from each month
-        all_messages = []
-        for year, month in sorted(months_to_fetch):
-            messages = self._fetch_pipermail_month(year, month)
-            all_messages.extend(messages)
-        
-        # Filter to just the date range we want
-        # (This is approximate since we don't always have good date parsing)
-        
+
+        logger.info(f"Fetching recent mailing list messages")
+
+        # Fetch recent messages from the index
+        # Estimate ~10-20 messages per day for bitcoin-dev
+        message_limit = min(days_back * 20, 100)  # Cap at 100 to be respectful
+        all_messages = self._fetch_recent_messages(limit=message_limit)
+
         # Group into threads
         threads = self._group_into_threads(all_messages)
-        
+
         # Calculate summary stats
         all_participants = set()
         for thread in threads:
             all_participants.update(thread['participants'])
-        
+
         data = {
             'source': 'mailing_list',
             'list': 'bitcoin-dev',
@@ -374,7 +357,7 @@ class MailingListScraper:
                 'unique_participants': len(all_participants)
             }
         }
-        
+
         logger.info(f"Mailing list fetch complete: {data['summary']}")
         return data
 

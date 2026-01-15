@@ -35,19 +35,19 @@ class IRCScraper:
     CHANNEL = "#bitcoin-core-dev"
     
     # Regex patterns for parsing IRC logs
-    # Standard message: 2025-01-14 00:01:23 <username> message
+    # Standard message: 01:24 < username> message
     MESSAGE_PATTERN = re.compile(
-        r'^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+<([^>]+)>\s+(.+)$'
+        r'^(\d{2}:\d{2})\s+<\s*([^>]+)>\s+(.+)$'
     )
-    
-    # Action message: 2025-01-14 00:01:23 * username does something
+
+    # Action message: 01:24 * username does something
     ACTION_PATTERN = re.compile(
-        r'^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\*\s+(\S+)\s+(.+)$'
+        r'^(\d{2}:\d{2})\s+\*\s+(\S+)\s+(.+)$'
     )
-    
-    # System message (joins, parts, etc)
+
+    # System message (joins, parts, etc): 01:24 -!- username [~user@host] has joined
     SYSTEM_PATTERN = re.compile(
-        r'^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+-!-\s+(.+)$'
+        r'^(\d{2}:\d{2})\s+-!-\s+(.+)$'
     )
     
     def __init__(self):
@@ -97,79 +97,83 @@ class IRCScraper:
             logger.error(f"Error fetching IRC log: {e}")
             return None
     
-    def _parse_log_line(self, line: str) -> Optional[dict]:
+    def _parse_log_line(self, line: str, date: datetime) -> Optional[dict]:
         """
         Parse a single line from the IRC log.
-        
+
         Args:
             line: A single line from the log file
-        
+            date: The date of this log file (to combine with time-only timestamps)
+
         Returns:
             Parsed message dict or None if line doesn't match expected format
         """
         line = line.strip()
         if not line:
             return None
-        
+
         # Try standard message format
         match = self.MESSAGE_PATTERN.match(line)
         if match:
-            timestamp, username, message = match.groups()
+            time_str, username, message = match.groups()
+            full_timestamp = f"{date.strftime('%Y-%m-%d')} {time_str}:00"
             return {
                 'type': 'message',
-                'timestamp': timestamp,
+                'timestamp': full_timestamp,
                 'user': username,
                 'content': message
             }
-        
+
         # Try action format
         match = self.ACTION_PATTERN.match(line)
         if match:
-            timestamp, username, message = match.groups()
+            time_str, username, message = match.groups()
+            full_timestamp = f"{date.strftime('%Y-%m-%d')} {time_str}:00"
             return {
                 'type': 'action',
-                'timestamp': timestamp,
+                'timestamp': full_timestamp,
                 'user': username,
                 'content': message
             }
-        
+
         # Try system message
         match = self.SYSTEM_PATTERN.match(line)
         if match:
-            timestamp, message = match.groups()
+            time_str, message = match.groups()
+            full_timestamp = f"{date.strftime('%Y-%m-%d')} {time_str}:00"
             return {
                 'type': 'system',
-                'timestamp': timestamp,
+                'timestamp': full_timestamp,
                 'user': None,
                 'content': message
             }
-        
+
         return None
     
     def parse_log(self, raw_log: str, date: datetime) -> dict:
         """
         Parse a raw IRC log into structured data.
-        
+
         Args:
             raw_log: Raw log file content
             date: The date of the log
-        
+
         Returns:
             Structured log data
         """
         messages = []
         participants = set()
-        
+
         for line in raw_log.split('\n'):
-            parsed = self._parse_log_line(line)
+            parsed = self._parse_log_line(line, date)
             if parsed and parsed['type'] in ('message', 'action'):
                 # Add drama signals
                 parsed['drama_signals'] = calculate_basic_drama_signals(parsed['content'])
                 messages.append(parsed)
-                
+
                 if parsed['user']:
                     participants.add(parsed['user'])
-        
+
         return {
             'date': date.strftime('%Y-%m-%d'),
             'channel': self.CHANNEL,

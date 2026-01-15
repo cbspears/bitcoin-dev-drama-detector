@@ -216,12 +216,19 @@ Respond in JSON format:
             'drama_score': analysis['drama_score']
         }
 
-    def calculate_daily_scores(self, github_data: Optional[Dict] = None) -> Dict:
+    def calculate_daily_scores(
+        self,
+        github_data: Optional[Dict] = None,
+        irc_data: Optional[Dict] = None,
+        mailing_list_data: Optional[Dict] = None
+    ) -> Dict:
         """
         Calculate overall drama scores for each source.
 
         Args:
             github_data: GitHub data dict from scraper
+            irc_data: IRC data dict from scraper
+            mailing_list_data: Mailing list data dict from scraper
 
         Returns:
             Daily scores dict for dashboard
@@ -250,6 +257,33 @@ Respond in JSON format:
             if all_scores:
                 scores['github'] = round(sum(all_scores) / len(all_scores), 1)
 
+        # Calculate IRC score if data available
+        if irc_data:
+            all_scores = []
+            # Sample IRC threads
+            for log in irc_data.get('logs', []):
+                for thread in log.get('threads', [])[:5]:  # Sample 5 threads per day
+                    # Use basic drama signals for quick scoring
+                    signals = thread.get('drama_signals', {})
+                    score = min(10, signals.get('drama_keywords', 0) * 2)
+                    all_scores.append(score)
+
+            if all_scores:
+                scores['irc'] = round(sum(all_scores) / len(all_scores), 1)
+
+        # Calculate mailing list score if data available
+        if mailing_list_data:
+            all_scores = []
+            # Sample mailing list threads
+            for thread in mailing_list_data.get('threads', [])[:10]:  # Sample 10 threads
+                # Use basic drama signals for quick scoring
+                signals = thread.get('drama_signals', {})
+                score = min(10, signals.get('drama_keywords', 0) * 2)
+                all_scores.append(score)
+
+            if all_scores:
+                scores['mailing_list'] = round(sum(all_scores) / len(all_scores), 1)
+
         # Overall is average of available sources
         available_scores = [s for s in [scores['github'], scores['mailing_list'], scores['irc']] if s > 0]
         if available_scores:
@@ -257,12 +291,19 @@ Respond in JSON format:
 
         return scores
 
-    def extract_hot_topics(self, github_data: Optional[Dict] = None) -> List[Dict]:
+    def extract_hot_topics(
+        self,
+        github_data: Optional[Dict] = None,
+        irc_data: Optional[Dict] = None,
+        mailing_list_data: Optional[Dict] = None
+    ) -> List[Dict]:
         """
         Extract hot topics from discussions.
 
         Args:
             github_data: GitHub data dict
+            irc_data: IRC data dict
+            mailing_list_data: Mailing list data dict
 
         Returns:
             List of hot topics with heat scores
@@ -344,12 +385,20 @@ Respond in JSON format:
 
         return topics if topics else ['general']
 
-    def identify_spicy_threads(self, github_data: Optional[Dict] = None, limit: int = 10) -> List[Dict]:
+    def identify_spicy_threads(
+        self,
+        github_data: Optional[Dict] = None,
+        irc_data: Optional[Dict] = None,
+        mailing_list_data: Optional[Dict] = None,
+        limit: int = 10
+    ) -> List[Dict]:
         """
         Identify the most contentious threads/discussions.
 
         Args:
             github_data: GitHub data dict
+            irc_data: IRC data dict
+            mailing_list_data: Mailing list data dict
             limit: Number of threads to return
 
         Returns:
@@ -401,12 +450,20 @@ Respond in JSON format:
         threads.sort(key=lambda x: x['drama_score'], reverse=True)
         return threads[:limit]
 
-    def identify_key_participants(self, github_data: Optional[Dict] = None, limit: int = 10) -> List[Dict]:
+    def identify_key_participants(
+        self,
+        github_data: Optional[Dict] = None,
+        irc_data: Optional[Dict] = None,
+        mailing_list_data: Optional[Dict] = None,
+        limit: int = 10
+    ) -> List[Dict]:
         """
         Identify the most active participants in discussions.
 
         Args:
             github_data: GitHub data dict
+            irc_data: IRC data dict
+            mailing_list_data: Mailing list data dict
             limit: Number of participants to return
 
         Returns:
@@ -469,28 +526,38 @@ Respond in JSON format:
 
         logger.info(f"Processing data for {date_str}")
 
-        # Load raw data
+        # Load raw data from all sources
         github_data = load_raw_data('github', date_str)
+        irc_data = load_raw_data('irc', date_str)
+        mailing_list_data = load_raw_data('mailing_list', date_str)
 
         if not github_data:
             logger.warning(f"No GitHub data found for {date_str}")
             github_data = None
 
+        if not irc_data:
+            logger.warning(f"No IRC data found for {date_str}")
+            irc_data = None
+
+        if not mailing_list_data:
+            logger.warning(f"No mailing list data found for {date_str}")
+            mailing_list_data = None
+
         # Generate outputs
         logger.info("Calculating daily scores...")
         daily_scores = {
             'date': date_str,
-            **self.calculate_daily_scores(github_data)
+            **self.calculate_daily_scores(github_data, irc_data, mailing_list_data)
         }
 
         logger.info("Extracting hot topics...")
-        hot_topics = self.extract_hot_topics(github_data)
+        hot_topics = self.extract_hot_topics(github_data, irc_data, mailing_list_data)
 
         logger.info("Identifying spicy threads...")
-        spicy_threads = self.identify_spicy_threads(github_data)
+        spicy_threads = self.identify_spicy_threads(github_data, irc_data, mailing_list_data)
 
         logger.info("Identifying key participants...")
-        key_participants = self.identify_key_participants(github_data)
+        key_participants = self.identify_key_participants(github_data, irc_data, mailing_list_data)
 
         # Save processed data
         save_processed_data(daily_scores, f'daily_scores_{date_str}.json')
