@@ -1,0 +1,102 @@
+# Bitcoin Dev Drama Detector - Daily Sync Workflow
+# Runs scrapers daily to fetch fresh data from GitHub, IRC, and mailing list
+
+name: Daily Data Sync
+
+on:
+  # Run daily at 6 AM UTC
+  schedule:
+    - cron: '0 6 * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'Number of days to look back'
+        required: false
+        default: '1'
+        type: string
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  scrape:
+    name: Fetch Data
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Create data directories
+        run: |
+          mkdir -p data/raw/github
+          mkdir -p data/raw/irc
+          mkdir -p data/raw/mailing_list
+          mkdir -p data/processed
+      
+      - name: Fetch GitHub data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          python scrapers/fetch_github.py --days ${{ github.event.inputs.days_back || '1' }}
+      
+      - name: Fetch IRC logs
+        run: |
+          python scrapers/fetch_irc.py --days ${{ github.event.inputs.days_back || '1' }}
+      
+      - name: Fetch Mailing List data
+        run: |
+          python scrapers/fetch_mailing_list.py --days ${{ github.event.inputs.days_back || '1' }}
+      
+      - name: Upload raw data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-data-${{ github.run_number }}
+          path: data/raw/
+          retention-days: 30
+      
+      - name: Commit data to repository
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Add data files
+          git add data/
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "📊 Daily data sync - $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+  # Future: Add analysis job that runs after scraping
+  # analyze:
+  #   name: Analyze Drama
+  #   needs: scrape
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Download raw data
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: raw-data-${{ github.run_number }}
+  #     
+  #     - name: Run drama analyzer
+  #       env:
+  #         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  #       run: |
+  #         python analyzer/drama_scorer.py
