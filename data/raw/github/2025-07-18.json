@@ -1,0 +1,385 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:59:04.195195+00:00",
+  "date": "2025-07-18",
+  "pull_requests": [
+    {
+      "number": 33013,
+      "title": "[29.x] Backport #32521",
+      "body": "This backports PR #32521 to make the change available to miners who can't (or don't want to) upgrade past version 29.",
+      "state": "closed",
+      "user": "darosior",
+      "created_at": "2025-07-18T21:08:44Z",
+      "updated_at": "2025-07-24T16:39:08Z",
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33013",
+      "labels": [
+        "Backport",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33013.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [marcofleon](https://github.com/bitcoin/bitcoin/pull/33013#issuecomment-3113414394), [glozow](https://github.com/bitcoin/bitcoin/pull/33013#pullrequestreview-3052376345) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-18T21:08:49Z"
+        },
+        {
+          "user": "glozow",
+          "body": "@darosior could you make the release notes updates as well please? Thanks\r\n\r\nFor example\r\n```\r\ndiff --git a/doc/release-notes.md b/doc/release-notes.md\r\nindex 3a39efadbce..63327ea13a5 100644\r\n--- a/doc/release-notes.md\r\n+++ b/doc/release-notes.md\r\n@@ -49,9 +49,10 @@ Notable changes\r\n - #31757 wallet: fix crash on double block disconnection\r\n - #32553 wallet: Fix logging of wallet version\r\n \r\n-### P2P\r\n+### P2P and Mempool Policy\r\n \r\n - #32826 p2p: add more bad ports\r\n+- #32521 policy: make pathological transactions packed with legacy sigops non-standard\r\n \r\n ### Test\r\n \r\n```",
+          "created_at": "2025-07-21T15:00:29Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Sure, will do.",
+          "created_at": "2025-07-21T15:12:52Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Added a commit with the suggested release note. While i was there i also changed my nym for my name in the credits.",
+          "created_at": "2025-07-22T12:50:38Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Can you squash the last two commits into `doc: update release notes for 29.x`? Although, I think this change should have it's full release note displayed (#33037). i.e something like this: https://github.com/fanquake/bitcoin/commit/fc2e2ef1709d553a43e141db216a7f1959e1bb4c.",
+          "created_at": "2025-07-23T09:56:14Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Cherry-picked your commit",
+          "created_at": "2025-07-23T16:48:46Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "the ci failure is unrelated. The fix was https://github.com/bitcoin/bitcoin/commit/cd8089c20baaaee329cbf7951195953a9f86d7cf, but that never made it into 29.x",
+          "created_at": "2025-07-24T08:26:30Z"
+        },
+        {
+          "user": "marcofleon",
+          "body": "reACK f25dc84b2892e6bdbbd0471add9fcb2757700981",
+          "created_at": "2025-07-24T13:08:24Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Opened a separate backport PR for the flakiness fix: https://github.com/bitcoin/bitcoin/pull/33052",
+          "created_at": "2025-07-24T13:33:08Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Should i rebase now that #33052 is merged?",
+          "created_at": "2025-07-24T16:21:24Z"
+        }
+      ]
+    },
+    {
+      "number": 33012,
+      "title": "script: return verification flag responsible for error upon validation failure",
+      "body": "For 30.0 please consider reviewing https://github.com/bitcoin/bitcoin/pull/33050 instead of this PR. This can still be considered independently later on, but #33050 is a smaller patch to get the desired effects which should be easier to get in before feature freeze.\r\n\r\nFor unconfirmed transactions, we currently distinguish between Script validation failures due to standardness rules and those due to consensus rules. The distinction is used to decide whether to disconnect the peer which submitted this transaction.\r\n\r\nThis is currently achieved by repeating Script validation with only the consensus verification flags, after it failed with the standardness flags. It is wasteful, and potentially significantly more so since we have Taproot. This PR proposes to replace this detection by having Script validation return the verification flag responsible for the failure instead.\r\n\r\nNote this is a slight behaviour change, as a consensus-related Script validation failure that happens after a standardness-related Script validation failure would not be treated as a consensus error anymore (and consequentially the peer not disconnected). I don't think this is an issue because we already do not treat all consensus-invalid transactions we get submitted as consensus errors. For instance, a non-standard transaction (for any reason other than its Scripts) with a consensus-invalid Script will be treated as a standardness error. Same for a transaction with a consensus-invalid Script in a later input than another with a non-standard Script. In these conditions, a Script that is consensus-invalid after being standardness-invalid is an edge case that seems unnecessary to detect. It also seems to me that the fact this edge case is detected at all is more an artifact of the existing logic (introduced in 97e7901a3a74 13 years ago) than a design decision. For all these reasons, this slight behaviour change seems fine to me (and definitely worth it when considering the upside of not having to run Script validation twice).\r\n\r\nThis change is quite verbose. If reviewers want i can try to make it less so, but i first wanted to open this as draft to get feedback on the broader approach of returning errors from Script validation directly instead of having to run it multiple times with different flags to distinguish the cause of an error.",
+      "state": "closed",
+      "user": "darosior",
+      "created_at": "2025-07-18T19:19:49Z",
+      "updated_at": "2025-09-11T13:49:08Z",
+      "comments": 13,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33012",
+      "labels": [
+        "Consensus",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33012.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33050](https://github.com/bitcoin/bitcoin/pull/33050) (net, validation: don't punish peers for consensus-invalid txs by ajtowns)\n* [#32998](https://github.com/bitcoin/bitcoin/pull/32998) (Bump SCRIPT_VERIFY flags to 64 bit by ajtowns)\n* [#32575](https://github.com/bitcoin/bitcoin/pull/32575) (refactor: Split multithreaded case out of CheckInputScripts by fjahr)\n* [#32473](https://github.com/bitcoin/bitcoin/pull/32473) (Introduce per-txin sighash midstate cache for legacy/p2sh/segwitv0 scripts by sipa)\n* [#32247](https://github.com/bitcoin/bitcoin/pull/32247) (BIP-348 (OP_CHECKSIGFROMSTACK) (regtest only) by jamesob)\n* [#32143](https://github.com/bitcoin/bitcoin/pull/32143) (Fix 11-year-old mis-categorized error code in OP_IF evaluation by cculianu)\n* [#31713](https://github.com/bitcoin/bitcoin/pull/31713) (miniscript refactor: Remove unique_ptr-indirection (#30866 follow-up) by hodlinator)\n* [#31576](https://github.com/bitcoin/bitcoin/pull/31576) (test: Move `script_assets_tests` into its own suite by hebasto)\n* [#29491](https://github.com/bitcoin/bitcoin/pull/29491) ([EXPERIMENTAL] Schnorr batch verification for blocks by fjahr)\n* [#29247](https://github.com/bitcoin/bitcoin/pull/29247) (CAT in Tapscript (BIP-347) by arminsabouri)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-18T19:19:55Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `TSan, depends, gui`: https://github.com/bitcoin/bitcoin/runs/46284608490</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by a compilation error in verify_script.cpp due to an incorrect call to EvalScript with mismatched argument types.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-18T20:11:33Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> Note this is a slight behaviour change, as a consensus-related Script validation failure that happens after a standardness-related Script validation failure would not be treated as a consensus error anymore (and consequentially the peer not disconnected).\r\n\r\nI'm skeptical whether this behaviour is really worth preserving in a limited fashion? With this change, an attacker can waste your resources without being discouraged or risking having to pay tx fees by making a consensus invalid tx that fails standardness before the consensus failure is seen; and any innocent third parties are more likely to waste your resources by relaying txs under different standardness policies, and won't be penalised at all.\r\n\r\nI think getting different errors for standardness vs consensus failures can be useful for debugging (and perhaps functional tests or network behaviour monitoring) so could see it being worthwhile to retain a (default off) config option to continue testing transactions twice.",
+          "created_at": "2025-07-20T05:44:56Z"
+        },
+        {
+          "user": "darosior",
+          "body": "The behaviour already exists in a limited fashion. Even without this change, an attacker can trivially create such a transaction (as discussed in OP). Here is for instance a `p2p_invalid_tx.py` case which passes both with or without this PR:\r\n\r\n<details>\r\n\r\n<summary> Click to see patch </summary>\r\n\r\n```diff\r\ndiff --git a/test/functional/data/invalid_txs.py b/test/functional/data/invalid_txs.py\r\nindex 36b274efc27..46bb2bba367 100644\r\n--- a/test/functional/data/invalid_txs.py\r\n+++ b/test/functional/data/invalid_txs.py\r\n@@ -286,6 +286,22 @@ class NonStandardAndInvalid(BadTxTemplate):\r\n             self.spend_tx, 0, script_sig=b'\\x00' * 3 + b'\\xab\\x6a',\r\n             amount=(self.spend_avail // 2))\r\n \r\n+\r\n+class FirstInNonStdSecondInInvalid(BadTxTemplate):\r\n+    \"\"\"A transaction with first a standardness error and then a consensus error.\"\"\"\r\n+    reject_reason = \"non-mandatory-script-verify-flag (Using OP_CODESEPARATOR in non-witness script)\"\r\n+    # NOTE: feature_block would need to be tweaked for the spent tx to have two outputs.\r\n+    block_reject_reason = \"mandatory-script-verify-flag-failed (OP_RETURN was encountered)\"\r\n+    expect_disconnect = False\r\n+    valid_in_block = False\r\n+\r\n+    def get_tx(self):\r\n+        tx = create_tx_with_script(self.spend_tx, 0, script_sig=b\"\", amount=(self.spend_avail // 2))\r\n+        tx.vin.append(CTxIn(COutPoint(self.spend_tx.txid_int, 1)))\r\n+        tx.vin[0].scriptSig = b\"\\xab\"  # A CODESEP in the first input (non-standard)\r\n+        tx.vin[1].scriptSig = b\"\\x6a\"  # An OP_RETURN in the second input (invalid)\r\n+        return tx\r\n+\r\n # Disabled opcode tx templates (CVE-2010-5137)\r\n DisabledOpcodeTemplates = [getDisabledOpcodeTemplate(opcode) for opcode in [\r\n     OP_CAT,\r\ndiff --git a/test/functional/p2p_invalid_tx.py b/test/functional/p2p_invalid_tx.py\r\nindex ae9771e7cb4..33082337cc8 100755\r\n--- a/test/functional/p2p_invalid_tx.py\r\n+++ b/test/functional/p2p_invalid_tx.py\r\n@@ -14,6 +14,7 @@ from test_framework.messages import (\r\n     CTxOut,\r\n )\r\n from test_framework.p2p import P2PDataStore\r\n+from test_framework.script import CScript, OP_TRUE\r\n from test_framework.test_framework import BitcoinTestFramework\r\n from test_framework.util import (\r\n     assert_equal,\r\n@@ -56,7 +57,7 @@ class InvalidTxRequestTest(BitcoinTestFramework):\r\n \r\n         self.log.info(\"Create a new block with an anyone-can-spend coinbase.\")\r\n         height = 1\r\n-        block = create_block(tip, create_coinbase(height), block_time)\r\n+        block = create_block(tip, create_coinbase(height, extra_output_script=CScript([OP_TRUE])), block_time)\r\n         block.solve()\r\n         # Save the coinbase for later\r\n         block1 = block\r\n```\r\n\r\n</details>\r\n\r\nI don't think this logic is actually meant to prevent an attacker from wasting resources anyways. I think it's rather to make sure we don't split the network when introducing new Script-runtime standardness rules. And this change doesn't affect this.",
+          "created_at": "2025-07-21T13:35:40Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Rebased to fix a silent merge conflict that was making the \"test each commit\" CI job fail.",
+          "created_at": "2025-07-21T14:35:14Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> The behaviour already exists in a limited fashion. Even without this change, an attacker can trivially create such a transaction (as discussed in OP). Here is for instance a `p2p_invalid_tx.py` case which passes both with or without this PR:\r\n\r\nOkay, but that just means the extra work isn't providing much value today either?\r\n\r\n> I don't think this logic is actually meant to prevent an attacker from wasting resources anyways. I think it's rather to make sure we don't split the network when introducing new Script-runtime standardness rules. And this change doesn't affect this.\r\n\r\nI'm suggesting we should not discourage for consensus invalid txs either, since we can't do that both consistently and efficiently -- ie, drop `MaybePunishNodeForTx()` entirely. That would also have the benefit of not having to worry about potential network splits due to txs violating new consensus rules that never actually make it into a block (cf #31269 and #26291). See https://github.com/ajtowns/bitcoin/commits/202507-nopunishtx/",
+          "created_at": "2025-07-23T00:52:48Z"
+        },
+        {
+          "user": "darosior",
+          "body": "That doesn't seem too unreasonable to stop disconnecting on receiving a transaction which fails Script validation due to a consensus verification flag. However it's not clear that it's necessarily better. It doesn't help in adversarial situations, but may still avoid wasting resources on innocently misbehaving peers. With this PR, opportunistically detecting such peers and evicting them comes at virtually no cost (unlike the current situation). So i suppose the tradeoff is between \"maintain the opportunistic behaviour\" and \"avoid the cost of reviewing and merging this PR\".",
+          "created_at": "2025-07-23T19:50:46Z"
+        },
+        {
+          "user": "darosior",
+          "body": "One example where the opportunistic disconnection could be useful is in the case of a hardfork coin with signature replay protection but still connecting to Bitcoin peers. It happened in the past but admittedly seems very unlikely nowadays.",
+          "created_at": "2025-07-23T20:29:19Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> One example where the opportunistic disconnection could be useful is in the case of a hardfork coin\r\n\r\nIn that case you'll already get a network split when the hard fork side mines a block.\r\n\r\n> It doesn't help in adversarial situations, but may still avoid wasting resources on innocently misbehaving peers. With this PR, opportunistically detecting such peers and evicting them comes at virtually no cost (unlike the current situation).\r\n\r\nDisconnecting peers is only useful in adversarial situations -- keeping slightly buggy but otherwise honest peers in sync with our view of the world is a desirable outcome.\r\n\r\nA particular example of where this makes the network more robust is when we take currently standard txs and make them consensus invalid: if we ban on consensus invalid txs, then old nodes (that consider the tx standard) and new nodes (that consider the tx invalid) need to be bridged by intermediate nodes (that consider it valid but non-standard). If we simply ignore invalid txs, making the network more fragile.\r\n\r\n> So i suppose the tradeoff is between \"maintain the opportunistic behaviour\" and \"avoid the cost of reviewing and merging this PR\".\r\n\r\nSomeone recently made the point that we already have a lot of code to maintain in bitcoin core, and that perhaps it would be beneficial to focus our attention on the parts that are providing the most benefit...",
+          "created_at": "2025-07-24T01:14:39Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> Someone recently made the point that we already have a lot of code to maintain in bitcoin core\r\n\r\nA wise man! More seriously, i was merely pointing out the tradeoff here. Not saying this PR is the better alternative to #33050. I am out of rationalization for the existing behaviour anyways, so might as well take a red diff over a green one.",
+          "created_at": "2025-07-24T13:07:27Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-07-26T00:11:57Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> In that case you'll already get a network split when the hard fork side mines a block.\r\n\r\nDiscussed this with AJ (and others). For reference, in this case the disconnection would happen after a second block being submitted on top a first invalid one. We would not disconnect upon a first invalid block being submitted through compact blocks. It turns out that this logic was not tested at all, so i opened https://github.com/bitcoin/bitcoin/pull/33083 which exercises various cases in `MaybePunishNodeForBlock`.",
+          "created_at": "2025-07-29T14:04:18Z"
+        },
+        {
+          "user": "darosior",
+          "body": "There may be use cases for better reporting independently of reducing unconfirmed transactions validation time, but i'm not going to make a priority of working on those. Closing for now.",
+          "created_at": "2025-09-11T13:49:07Z"
+        }
+      ]
+    },
+    {
+      "number": 33011,
+      "title": "log: rate limiting followups",
+      "body": "Followups to #32604.\r\n\r\nThere are two behavior changes:\r\n- prefixing with `[*]` is done to all logs (regardless of `should_ratelimit`) per [this comment](https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2195710943).\r\n- a DEBUG_ONLY `-disableratelimitlogging` flag is added by default to functional tests so they don't encounter rate limiting.",
+      "state": "closed",
+      "user": "Crypt-iQ",
+      "created_at": "2025-07-18T18:00:57Z",
+      "updated_at": "2025-08-20T11:19:07Z",
+      "comments": 20,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33011",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33011.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [stickies-v](https://github.com/bitcoin/bitcoin/pull/33011#issuecomment-3181130704), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33011#pullrequestreview-3113664477), [achow101](https://github.com/bitcoin/bitcoin/pull/33011#issuecomment-3189985905) |\n| Stale ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/33011#pullrequestreview-3097038450) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-18T18:01:03Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Addressed in this PR:\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188529752\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2163341392\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2163349298\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2182919153\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2185313756\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188155450\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188156156\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188158176\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188159134\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188161714\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188231409\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188285962\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188544998\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188548959\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2194330070\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2195710943\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188644325\r\n\r\nNot addressed:\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2115869345\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188158709\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188237233\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188643445\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188651877\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188652258\r\n- https://github.com/bitcoin/bitcoin/pull/32604#issuecomment-3054117201\r\n\r\nWon't address:\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188225785\r\n  - Not convinced recursion is bad in this case.\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2194621936\r\n  - Removed `BOOST_CHECK_THROW` and `BOOST_CHECK_NO_THROW`, so no longer relevant.\r\n- https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2188256330\r\n  - Overly verbose test is now cleaned up a fair bit\r\n",
+          "created_at": "2025-07-18T18:11:10Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `previous releases, depends DEBUG`: https://github.com/bitcoin/bitcoin/runs/46279969042</sub>\n<sub>LLM reason (✨ experimental): Build error due to incomplete type in std::pair's second member caused by missing full definition of BCLog::LogRateLimiter::Stats.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-18T19:24:17Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "cc @stickies-v @l0rinc",
+          "created_at": "2025-07-23T11:55:42Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `MSan, depends`: https://github.com/bitcoin/bitcoin/runs/46865525511</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by a macro name conflict where DEBUG is redefined as 1, causing syntax errors during compilation.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-28T15:24:17Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Concept ACK",
+          "created_at": "2025-07-28T15:26:21Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "The latest push 526403df23a2db781709e4494da3a9f79284531d:\r\n- makes `m_limiter` a `std::shared_ptr`\r\n- adds a commit to remove double-hashing in `SourceLocationHasher` (b8e92fb3d4137f91fe6a54829867fc54357da648)\r\n- changes `logging_filesize_rate_limit` to dedupe logic and explicitly check for certain rate-limiting logs\r\n\r\nThe CI is [failing](https://api.cirrus-ci.com/v1/task/6153650155814912/logs/ci.log) with `DEBUG_LOCKCONTENTION` as `ReadDebugLogLines` is matching against a log from the scheduler having lock contention. Will investigate.",
+          "created_at": "2025-07-28T19:58:48Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Latest push 526403df23a2db781709e4494da3a9f79284531d -> d434155db5f9c34b8ab3e19038d824d161b34195 modifies `logging_filesize_rate_limit` to scan `ReadDebugLogLines` for the `[warning] Restarting logging` string in one place. This is hacky and is needed to make the CI pass when `DEBUG_LOCKCONTENTION` is specified.\r\n\r\nThe failure happens because:\r\n- `Reset` is in the task queue of the scheduler\r\n- `MockForwardAndSync` calls `MockForward`\r\n- `Reset` will be called and will schedule another `Reset`. This will lock `newTaskMutex`.\r\n- The `scheduleFromNow` call in `MockForwardAndSync` will lock `newTaskMutex`.\r\n\r\nIf there's lock contention here, it will trigger the failure. The logs will look like:\r\n```\r\n[14:38:33.794] [*] [warning] Excessive logging detected from test/logging_tests.cpp:392 (void logging_tests::(anonymous namespace)::LogFromLocation(Location, const std::string &)): >1048576 bytes logged during the last time window of 20s. Suppressing logging to disk from this source location until time window resets. Console logging unaffected. Last log entry.\r\n[14:38:33.794] [*] a\r\n[14:38:33.794] [*] b\r\n[14:38:33.794] [*] c\r\n[14:38:33.794] [lock] Enter: lock contention newTaskMutex, scheduler.cpp:74 started\r\n[14:38:33.794] [warning] Restarting logging from test/logging_tests.cpp:392 (void logging_tests::(anonymous namespace)::LogFromLocation(Location, const std::string &)): 4 bytes were dropped during the last 20s.\r\n[14:38:33.794] [lock] Enter: lock contention newTaskMutex, scheduler.cpp:74 completed (10μs)\r\n[14:38:33.794] [lock] Enter: lock contention newTaskMutex, scheduler.cpp:74 started\r\n[14:38:33.794] [lock] Enter: lock contention newTaskMutex, scheduler.cpp:74 completed (36μs)\r\n[14:38:33.794] test/logging_tests.cpp(469): \u001b[1;31;49merror: in \"logging_tests/logging_filesize_rate_limit\": check ReadDebugLogLines().back().starts_with(\"[warning] Restarting logging\") has failed\u001b[0;39;49m\r\n```",
+          "created_at": "2025-07-30T14:01:52Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Latest push d434155db5f9c34b8ab3e19038d824d161b34195 -> f57496e:\r\n- ensures the category mask does not leak across tests\r\n- modifies `logging_filesize_rate_limit` to disable `BCLog::LogFlags::LOCK` if `DEBUG_LOCKCONTENTION` is defined\r\n\r\nThis gets rid of the test flake without hacking around `ReadDebugLogLines`.",
+          "created_at": "2025-07-31T15:38:47Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `MSan, depends`: https://github.com/bitcoin/bitcoin/runs/47136399385</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by the \"logging_tests\" test failing during execution.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-31T17:29:32Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Latest push 31ef2b6 -> 8dd5c0a:\r\n- adds a DEBUG_ONLY flag to disable the rate limiting. This was pointed out [here](https://github.com/bitcoin/bitcoin/pull/33011#discussion_r2246301270) that some of the functional tests were having their logs suppressed during normal operation.\r\n\r\nShould the DEBUG_ONLY flag get a release note?",
+          "created_at": "2025-08-04T18:52:27Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "re-ACK 7bc28668cc791d28fe824476d2c1f236c5a772d0\r\n\r\nThanks for addressing all comments and keeping everything super organized all the time. A pleasure to review your PR, again.",
+          "created_at": "2025-08-06T20:51:56Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "re-ACK f1d25abcaa6a85fec08ea760036f2c7c02945ba8\r\n\r\nNo changes except addressing review nits.",
+          "created_at": "2025-08-11T10:33:44Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK f1d25abcaa6a85fec08ea760036f2c7c02945ba8",
+          "created_at": "2025-08-11T22:15:35Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "The latest push f1d25ab -> 5c74a0b:\r\n- removes the release note for the DEBUG_ONLY `-logratelimit`\r\n- addresses some minor comments about `LogRateLimiter` in 3d630c2544e19480268426cda245796d4ce34ac3",
+          "created_at": "2025-08-12T18:52:30Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "re-ACK 5c74a0b397cb3db94761bad78801eed4544155b9",
+          "created_at": "2025-08-12T21:45:18Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Thanks for the review @l0rinc, going to hold off on changing this PR unless there are any blocking comments.",
+          "created_at": "2025-08-13T12:51:18Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 5c74a0b397cb3db94761bad78801eed4544155b9",
+          "created_at": "2025-08-14T22:04:07Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "This might be causing sporadic CI failures? See #33195.",
+          "created_at": "2025-08-15T13:41:13Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #33225.",
+          "created_at": "2025-08-20T11:19:07Z"
+        }
+      ]
+    },
+    {
+      "number": 33008,
+      "title": "wallet: support bip388 policy with external signer",
+      "body": "External signers such as Ledger, BitBox02 and Jade, when used with multisig, use [BIP388](https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki) to display (and constrain) descriptor policies to their users.\r\n\r\nAt least in the case of Ledger (no others so far, see https://github.com/bitcoin/bitcoin/pull/33008#issuecomment-3165080503) this requires us to hold on to an hmac, which proves to the device that the user previously reviewed and approved it.\r\n\r\nThis PR adds a new RPC call `registerpolicy` which converts our descriptor(s) into a BIP388 policy (_partially implemented_), calls a new HWI method `register` (_implemented_) and stores the resulting HMAC (_implemented_).\r\n\r\nWhen signing a transaction using HWI's `signtx` it passes the HMAC along with the PSBT (_TODO_).\r\n\r\nFor convenience the HMAC can be retrieved via `getwalletinfo` (_implemented_). This is useful for scenario's where we can't (yet) complete a transaction via HWI calls.\r\n\r\nNote that the HMAC itself is not specified in BIP388 and may be different for different hardware vendors. So we'll store and echo any hex string the device gives us.\r\n\r\nAn alternative approach to directly supporting BIP388 policies would be to pass the involved descriptors to HWI and have it figure out how to derive a policy.\r\n\r\nTesting:\r\n- make a multisig wallet with a Ledger or other [supported device](https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki#reference-implementation)\r\n  - try https://github.com/Sjors/bitcoin/pull/91 if you're feeling adventurous, it includes this PR\r\n- install https://github.com/bitcoin-core/HWI/pull/791 HWI branch\r\n- call `bitcoin rpc registerpolicy`\r\n- call `bitcoin rpc getwalletinfo` to see the hmac\r\n\r\nTODO:\r\n- [ ] derive policy using `Descriptor` class instead regex madness, implement all constraints\r\n- [ ] pass hmac along when signing\r\n\r\nDepends on:\r\n- [ ] HWI `register` command: https://github.com/bitcoin-core/HWI/pull/791\r\n- [ ] HWI optional `--hmac` argument for `signtx` (if set, bypass the current auto-registration workaround)\r\n\r\nPotential followups:\r\n- pass hmac along when displaying an address. This provides some extra assurance to the user. See https://github.com/bitcoin-core/HWI/pull/647\r\n",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-07-18T15:31:45Z",
+      "updated_at": "2026-01-14T15:21:18Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33008",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33008.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33034](https://github.com/bitcoin/bitcoin/pull/33034) (wallet: Store transactions in a separate sqlite table by achow101)\n* [#32958](https://github.com/bitcoin/bitcoin/pull/32958) (wallet/refactor: change PSBTError to PSBTResult and remove std::optional<common::PSBTResult> and return common::PSBTResult by kevkevinpal)\n* [#32895](https://github.com/bitcoin/bitcoin/pull/32895) (wallet: Prepare for future upgrades by recording versions of last client to open and decrypt by achow101)\n* [#32876](https://github.com/bitcoin/bitcoin/pull/32876) (refactor: use options struct for signing and PSBT operations by Sjors)\n* [#32861](https://github.com/bitcoin/bitcoin/pull/32861) (Have createwalletdescriptor auto-detect an unused(KEY) by Sjors)\n* [#32857](https://github.com/bitcoin/bitcoin/pull/32857) (wallet: allow skipping script paths by Sjors)\n* [#32784](https://github.com/bitcoin/bitcoin/pull/32784) (wallet: derivehdkey RPC to get xpub at arbitrary path by Sjors)\n* [#32489](https://github.com/bitcoin/bitcoin/pull/32489) (wallet: Add `exportwatchonlywallet` RPC to export a watchonly version of a wallet by achow101)\n* [#29136](https://github.com/bitcoin/bitcoin/pull/29136) (wallet: `addhdkey` RPC to add just keys to wallets via new `unused(KEY)` descriptor by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible typos and grammar issues:\n\n- furth -> further [typo in TODO comment: \"apply furth BIP388 restrictions\" should be \"further\"]\n- swith -> with [typo in comment: \"Replace keys in descriptor swith @1, etc\" should be \"with\"]\n- Mananager -> Manager [typo in error message: \"Could not find ExternalSignerScriptPubKeyMananager\" should be \"Manager\"]\n\n\n\n\nPossible places where named args for integral literals may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- std::sregex_token_iterator(receive_descriptor.begin(), receive_descriptor.end(), key_regex, 1) in src/wallet/wallet.cpp\n\n\n\n<sup>2026-01-05</sup>\n",
+          "created_at": "2025-07-18T15:31:50Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `previous releases, depends DEBUG`: https://github.com/bitcoin/bitcoin/runs/46270694515</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by a compilation error due to a redundant declaration of 'RPCHelpMan wallet::registerpolicy()' which is treated as an error because all warnings are enabled as errors.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-18T16:31:15Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `tidy`: https://github.com/bitcoin/bitcoin/runs/47448999684</sub>\n<sub>LLM reason (✨ experimental): The CI failure is due to an error flagged by clang-tidy in wallet.cpp at line 2621.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-08-05T21:20:15Z"
+        },
+        {
+          "user": "pythcoiner",
+          "body": "> At least in the case of Ledger (haven't tested the others) this requires us to hold on to an hmac, which proves to the device that the user previously reviewed and approved it.\r\n\r\nIn the range of devices supporting miniscript, only Ledger requires the software to store the Proof Of Registration, other devices stores it internally(SpecterDiy, BitBox, Coldcard, Jade) or not at all (Krux).",
+          "created_at": "2025-08-07T17:12:51Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@pythcoiner thanks, updated the description.\r\n\r\n",
+          "created_at": "2025-08-25T12:16:09Z"
+        }
+      ]
+    },
+    {
+      "number": 33007,
+      "title": "test: fix `ReadTopologicalSet` unsigned integer overflow",
+      "body": "This PR is a simple fix for a potential unsigned integer overflow in ReadTopologicalSet. \r\nWe obtain the value of `mask` from fuzz input, which can be the maximum representable value.\r\nAdding 1 to it would then cause an overflow.\r\n\r\nThe fix skips the addition when the read value is already the maximum.\r\n\r\nSee https://github.com/bitcoin/bitcoin/pull/30605#discussion_r2215338569 for more context",
+      "state": "closed",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-07-18T13:54:26Z",
+      "updated_at": "2025-07-21T11:24:58Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33007",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33007.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/33007#issuecomment-3089665005) |\n| Concept ACK | [sipa](https://github.com/bitcoin/bitcoin/pull/33007#issuecomment-3089573020) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-18T13:54:31Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "cc @maflcko @sipa ",
+          "created_at": "2025-07-18T13:55:31Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `ARM, unit tests, no functional tests`: https://github.com/bitcoin/bitcoin/runs/46263518304</sub>\n<sub>LLM reason (✨ experimental): Compilation failed due to an undefined symbol 'nonzero' in source file cluster_linearize.cpp.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-18T13:57:56Z"
+        },
+        {
+          "user": "sipa",
+          "body": "utACK",
+          "created_at": "2025-07-18T13:59:37Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 31c4e77a256c15c221dcc278883f6d3be55660b4",
+          "created_at": "2025-07-18T14:26:46Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33010,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "farrelalfeshal10",
+      "created_at": "2025-07-18T16:28:37Z",
+      "updated_at": "2025-07-18T18:07:21Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33010",
+      "labels": []
+    },
+    {
+      "number": 33009,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "farrelalfeshal10",
+      "created_at": "2025-07-18T16:28:02Z",
+      "updated_at": "2025-07-18T18:04:57Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33009",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 2
+  }
+}

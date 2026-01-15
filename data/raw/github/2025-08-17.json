@@ -1,0 +1,110 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:07:02.253575+00:00",
+  "date": "2025-08-17",
+  "pull_requests": [],
+  "issues": [
+    {
+      "number": 33208,
+      "title": "Indexes stuck on unknown best block after unclean shutdown",
+      "body": "I was contacted by someone who runs a lot of nodes that they see the following issue happen very often: After an unclean shutdown an index reports that it is at an unknown best block and the node can not be restarted unless the index is deactivated or resynced.\n\n```\n2025-08-16T12:34:43Z Verification progress: 99%\n2025-08-16T12:34:43Z Verification: No coin database inconsistencies in last 6 blocks (6 transactions)\n2025-08-16T12:34:43Z Block index and chainstate loaded\n2025-08-16T12:34:43Z Opening LevelDB in /bitcoin/testnet3/indexes/txindex\n2025-08-16T12:34:43Z Opened LevelDB successfully\n2025-08-16T12:34:43Z Using obfuscation key for /bitcoin/testnet3/indexes/txindex: 0000000000000000\n2025-08-16T12:34:43Z Opening LevelDB in /bitcoin/testnet3/indexes/coinstats/db\n2025-08-16T12:34:43Z Opened LevelDB successfully\n2025-08-16T12:34:43Z Using obfuscation key for /bitcoin/testnet3/indexes/coinstats/db: 0000000000000000\n2025-08-16T12:34:43Z [error] txindex: best block of the index not found. Please rebuild the index.\n2025-08-16T12:34:43Z Shutdown: In progress...\n2025-08-16T12:34:43Z scheduler thread exit\n2025-08-16T12:34:43Z Flushed fee estimates to fee_estimates.dat.\n2025-08-16T12:34:44Z Shutdown: done\n```\n\nI didn't find an issue on this problem here but it seems to indeed be happening more widely since I could find similar reports on several forums for node runners:\n\nhttps://community.umbrel.com/t/bitcoin-core-stuck-starting-rebuild-index/18715\nhttps://community.umbrel.com/t/can-anyone-explain-how-to-rebuild-an-index/23288\nhttps://community.start9.com/t/bitcoin-restart-loop-with-error-txindex-best-block-of-the-index-not-found-please-rebuild-the-index/1589\nhttps://community.start9.com/t/knots-is-looping-in-running-erroring-restarting/3522 (This is knots but I don't think knots changes much on the indexes)\nhttps://bitcoin.stackexchange.com/questions/126304/bitcoind-testnet3-node-fails-with-txindex-best-block-of-the-index-not-found\n\nSo far I haven't been able to reproduce the issue though. I tried through applying targeted asserts and sleeps but either I haven't found the right spot or this is some deeper issue. I'm waiting to receive more infos/logs that might be helpful for triaging.\n\nIn the PR that added this code @mzumsande [already anticipated that this could be an issue](https://github.com/bitcoin/bitcoin/pull/25193#issuecomment-1135154066). From taking a look and considering/sketching out some ideas I think the simplest way to fix this might be to go back to the old behavior in `Init` and give the `CustomInit` in coinstatsindex the ability to roll back if it is initialized with an older block. It seems like fixing this was the motivation behind #25193 but I haven't read through all the old conversations yet.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-08-17T11:29:44Z",
+      "updated_at": "2026-01-15T09:15:25Z",
+      "comments": 16,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33208",
+      "labels": [
+        "Bug",
+        "UTXO Db and Indexes"
+      ],
+      "comment_list": [
+        {
+          "user": "mzumsande",
+          "body": "Interesting - I don't understand how this happens: We shouldn't persist the index best block without persisting the block index db right before that (`ChainStateFlushed`), so how can we end up in a situation with the indexes bestblock not being part of the chain, even with an unclean shutdown?\n\nIt would be helpful to know if the corruption (during the unclean shutdown) happened during initial sync phase (`Sync()`) or during the validationinterface signals phase.\n\nOne thing I gather from the reports is that we should make it clearer in the error messages what it means to rebuild an index. Many users appear to do a full reindex, when it would be sufficient to delete the respective index folder (assuming there is nothing wrong with the block tree db, another possibility is that  the indexes are alright, but this is just a symptom of some sort of corruption in that db).\n",
+          "created_at": "2025-08-17T12:18:31Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "I wrote/deleted something incorrect earlier, but I could reproduce this locally now.\nThe issue is that after a reorg,  we call `Commit()` within `BaseIndex::Rewind()`, [here](https://github.com/bitcoin/bitcoin/blame/57e8f34fe20620b3350ca1f0fa5c7d8d3a06be82/src/index/base.cpp#L310) without flushing the chainstate. This means, that if a crash/unclean shutdown happens after that for an unrelated reason, the best block of the index data will be a block that wasn't flushed.\n\n> I think the simplest way to fix this might be to go back to the old behavior in Init and give the CustomInit in coinstatsindex the ability to roll back if it is initialized with an older block.\n\nThis would fix the issue above for txindex, but how would we recover the coinstatsindex (the issue that #25193 attempted to fix)? We lost the block indexes necessary for that during the crash (they were never flushed), so we can't roll back through these blocks, and the coinstatindex data will be incorrect.\n\nI think it would be better to simply remove the call to `Commit()` from `BaseIndex::Rewind()`, so that the best block on disk of the index aligns with the flushed chainstate (the commit will happen later, with the next `ChainStateFlushed`).\n\nIn any case would be good to fix this in 30.0, I'll work on a PR to remove the `Commit` call / add a functional test for the situation.\n\nFYI @ryanofsky @furszy  in case you have an opinion.\n",
+          "created_at": "2025-08-17T20:39:50Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> The issue is that after a reorg, we call Commit() within BaseIndex::Rewind(), [here](https://github.com/bitcoin/bitcoin/blame/57e8f34fe20620b3350ca1f0fa5c7d8d3a06be82/src/index/base.cpp#L310) without flushing the chainstate. This means, that if a crash/unclean shutdown happens after that for an unrelated reason, the best block of the index data will be a block that wasn't flushed.\n\nHm, ok, honestly I ignored reorgs in my analysis because based on how frequently this seems to happen and I still would be surprised if it this is the (only) way this can occur. E.g. how many nodes crash right at the moment when a mainnet block was reorged but there was no flush yet? But I hope I can get more answers out of the logs when this happens again in the wild.",
+          "created_at": "2025-08-17T21:06:32Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> E.g. how many nodes crash right at the moment when a mainnet block was reorged but there was no flush yet?\n\nThere are no extreme timing issues here. After the reorg, the node could crash anytime until the next `ChainStateFlushed` (which  used to be once every 24h, but will  be every hour in 30.0, so maybe #30611 could help make this less frequent).",
+          "created_at": "2025-08-17T21:25:41Z"
+        },
+        {
+          "user": "furszy",
+          "body": "Raw idea: I think we can still rewind the indexes even without the block data. The block filter and coinstats indexes store the block height and hash on disk (one as the db key, the other in the record value pair), which should be enough to tell how far the index got during init. We can reconstruct the index records’ sequence and drop, in reverse order, the ones that map to nonexistent blocks.\nFor the tx index no sequencing is needed, we can directly traverse the db and delete the records that map to nonexistent block files or block positions.",
+          "created_at": "2025-08-17T22:01:46Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> Raw idea: I think we can still rewind the indexes even without the block data\n\nHow would we reconstruct the `m_muhash` object of the coinstatsindex though? That part of the state is not stored for each block height, just the current one at `DB_MUHASH`.",
+          "created_at": "2025-08-18T06:57:00Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> > Raw idea: I think we can still rewind the indexes even without the block data\n> \n> How would we reconstruct the `m_muhash` object of the coinstatsindex though? That part of the state is not stored for each block height, just the current one at `DB_MUHASH`.\n\nIt seems we are storing it for each block height, see [line 30](https://github.com/bitcoin/bitcoin/blob/d31dc8f8189e93c82dadc01df9a2dd9cfdb50bf9/src/index/coinstatsindex.cpp#L30) and [line 225](https://github.com/bitcoin/bitcoin/blob/d31dc8f8189e93c82dadc01df9a2dd9cfdb50bf9/src/index/coinstatsindex.cpp#L225).",
+          "created_at": "2025-08-18T14:00:36Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> > > Raw idea: I think we can still rewind the indexes even without the block data\n> > \n> > \n> > How would we reconstruct the `m_muhash` object of the coinstatsindex though? That part of the state is not stored for each block height, just the current one at `DB_MUHASH`.\n> \n> It seems we are storing it for each block height, see [line 30](https://github.com/bitcoin/bitcoin/blob/d31dc8f8189e93c82dadc01df9a2dd9cfdb50bf9/src/index/coinstatsindex.cpp#L30) and [line 225](https://github.com/bitcoin/bitcoin/blob/d31dc8f8189e93c82dadc01df9a2dd9cfdb50bf9/src/index/coinstatsindex.cpp#L225).\n\nThat's the sha256 hash digest of the MuHash object, not the full `MuHash3072`. I think @mzumsande is correct that we can't roll `m_muhash` back if the blocks are not available.",
+          "created_at": "2025-08-18T14:15:50Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> That's the sha256 hash digest of the MuHash object, not the full `MuHash3072`. I think [@mzumsande](https://github.com/mzumsande) is correct that we can't roll `m_muhash` back if the blocks are not available.\n\nYeah ok, that was close. I missed the uint256 there.",
+          "created_at": "2025-08-18T15:06:13Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "See #33212 for a fix and a test.",
+          "created_at": "2025-08-18T20:53:32Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> That's the sha256 hash digest of the MuHash object, not the full `MuHash3072`. I think [@mzumsande](https://github.com/mzumsande) is correct that we can't roll `m_muhash` back if the blocks are not available.\n\nSince the coinstatsindex is changing with #30469, maybe we should also add to that to store the full muhash for every block? This would be the best time to make such a breaking change.",
+          "created_at": "2025-08-18T21:25:53Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> I think @mzumsande is correct that we can't roll m_muhash back if the blocks are not available.\n\nActually there is a way to recover `m_muhash` but it's way too complicated to be considered as a fix IMO. Maybe in the future when we have made progress on a number of fronts. But here it goes: we could roll back the chain to the index fork point, calculate the muhash for the utxo set from scratch, compare the finalized out to the sha256 digest and then move on from there. Also, it would be possible that the blocks the index is on actually are in the main chain and so the index could also wait to see if they become available after all, also pretty messy though.\n\nEven though this doesn't seem realistic to me now this helps my argument on this:\n\n> Since the coinstatsindex is changing with https://github.com/bitcoin/bitcoin/pull/30469, maybe we should also add to that to store the full muhash for every block? This would be the best time to make such a breaking change.\n\nI tend to think we don't need to do this. For the issues that we are encountering there should be simpler fixes available like @mzumsande 's PR and the `MuHash3072` is essentially just a different representation of the UTXO set. We also don't persist the older versions of the UTXO set, we roll back the blocks if we need to get to an earlier state. So I would treat the `MuHash3072` the same way, as long as we have the necessary blocks we can roll back and forth. We just need to manage the data correctly which the fix PR should hopefully do. Also, the index would grow by >300MB by my back of the envelope calculation.",
+          "created_at": "2025-08-18T22:14:25Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> > That's the sha256 hash digest of the MuHash object, not the full `MuHash3072`. I think [@mzumsande](https://github.com/mzumsande) is correct that we can't roll `m_muhash` back if the blocks are not available.\n> \n> Since the coinstatsindex is changing with [#30469](https://github.com/bitcoin/bitcoin/pull/30469), maybe we should also add to that to store the full muhash for every block? This would be the best time to make such a breaking change.\n\nI considered this, but the additional disk space seemed excessive given that the per-block MuHash would likely never be used. It seems simpler to automatically reconstruct the index from scratch. With #26966 this should be quite plausible.\n\n> I think @mzumsande is correct that we can't roll m_muhash back if the blocks are not available.\nActually there is a way to recover m_muhash but it's way too complicated to be considered as a fix IMO. Maybe in the future when we have made progress on a number of fronts. But here it goes: we could roll back the chain to the index fork point, calculate the muhash for the utxo set from scratch, compare the finalized out to the sha256 digest and then move on from there. Also, it would be possible that the blocks the index is on actually are in the main chain and so the index could also wait to see if they become available after all, also pretty messy though.\n\nYeah, that's messy. Calculating the MuHash for the utxo set from scratch is essentially the same as recomputing the index. The slowest part is reading all blocks from disk; the rest involves only a few arithmetic operations in both cases. I don’t think we should add complexity to the code when a full reconstruction would take about the same time. As mentioned above, #26966 would make this quite feasible.",
+          "created_at": "2025-08-19T01:16:09Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> Yeah, that's messy. Calculating the MuHash for the utxo set from scratch is essentially the same as recomputing the index.\n\nI think @fjahr meant to calculate the MuHash object directly from the current utxo set (as in `bitcoin-cli gettxoutsetinfo 'muhash'` without an coinstatsindex), which takes ~8 minutes on my laptop and doesn't involve reading blocks from disk  - still a bit messy though.",
+          "created_at": "2025-08-19T16:02:42Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> I think [@fjahr](https://github.com/fjahr) meant to calculate the MuHash object directly from the current utxo set (as in `bitcoin-cli gettxoutsetinfo 'muhash'` without an coinstatsindex), which takes ~8 minutes on my laptop and doesn't involve reading blocks from disk - still a bit messy though.\n\nha true, that's interesting.",
+          "created_at": "2025-08-20T09:16:34Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "Would be good to reopen, since this was only partly fixed, it looks like this could also happen during initial index sync, see https://github.com/bitcoin/bitcoin/pull/33212#pullrequestreview-3140857089",
+          "created_at": "2025-08-23T12:29:06Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 0,
+    "issues": 1
+  }
+}

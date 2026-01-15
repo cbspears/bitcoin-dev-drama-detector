@@ -1,0 +1,328 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:25:44.410052+00:00",
+  "date": "2025-10-24",
+  "pull_requests": [
+    {
+      "number": 33699,
+      "title": "p2p: reduce false-positives in addr rate-limiting",
+      "body": "Start the rate-limiter with 5 tokens instead of 1 token.\r\n\r\n---\r\n\r\nOn some occasions, a peer will send us addresses a few seconds after the connection is established. As peers start with token=1 and only get an additional token only every 10 seconds, some of these addresses might be rate-limited. The following log snippet contains an example:\r\n\r\n```\r\n04:12:02 [net] Added connection to [redacted] peer=1234\r\n...\r\n04:12:03 [net] Received addr: 1 addresses (1 processed, 0 rate-limited) from peer=1234\r\n04:12:34 [net] Received addr: 4 addresses (3 processed, 1 rate-limited) from peer=1234\r\n04:13:09 [net] Received addr: 2 addresses (2 processed, 0 rate-limited) from peer=1234\r\n```\r\n\r\nThe peer starts with token=1 and uses one for its self-announcement at 04:12:03. Until the next addr message arrives at 04:12:34, it re-gains 3 tokens and uses them, however, the fourth address in this addr message is rate-limited. At 04:13:09, the peer has token=3 and uses 2.\r\n\r\nThis change gives peers token=5 to start with. To choose this value, I looked at the address relay of freshly connected peers. The data was sampled from the debug.logs from different nodes. It appears, that only very few peers require more than 5 initial tokens.\r\n\r\n<img width=\"1172\" height=\"838\" alt=\"image\" src=\"https://github.com/user-attachments/assets/19fbe866-c604-4508-889c-d9600990726e\" />\r\n\r\n\r\nBy increasing the initial tokens to 5, someone could connect, send 5 addresses, disconnect, and repeat to spam the node with addresses. Previously, the same was possible but only one address was processed. I don't think this is a problem anymore since #30568.\r\n\r\n",
+      "state": "closed",
+      "user": "0xB10C",
+      "created_at": "2025-10-24T17:10:10Z",
+      "updated_at": "2025-12-24T15:39:09Z",
+      "comments": 16,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33699",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33699.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [mzumsande](https://github.com/bitcoin/bitcoin/pull/33699#pullrequestreview-3381256003), [Crypt-iQ](https://github.com/bitcoin/bitcoin/pull/33699#issuecomment-3449008388) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-24T17:10:16Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "crACK fdf4863d66ed09a6b45fb6cd0d0c48a02e0e267d\r\n\r\nThe graph is helpful, I wonder what's going on with those peers above and to the left of the staircase?",
+          "created_at": "2025-10-26T23:24:57Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @ajtowns ",
+          "created_at": "2025-10-27T10:47:45Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "> I wonder what's going on with those peers above and to the left of the staircase?\r\n\r\nIt can happen that a (Bitcoin Core) peer sends us an addr message with more than X entries by random chance. Observed from  the logs I looked at:\r\n\r\n```\r\nchance >= 1 entries \t 100.00%\r\nchance >= 2 entries \t 37.62%\r\nchance >= 3 entries \t 19.14%\r\nchance >= 4 entries \t 10.16%\r\nchance >= 5 entries \t 5.66%\r\nchance >= 6 entries \t 3.28%\r\nchance >= 7 entries \t 1.98%\r\nchance >= 8 entries \t 1.25%\r\nchance >= 9 entries \t 0.81%\r\nchance >= 10 entries \t 0.55%\r\nchance >= 11 entries \t 0.39%\r\nchance >= 12 entries \t 0.28%\r\nchance >= 13 entries \t 0.21%\r\nchance >= 14 entries \t 0.16%\r\nchance >= 15 entries \t 0.13%\r\n```\r\n\r\nSo there's a 3.28% chance that a peer sends us a addr message with more than 5 addr. If this message arrives <10s after connection open, the peer does not have enough token yet. However, it's also unlikely that we choose to relay >5 addresses to this peer in <10s.\r\n\r\nThis is a hand-picked example from a peer (that claims to be v29.0) that sent some larger addr messages early on:\r\n\r\n```\r\n01:08:43 [net] Added connection to X peer=9668\r\n01:09:05 [msghand] Received addr: 8 addresses (3 processed, 5 rate-limited) from peer=9668\r\n01:10:25 [msghand] Received addr: 11 addresses (8 processed, 3 rate-limited) from peer=9668\r\n01:10:48 [msghand] Received addr: 3 addresses (2 processed, 1 rate-limited) from peer=9668\r\n01:11:38 [msghand] Received addr: 9 addresses (5 processed, 4 rate-limited) from peer=9668\r\n01:12:13 [msghand] Received addr: 3 addresses (3 processed, 0 rate-limited) from peer=9668\r\n01:13:09 [msghand] Received addr: 8 addresses (6 processed, 2 rate-limited) from peer=9668\r\n01:13:55 [msghand] Received addr: 2 addresses (2 processed, 0 rate-limited) from peer=9668\r\n```\r\n\r\nHere's an overview of the number addr message entries peers send to me and were processed or rate-limited. Nearly all of the rate-limited entries were send in the first 60 seconds. \r\n\r\n<img width=\"1381\" height=\"984\" alt=\"image\" src=\"https://github.com/user-attachments/assets/53c0a1a4-14f5-4de3-8647-819c73072fe5\" />\r\n",
+          "created_at": "2025-10-27T15:42:22Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> On some occasions, a peer will send us addresses a few seconds after the connection is established.\r\n\r\nWhat's the drawback of ignoring these addresses? If we'd connected a few seconds/a minute later, we'd have missed them anyway.\r\n\r\nAn advantage of starting with an (almost) empty bucket is that someone attempting an address spamming attack has to pay for that attack by maintaining a connection to us. Increasing the initial bucket for outbound/manual connections but not inbound connections might be better?",
+          "created_at": "2025-10-28T15:27:16Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> What's the drawback of ignoring these addresses? If we'd connected a few seconds/a minute later, we'd have missed them anyway.\r\n\r\nIgnoring the initial self-announcement of the peer if it get mixed up with other addrs would feel strange.",
+          "created_at": "2025-10-28T15:50:59Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Ignoring self-announcements seems to occur only in the time between our inbound peer (outbound from their perspective) 1) calling `SetupAddressRelay` when receiving version, and 2) receiving verack where it will set `fSuccessfullyConnected = true` and call `SendMessages` followed by `MaybeSendAddr`. The address entries are sent in order of insert, but then shuffled before processing since https://github.com/bitcoin/bitcoin/pull/22387 ([see rationale](https://github.com/bitcoin/bitcoin/pull/22387#discussion_r664238361)). If they weren't shuffled on receipt, I think the self-announcement would always be processed.\r\n\r\nIf we are being connected to, I think our self-announcement won't be rate-limited because we'll wait until receiving getaddr, call `SetupAddressRelay`, and then in `SendMessages`, our self-announcement will replace one of the existing entries in the getaddr response. There's no time-gap in this case afaict.",
+          "created_at": "2025-10-28T18:43:25Z"
+        },
+        {
+          "user": "glozow",
+          "body": "If these are Bitcoin Core nodes (so our sender-side logic is seemingly incompatible with our receiver-side logic), is an alternative approach to increase the delay after which we'd send addrs?",
+          "created_at": "2025-10-28T20:12:41Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> > What's the drawback of ignoring these addresses? If we'd connected a few seconds/a minute later, we'd have missed them anyway.\r\n> \r\n> Ignoring the initial self-announcement of the peer if it get mixed up with other addrs would feel strange.\r\n\r\nYeah, you're right. Though as glozow points out, it's also strange to have our sender/receiver side logic randomly mismatch depending on network behaviour (with this PR making the random mismatch much less frequent). Would it make sense to change the logic to be:\r\n\r\n```c++\r\nvoid PeerManagerImpl::MaybeSendAddr(CNode& node, Peer& peer, std::chrono::microseconds current_time)\r\n{\r\n    ...\r\n    if (... && peer.m_next_local_addr_send < current_time) {\r\n        ...   \r\n        if (peer.m_next_local_addr_send != 0us) {\r\n            peer.m_addr_known->reset();\r\n        }\r\n        if (std::optional<CService> local_service = GetLocalAddrForPeer(node)) {\r\n            CAddress local_addr{*local_service, peer.m_our_services, Now<NodeSeconds>()};\r\n            if (peer.m_next_local_addr_send == 0us) {\r\n                // first local addr announcement, send as a single message\r\n                if (peer.m_wants_addrv2) {\r\n                    MakeAndPushMessage(node, NetMsgType::ADDRV2, CAddress::V2_NETWORK(local_addr));\r\n                } else {\r\n                    MakeAndPushMessage(node, NetMsgType::ADDR, CAddress::V1_NETWORK(local_addr));\r\n                }\r\n            } else {\r\n                // normally, include local addr with any others queued up\r\n                PushAddress(peer, local_addr);\r\n            }\r\n        }\r\n        peer.m_next_local_addr_send = current_time + m_rng.rand_exp_duration(AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL);\r\n    }\r\n    ...\r\n```\r\n\r\nso that we push our local address as a single message first, using up the bucket preallocation, then allow other addresses to be sent and rate-limited as normal? That seems like it would automatically help existing nodes not rate-limit self announcements from future releases.",
+          "created_at": "2025-10-29T15:33:52Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> If they weren't shuffled on receipt, I think the self-announcement would always be processed.\r\n\r\nI think shuffling helps avoid an attacker being able to (a) prevent honest nodes' addresses from being relayed (by filling up the buffer, so that later honest announcements get dropped) and (b) (easily?) detect how many addresses are being rate limited. So I don't think removing the shuffle would be a good idea.",
+          "created_at": "2025-10-29T15:35:55Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> If we are being connected to, I think our self-announcement won't be rate-limited because we'll wait until receiving getaddr, call SetupAddressRelay, and then in SendMessages, our self-announcement will replace one of the existing entries in the getaddr response. There's no time-gap in this case afaict.\r\n\r\nTrue, I have observed this effect too recently, it isn't really clean though - I don't think anyone intended it to work such that a GETADDR answers would contain 999 addresses from addrman and a self announcement replacing a random one - so aj's suggestion makes change to me.\r\n\r\n> If these are Bitcoin Core nodes (so our sender-side logic is seemingly incompatible with our receiver-side logic), is an alternative approach to increase the delay after which we'd send addrs?\r\n\r\nThat should work too, but it would also slow things down if the receiver waits for addrs (ADDRFETCH connections).",
+          "created_at": "2025-10-29T19:15:08Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "> Ignoring self-announcements seems to occur only in the time between our inbound peer (outbound from their perspective) 1) calling `SetupAddressRelay` when receiving version, and 2) receiving verack where it will set `fSuccessfullyConnected = true` and call `SendMessages` followed by `MaybeSendAddr`. The address entries are sent in order of insert, but then shuffled before processing since #22387 ([see rationale](https://github.com/bitcoin/bitcoin/pull/22387#discussion_r664238361)). If they weren't shuffled on receipt, I think the self-announcement would always be processed.\r\n>\r\n> If we are being connected to, I think our self-announcement won't be rate-limited because we'll wait until receiving getaddr, call `SetupAddressRelay`, and then in `SendMessages`, our self-announcement will replace one of the existing entries in the getaddr response. There's no time-gap in this case afaict.\r\n\r\nThanks for that digging, I found that helpful.\r\n\r\n>>> What's the drawback of ignoring these addresses? If we'd connected a few seconds/a minute later, we'd have missed them anyway.  \r\n>>\r\n>> Ignoring the initial self-announcement of the peer if it get mixed up with other addrs would feel strange.  \r\n>>\r\n> Yeah, you're right.\r\n\r\nI'm actually not sure yet if any addresses my nodes rate-limited are actually self-announcements. Looking at the logs, there are certainly initial addr(v2) messages I received shortly after connection open (from inbound peers) with at least one address being rate-limited by me. However, I think if the peer doesn't self-announce (e.g. `-listen=0`), these could be just early normal address relay messages. I've set up a few nodes with this patch to log some of the rate-limitings https://github.com/0xB10C/bitcoin/commit/159b6fd80d8a31c01f3b62d9194cf926c007dc37 and hope to compare the rate-limited address to the address of the peer. Let's see...\r\n\r\n > Would it make sense to change the logic to be:\r\n\r\nI picked that up in https://github.com/0xB10C/bitcoin/tree/2025-11-self-advertise-in-separate-message - but will hold off PRing it until I'm sure we actually rate-limit self-announcements. Most of the work was the function test for the self-announcements, which is good to have regardless[^1]. \r\n\r\n[^1]: Note that the snipped above contains a subtle bug which isn't catched by one of our tests (but would be by the mentioned functional test): `MakeAndPushMessage(node, NetMsgType::ADDR, CAddress::V1_NETWORK(local_addr));` where `local_addr` is a `CAddress` compiles, but it should be a vector of `CAddress` with one element. This will send out the serialized address alone, which isn't valid content for an addr message.  ",
+          "created_at": "2025-12-03T19:05:50Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "Saw one today with https://github.com/0xB10C/bitcoin/commit/159b6fd80d8a31c01f3b62d9194cf926c007dc37. Will wait for a few more.\r\n\r\n```\r\nRate-limited addr 98.97.137.54:8333 SELF-ANNOUNCEMENT!? from peer=2324 addr=98.97.137.54:46196 ua=/Satoshi:22.0.0(FutureBit-Apollo-Node)/ processed=1 rate-limited=1 age=478ms type=inbound\r\n```\r\n\r\nedit: saw more, but interestingly only from older releases e.g. `/Satoshi:23.0.0/`?\r\n\r\n```\r\nRate-limited addr 159.26.100.23:8333 SELF-ANNOUNCEMENT!? from peer=6959 addr=159.26.100.23:44574 ua=/Satoshi:23.0.0/ processed=1 rate-limited=1 age=1396ms type=inbound\r\nRate-limited addr 86.48.14.196:8333 SELF-ANNOUNCEMENT!? from peer=3645 addr=86.48.14.196:24948 ua=/Satoshi:22.0.0/ processed=1 rate-limited=1 age=313ms type=inbound\r\nRate-limited addr 103.251.26.153:8333 SELF-ANNOUNCEMENT!? from peer=19504 addr=103.251.26.153:59551 ua=/Satoshi:22.0.0/ processed=1 rate-limited=1 age=252ms type=inbound\r\nRate-limited addr 92.167.10.252:8333 SELF-ANNOUNCEMENT!? from peer=20975 addr=92.167.10.252:51644 ua=/Satoshi:22.0.0/ processed=1 rate-limited=1 age=614ms type=inbound\r\nRate-limited addr 150.228.85.13:8333 SELF-ANNOUNCEMENT!? from peer=12338 addr=150.228.85.13:11419 ua=/Satoshi:22.0.0/ processed=1 rate-limited=1 age=477ms type=inbound\r\n\r\n# LinkingLion seems to heavily self announce their node IPs and seems to be getting rate limited:\r\n# see https://bnoc.xyz/t/linkinglion-an-entity-linking-bitcoin-transactions-to-ips/12/7?u=b10c\r\nRate-limited addr 199.116.84.88:8333 SELF-ANNOUNCEMENT!? from peer=7620 addr=199.116.84.88:17165 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=550 age=798ms type=inbound\r\nRate-limited addr 199.116.84.173:8333 SELF-ANNOUNCEMENT!? from peer=7624 addr=199.116.84.173:15987 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=689 age=1223ms type=inbound\r\nRate-limited addr 199.116.84.7:8333 SELF-ANNOUNCEMENT!? from peer=7854 addr=199.116.84.7:27880 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=161 age=712ms type=inbound\r\nRate-limited addr 199.116.84.147:8333 SELF-ANNOUNCEMENT!? from peer=7873 addr=199.116.84.147:4150 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=176 age=1090ms type=inbound\r\nRate-limited addr 199.116.84.185:8333 SELF-ANNOUNCEMENT!? from peer=7881 addr=199.116.84.185:20012 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=674 age=1297ms type=inbound\r\nRate-limited addr 199.116.84.185:8333 SELF-ANNOUNCEMENT!? from peer=7890 addr=199.116.84.185:37238 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=693 age=879ms type=inbound\r\nRate-limited addr 199.116.84.185:8333 SELF-ANNOUNCEMENT!? from peer=7958 addr=199.116.84.185:3673 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=61 age=707ms type=inbound\r\nRate-limited addr 199.116.84.185:8333 SELF-ANNOUNCEMENT!? from peer=8159 addr=199.116.84.185:32178 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=348 age=483ms type=inbound\r\nRate-limited addr 199.116.84.185:8333 SELF-ANNOUNCEMENT!? from peer=8396 addr=199.116.84.185:10842 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=669 age=1342ms type=inbound\r\nRate-limited addr 199.116.84.185:8333 SELF-ANNOUNCEMENT!? from peer=8491 addr=199.116.84.185:34938 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=331 age=20710ms type=inbound\r\nRate-limited addr 199.116.84.185:8333 SELF-ANNOUNCEMENT!? from peer=8910 addr=199.116.84.185:54696 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=567 age=1098ms type=inbound\r\nRate-limited addr 199.116.84.185:8333 SELF-ANNOUNCEMENT!? from peer=8946 addr=199.116.84.185:6062 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=605 age=1203ms type=inbound\r\nRate-limited addr 199.116.84.203:8333 SELF-ANNOUNCEMENT!? from peer=9049 addr=199.116.84.203:19824 ua=/btcwire:0.5.0/Satoshi:25.0.0/ processed=0 rate-limited=517 age=1240ms type=inbound\r\n```",
+          "created_at": "2025-12-04T19:24:33Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "> I picked that up in https://github.com/0xB10C/bitcoin/tree/2025-11-self-advertise-in-separate-message - but will hold off PRing it until I'm sure we actually rate-limit self-announcements. Most of the work was the function test for the self-announcements, which is good to have regardless[1](#user-content-fn-1-d4328d953018557e4e1f1ee79707ab61).\r\n\r\nOpened a PR for the self-announcement test in https://github.com/bitcoin/bitcoin/pull/34039\r\n\r\nThe logic change (https://github.com/bitcoin/bitcoin/commit/c1514bf3062dd4cc632a28a06c04f55b33f864c0) might be good to be explicit about our self-announcement in case we somehow start sending them along with other addresses, but doesn't seem to be needed now. I will keep an eye on rate-limited self-announcements for a bit longer to see if anything changes my impression there.\r\n",
+          "created_at": "2025-12-10T09:33:44Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "I'm becoming less sure that this PR is actually worthwhile doing. I've not seen us rate-limit a self-announcement from a recent node version yet. For all other addresses (that aren't direct self-announcements from our peer) it probably hardly matters if we randomly rate-limit a few gossiped addresses. \r\n\r\n> An advantage of starting with an (almost) empty bucket is that someone attempting an address spamming attack has to pay for that attack by maintaining a connection to us.\r\n\r\nAgree, generally, it might be better to keep the start token at 1 to make it more costly for an attacker to send us addresses that we will process. Especially with e.g. LinkingLion now [shifting behavior](https://bnoc.xyz/t/linkinglion-an-entity-linking-bitcoin-transactions-to-ips/12/7?u=b10c) to mass self-announce IPs of their new, listening nodes.\r\n\r\n> If these are Bitcoin Core nodes (so our sender-side logic is seemingly incompatible with our receiver-side logic), is an alternative approach to increase the delay after which we'd send addrs?\r\n\r\nYet another approach: On the sender side in `RelayAddress()`, pick peers where we expect that the tokens the other side has for us (i.e. `1 + connection_age_in_sec/10`) is more than the addresses we relayed to it. However, future changes to the start token might break this assumption for old nodes.\r\n\r\nGoing to close this PR for now. Might reopen if there are new insights from collected data.",
+          "created_at": "2025-12-10T10:05:38Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "> I think the suggestion by @ajtowns ([#33699 (comment)](https://github.com/bitcoin/bitcoin/pull/33699#issuecomment-3462287763)) to send the first self-advertisement separately would make sense on its own - currently it will usually (I think it depends a bit on timing) get mixed up with the GETADDR answer and replaces one of the 1000 addrs from it, which isn't clean.\r\n\r\ndone in https://github.com/bitcoin/bitcoin/pull/34146",
+          "created_at": "2025-12-24T15:39:09Z"
+        }
+      ]
+    },
+    {
+      "number": 33698,
+      "title": "test: Use same rpc timeout for authproxy and cli",
+      "body": "It seems odd to use different timeouts (and timeout factors) depending on whether the Python RPC proxy is used, or the bitcoin rpc command line interface.\r\n\r\nFix it by using the same timeout.\r\n\r\nThis can be tested by introducing a timeout error and checking it happens with and without `--usecli` after the exact same time.\r\n\r\nExample timeout error:\r\n\r\n```diff\r\ndiff --git a/test/functional/mining_template_verification.py b/test/functional/mining_template_verification.py\r\nindex de0833c596..e0f93a2b1e 100755\r\n--- a/test/functional/mining_template_verification.py\r\n+++ b/test/functional/mining_template_verification.py\r\n@@ -173,7 +173,7 @@ class MiningTemplateVerificationTest(BitcoinTestFramework):\r\n \r\n         self.log.info(\"Submitting this block should succeed\")\r\n         assert_equal(node.submitblock(block.serialize().hex()), None)\r\n-        node.waitforblockheight(2)\r\n+        node.waitforblockheight(200000)\r\n \r\n     def transaction_test(self, node, block_0_height, tx):\r\n         self.log.info(\"make block template with a transaction\")\r\n```\r\n\r\nExample cmd: `./bld-cmake/test/functional/mining_template_verification.py --timeout-factor=0.1 --usecli`.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-10-24T14:58:39Z",
+      "updated_at": "2025-10-30T16:46:30Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33698",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33698.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [brunoerg](https://github.com/bitcoin/bitcoin/pull/33698#pullrequestreview-3384258159), [stickies-v](https://github.com/bitcoin/bitcoin/pull/33698#pullrequestreview-3400367122) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-24T14:58:44Z"
+        },
+        {
+          "user": "Sammie05",
+          "body": "Tested PR #33698\r\nI went through the new changes, built the code, ran the specific test p2p_headers_sync_with_minchainwork.py --timeout-factor=0.2 in both RPC and CLI modes and everything looks good . but why did we decide on half the timeout for CLI instead of using the same value? ",
+          "created_at": "2025-10-25T00:04:46Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I went through the new changes, built the code, ran the specific test p2p_headers_sync_with_minchainwork.py --timeout-factor=0.2 in both RPC and CLI modes and everything looks good .\r\n\r\nIt shouldn't look \"good\". They should both timeout with the same timeout value.\r\n\r\n> but why did we decide on half the timeout for CLI instead of using the same value?\r\n\r\nThe goal of this pull is to use the exact same value, which is also what it does.\r\n\r\n",
+          "created_at": "2025-10-25T12:22:04Z"
+        },
+        {
+          "user": "Sammie05",
+          "body": "> > I went through the new changes, built the code, ran the specific test p2p_headers_sync_with_minchainwork.py --timeout-factor=0.2 in both RPC and CLI modes and everything looks good .\r\n> \r\n> It shouldn't look \"good\". They should both timeout with the same timeout value.\r\n> \r\n> > but why did we decide on half the timeout for CLI instead of using the same value?\r\n> \r\n> The goal of this pull is to use the exact same value, which is also what it does.\r\n\r\n\r\n\r\n> > I went through the new changes, built the code, ran the specific test p2p_headers_sync_with_minchainwork.py --timeout-factor=0.2 in both RPC and CLI modes and everything looks good .\r\n> \r\n> It shouldn't look \"good\". They should both timeout with the same timeout value.\r\n> \r\n> > but why did we decide on half the timeout for CLI instead of using the same value?\r\n> \r\n> The goal of this pull is to use the exact same value, which is also what it does.\r\n\r\nThanks for clarifying! I understand  the goal now.\r\n\r\nBut looking at the code\r\n\r\nself.cli = TestNodeCLI(\r\n    binaries,\r\n    self.datadir_path,\r\n    self.rpc_timeout // 2\r\n)\r\n\r\nDoesn't the // 2 division mean CLI is actually getting half the RPC timeout instead of the same value?",
+          "created_at": "2025-10-28T09:08:09Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Doesn't the // 2 division mean CLI is actually getting half the RPC timeout instead of the same value?\r\n\r\nIt is explained in the trailing comment, which refers to https://github.com/bitcoin/bitcoin/blob/66667d6512294fd5dd02161b7c68c19af0865865/test/functional/test_framework/test_node.py#L322\r\n\r\nIf you have a question about a line of code, it is better to leave the question on the line of code, instead of in the general pull request thread.",
+          "created_at": "2025-10-28T09:38:14Z"
+        },
+        {
+          "user": "Sammie05",
+          "body": "> > Doesn't the // 2 division mean CLI is actually getting half the RPC timeout instead of the same value?\r\n> \r\n> It is explained in the trailing comment, which refers to\r\n> \r\n> https://github.com/bitcoin/bitcoin/blob/66667d6512294fd5dd02161b7c68c19af0865865/test/functional/test_framework/test_node.py#L322\r\n> \r\n> If you have a question about a line of code, it is better to leave the question on the line of code, instead of in the general pull request thread.\r\n\r\nAlrighht. ",
+          "created_at": "2025-10-28T10:37:41Z"
+        }
+      ]
+    },
+    {
+      "number": 33696,
+      "title": "crypto: optimize SipHash `Write()` method with chunked processing",
+      "body": "reopening #33325 as draft\r\n\r\n## Summary\r\n\r\nThe current default `Write()` implementation of Siphash uses a byte-by-byte approach to iterate the span. This results in significant overhead for large inputs due to repeated bounds checking and span manipulations, without any help from the compiler.\r\n\r\nThis PR aims at optimizing Siphash by replacing byte-by-byte processing in CSipHasher::Write() with an optimized chunked approach that processes data in 8-byte aligned blocks when possible.\r\n\r\n## Details\r\n\r\nThe new implementation is divided in 3 stages that process:\r\n\r\n1. initial unaligned bytes to reach an 8-byte boundary\r\n2. aligned 8-byte chunks directly using memcpy for efficiency\r\n3. remaining bytes at the end\r\n\r\nevery change was thoroughly tested and benchmarked to avoid overfitting, but replicating is welcomed and encouraged.\r\n\r\n## Benchmarks\r\n\r\n```shell\r\ntaskset -c 1 ./bin/bench_bitcoin -filter=\"(GCSFilterConstruct)\" --min-time=60000\r\n```\r\n\r\n> Before:\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|       12,983,090.72 |               77.02 |    0.1% |     66.00 | `GCSFilterConstruct`\r\n\r\n> After:\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|       11,155,751.42 |               89.64 |    0.1% |     65.99 | `GCSFilterConstruct`\r\n\r\ncompared to master:\r\n\r\n- `GCSFilterConstruct` **+16%** faster",
+      "state": "closed",
+      "user": "Raimo33",
+      "created_at": "2025-10-24T09:06:16Z",
+      "updated_at": "2025-10-24T14:33:53Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33696",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33696.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [dergoegge](https://github.com/bitcoin/bitcoin/pull/33696#issuecomment-3442030733), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33696#issuecomment-3442257827) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-24T09:06:22Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "Concept NACK\r\n\r\nFor a small gain in the `GCSFilterConstruct` benchmark this is not worth the extra complexity and review overhead.",
+          "created_at": "2025-10-24T09:13:17Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Why are you reopening a [nacked](https://github.com/bitcoin/bitcoin/pull/33325#issuecomment-3436142482) PR?",
+          "created_at": "2025-10-24T09:18:41Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "> Why are you reopening a [nacked](https://github.com/bitcoin/bitcoin/pull/33325#issuecomment-3436142482) PR?\n\nreopened as WIP. Just need to make the diff simpler. you were the only NACK. It still conceptually valid imo to process blocks in 8 byte chunks.\n",
+          "created_at": "2025-10-24T09:35:19Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Why are you doing that? Why not fix it in the original PR to retain context?\r\nNACK, please use the original PR for this change, seems very weird to open a new PR when you don't like the feedback...",
+          "created_at": "2025-10-24T09:55:31Z"
+        }
+      ]
+    },
+    {
+      "number": 33694,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "MChuanying001",
+      "created_at": "2025-10-24T08:18:33Z",
+      "updated_at": "2025-10-24T08:19:14Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33694",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33694.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- *parameters.* -> (remove) [stray fragment splitting the sentence; remove \"parameters.\" so the description reads coherently]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-10-24T08:18:38Z"
+        }
+      ]
+    },
+    {
+      "number": 33693,
+      "title": "ci: use pycapnp 2.2.1",
+      "body": "Switch to using v2.2.1 in the mac native job. Remove the git clone & install step.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-10-24T02:40:41Z",
+      "updated_at": "2025-10-29T10:01:21Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33693",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33693.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/33693#issuecomment-3458604240), [hebasto](https://github.com/bitcoin/bitcoin/pull/33693#pullrequestreview-3391123943), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33693#issuecomment-3458893049) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-24T02:40:45Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "unrelated nit: I think you can also remove this comment:\r\n\r\n```\r\n# Homebrew's python@3.12 is marked as externally managed (PEP 668).\r\n# Therefore, `--break-system-packages` is needed.\r\n```\r\n\r\nSince, homebrew has updated the python version number, and the comment isn't added to any of the other `--break-system-packages` options where set.",
+          "created_at": "2025-10-24T07:37:48Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> I think you can also remove this comment:\r\n\r\nAdded a removal.",
+          "created_at": "2025-10-24T07:44:48Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 8088643a616355b941fabbd584013c5969c0d1dc",
+          "created_at": "2025-10-24T07:49:35Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "The following diff also seems to work, unless I’ve missed minor issues or pitfalls already discussed in in https://github.com/bitcoin/bitcoin/pull/33201:\r\n```diff\r\ndiff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\r\nindex a05e8f9648..1c69cc5437 100644\r\n--- a/.github/workflows/ci.yml\r\n+++ b/.github/workflows/ci.yml\r\n@@ -157,11 +157,6 @@ jobs:\r\n           brew install --quiet python@3 || brew link --overwrite python@3\r\n           brew install --quiet coreutils ninja pkgconf gnu-getopt ccache boost libevent zeromq qt@6 qrencode capnp\r\n \r\n-      - name: Install Python packages\r\n-        run: |\r\n-          git clone -b v2.1.0 https://github.com/capnproto/pycapnp\r\n-          pip3 install ./pycapnp -C force-bundled-libcapnp=True --break-system-packages\r\n-\r\n       - name: Set Ccache directory\r\n         run: echo \"CCACHE_DIR=${RUNNER_TEMP}/ccache_dir\" >> \"$GITHUB_ENV\"\r\n \r\ndiff --git a/ci/test/00_setup_env_mac_native.sh b/ci/test/00_setup_env_mac_native.sh\r\nindex 41a3bc4587..3cab6555b0 100755\r\n--- a/ci/test/00_setup_env_mac_native.sh\r\n+++ b/ci/test/00_setup_env_mac_native.sh\r\n@@ -9,7 +9,7 @@ export LC_ALL=C.UTF-8\r\n # Homebrew's python@3.12 is marked as externally managed (PEP 668).\r\n # Therefore, `--break-system-packages` is needed.\r\n export CONTAINER_NAME=\"ci_mac_native\"  # macos does not use a container, but the env var is needed for logging\r\n-export PIP_PACKAGES=\"--break-system-packages zmq\"\r\n+export PIP_PACKAGES=\"--break-system-packages zmq pycapnp\"\r\n export GOAL=\"install deploy\"\r\n export CMAKE_GENERATOR=\"Ninja\"\r\n export BITCOIN_CONFIG=\"-DBUILD_GUI=ON -DWITH_ZMQ=ON -DREDUCE_EXPORTS=ON -DCMAKE_EXE_LINKER_FLAGS='-Wl,-stack_size -Wl,0x80000'\"\r\n```\r\n\r\n",
+          "created_at": "2025-10-25T11:36:12Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 53b34c80c631ee3f5ae652315592924f6935e0f1",
+          "created_at": "2025-10-28T21:39:15Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "crACK 53b34c80c631ee3f5ae652315592924f6935e0f1\r\n",
+          "created_at": "2025-10-28T23:04:20Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33700,
+      "title": "Batch tx broadcast RPC",
+      "body": "### Please describe the feature you'd like to see added.\n\nThe intent of #31085 wasn't really *just* to be able to broadcast a \"package\" of size 1, but that it would be nice if the caller of `submitpackage` didn't need to sit down and figure out/make sure all their broadcasts match exactly some BIP-defined structure. Ideally I just give Bitcoin Core a pile of transactions and it figures it out - if there's two children and two parents it broadcasts them as two packages, etc. Maybe this is just something we get for \"free\" with cluster mempool and larger package relay (as long as the transactions are even related to each other, though it'd be kinda nice for Bitcoin Core to figure that out too), but any restrictions in `submitpackage` ultimately filter down through the ecosystem and imply restrictions on hundreds of internal interfaces (eg the LDK `BroadcasterInterface`) and APIs (eg Esplora/Electrum implementations will generally just call that method), so it'd be nice to be as generic as possible.\n\n### Is your feature related to a problem, if so please describe it.\n\n_No response_\n\n### Describe the solution you'd like\n\n_No response_\n\n### Describe any alternatives you've considered\n\n_No response_\n\n### Please leave any additional context\n\n_No response_",
+      "state": "open",
+      "user": "TheBlueMatt",
+      "created_at": "2025-10-24T17:23:11Z",
+      "updated_at": "2025-12-04T17:12:58Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33700",
+      "labels": [
+        "Feature",
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "TheBlueMatt",
+          "body": "Oh, maybe the most important relaxation would be to remove the topological-sort requirement.",
+          "created_at": "2025-10-24T17:33:35Z"
+        },
+        {
+          "user": "glozow",
+          "body": "This definitely seems doable. A couple more API questions since you're here:\nWhat would you prefer to happen if a transaction fails? Is it fine if we quit altogether or do you want the node to keep trying with everything else?\nWe currently just have an error message that's just passed/failed. Would this change work: all passed / some passed / you submitted invalid stuff / maxfeerate or maxburnamount exceeded ?\nAre you ok with _some_ requirements, e.g. \"your batch contains transactions that conflict with each other?\"",
+          "created_at": "2025-10-29T13:37:01Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "I'd contend that if you could make a p2p connection, announce `INV tx1 tx2 ...` and reply to `GETDATA` requests (or BIP331 messages or whatever we add in future), and get your txs added to the node's mempool and relayed onwards, then you should be able to get the same result with a simple RPC call.\n\nFor errors, I think it would be preferable to have a parameter that decides whether the behaviour should be \"only accept anything if you can accept everything\" or \"accept as much as you can and tell me what failed and why, including giving me the txid of any in-mempool conflicts\".\n\nFor txs that won't relay currently (eg grandparent, parent below mempool minfee, child cpfp's both?), I think this should give an error, rather than doing any special handling that will still only add the txs to this node's mempool.",
+          "created_at": "2025-10-29T17:01:26Z"
+        },
+        {
+          "user": "TheBlueMatt",
+          "body": "> What would you prefer to happen if a transaction fails? Is it fine if we quit altogether or do you want the node to keep trying with everything else?\n\nParameter as mentioned by @ajtowns would be fine, but my general view of transaction relay is its all fallible anyway (nodes may be partitioned/fees may spike/we may be disconnected from the internet/etc/etc) so I want to just send a bunch of transaction hex into the void and Bitcoin Core is responsible for getting as much as possible confirmed.\n\nThus, my suggestion would be to just keep going and broadcast what you can, maybe returning the error on a per-tx basis.\n\n\n> We currently just have an error message that's just passed/failed. Would this change work: all passed / some passed / you submitted invalid stuff / maxfeerate or maxburnamount exceeded ?\n\nSure.\n\n> Are you ok with some requirements, e.g. \"your batch contains transactions that conflict with each other?\"\n\nYea, at least that seems reasonable.",
+          "created_at": "2025-11-04T13:40:50Z"
+        }
+      ]
+    },
+    {
+      "number": 33697,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "wm97artsociety",
+      "created_at": "2025-10-24T09:23:26Z",
+      "updated_at": "2025-10-24T09:29:52Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33697",
+      "labels": []
+    },
+    {
+      "number": 33695,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "wm97artsociety",
+      "created_at": "2025-10-24T08:54:44Z",
+      "updated_at": "2025-10-24T08:56:42Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33695",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 3
+  }
+}

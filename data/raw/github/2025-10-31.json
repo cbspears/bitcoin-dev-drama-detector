@@ -1,0 +1,259 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:27:28.408016+00:00",
+  "date": "2025-10-31",
+  "pull_requests": [
+    {
+      "number": 33757,
+      "title": "refactor: make script Solver's often-unused solutions parameter optional",
+      "body": "### Summary\r\nMany callsites only need to determine the script type and don't use the parsed solutions.\r\nPreviously, these callers still incurred the cost of allocating and populating a `std::vector<std::vector<unsigned char>>`.\r\n\r\n### Fix\r\nChanging `Solver` signature from reference to nullable pointer parameter with `nullptr` default allows calling the method for its result only. Note that we can't call `std::optional` here because that would copy the values but we need the result to be provided from the outside to avoid the copies.\r\nInside the `Solver` we guard all accesses to the solutions parameter.\r\nCallsites were changed to pass `&solutions` only when they need the data and removed when we don't.\r\n\r\n### Origin & Alternative\r\nThis was originally discovered in https://github.com/bitcoin/bitcoin/pull/32279/files#diff-060e8fd790fc1c3e18c64327a7395bb5b2d6d57db9792cc666bd8d7354a40c0bR1154-R1159 where we needed to test the allocation characteristics of different templates.\r\nThis supersedes the vector reuse optimization approach in https://github.com/bitcoin/bitcoin/pull/33645#issuecomment-3436715527 by addressing the problem more fundamentally - avoiding unnecessary work entirely rather than optimizing it. The author of the different change was added as a coauthor.",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-10-31T16:53:23Z",
+      "updated_at": "2025-11-02T16:32:35Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33757",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33757.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Raimo33](https://github.com/bitcoin/bitcoin/pull/33757#issuecomment-3474029652) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33645](https://github.com/bitcoin/bitcoin/pull/33645) (refactor: optimize: avoid allocations in script & policy verification by Raimo33)\n* [#32729](https://github.com/bitcoin/bitcoin/pull/32729) (test,refactor: extract script template helpers & widen sigop count coverage by l0rinc)\n* [#29060](https://github.com/bitcoin/bitcoin/pull/29060) (Policy: Report debug message why inputs are non standard by ismaelsadeeq)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-31T16:53:29Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "Code Review ACK 2726abd896817c0dfd5b171a643bad6af015d070\r\n\r\nI proposed the same in this private commit: 3ea121d49c01935f74673cbb825ed608179e43d5\r\nwould like a bit more clarity on the benchmarks referenced. are we talking about `CCoinsCaching`?",
+          "created_at": "2025-10-31T17:03:29Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> would like a bit more clarity on the benchmarks referenced\r\n\r\nWas waiting for corecheck to finish, but it shows only `2.63%` speedup for `CCoinsCaching`.\r\nI'll measure it properly, but in the meantime I'll leave this as a refactoring only since the resulting code is arguably cleaner.\r\n",
+          "created_at": "2025-10-31T17:59:38Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "The proposed approach increases complexity both at the callsites and in the implementation of the function itself.\r\n\r\nAll the added `&` at the callsites would be unnecessary, if the PR simply added a single argument overload to the `Solver` function instead of a default argument.\r\n\r\nFurther, `vSolutionsRet` actually seems to be an *output argument*, not an inout argument. Passing that as the return type improves local reasoning:\r\n\r\n```cpp\r\nauto SolveType(CScript const& scriptPubKey) -> TxoutType;\r\nauto Solve(CScript const& scriptPubKey) -> std::tuple<TxoutType, std::vector<std::vector<unsigned char>>>; \r\n```",
+          "created_at": "2025-11-02T05:55:53Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "> ```c++\r\n> auto SolveType(CScript const& scriptPubKey) -> TxoutType;\r\n> ```\r\n\r\nI agree on having a separate method for this. It was my initial approach. It involves some code duplication and adding an extra test but might be worth it to avoid all the `if (vSolutionsRet)` checks. \r\n\r\n> ```c++\r\n> auto Solve(CScript const& scriptPubKey) -> std::tuple<TxoutType, std::vector<std::vector<unsigned char>>>; \r\n> ```\r\n\r\nWouldn't this increase allocs/copies? I'd say it's perfectly fine to leave it as is with the vector reference as parameter. I'd lean towards returning it if it didn't involve `std::tuple` and had guaranteed RVO or copy elision.",
+          "created_at": "2025-11-02T10:28:05Z"
+        },
+        {
+          "user": "sipa",
+          "body": "If we're going to touch this code, my preference would be to go with @purpleKarrot's approach of two separate functions, moving the `vSolutions` field into a return pair element.\r\n\r\nIf the allocation overhead of that is a concern, I think the proper solution is a follow-up to get rid of the `vSolutions` approach of encoding things, and instead introduce a proper type that encodes it more usefully (possibly an `std::variant`, like `CTxDestination`, but with more possibilities). For multisig-like results it wouldn't be entirely allocation-free, but it'd certainly get rid of most allocations in practice.",
+          "created_at": "2025-11-02T11:12:50Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thank you for the comments, appreciate the high-level review!\r\n\r\n@purpleKarrot, I though of both solutions you have suggested (I also passionately hate output parameters) but since I meant this as a call-site-simplification while eliminating useless work (though the cases where the `vSolutions` was still needed *was* indeed slightly more awkward), populating the vector just to discard it immediately didn't seem like it would solve anything.\r\n\r\n> and instead introduce a proper type that encodes it more usefully\r\n\r\nThat could work, split the different results by type instead of an enum (`Solve` would basically be proper parser doing some of the work that's currently done on call-sites) so that they just lazily store minimal data and reconstruct whatever the particular type needs.\r\nBut this seems like a big refactor of an area of the code that I'm not actively working on so I'll close the PR - and removed my nack from https://github.com/bitcoin/bitcoin/pull/33645#issuecomment-3436715527 since I can't provide a meaningful alternative anymore.\r\n\r\nThanks!",
+          "created_at": "2025-11-02T14:22:32Z"
+        }
+      ]
+    },
+    {
+      "number": 33755,
+      "title": "Relax standardness rules regarding CHECKMULTISIG",
+      "body": "In PR #5247, the STRICTENC standardness rules were tightened with regards to CHECKMULTISIG so that unparsable public keys fail the script when they are encountered. The overall purpose here was to disallow the use of confusing hybrid public keys by policy while keeping policy compatible (i.e., strictly stronger) with consensus rules.\r\n\r\nComments in PR #5247 note that \"I don't believe it should affect any system in production\"; however, this belief is/was false. Counterparty was stuffing data blobs into multisig pubkey lists, but these UTXOs were meant to be spendable because, although some pubkeys were unparsable, other keys were parsable, and the UTXOs were meant to be spent by those valid keys.\r\n\r\nBut in tackling the hybrid key issue, PR #5247 disallowed any unparsable keys in multisigs, whether or not they were hybrid, and whether or not the signature was meant to satisfy a hybrid key.\r\n\r\nIn production, Counterparty UTXOs were inadvertently caught up in this standardness rule change and became \"soft confiscated.\"  That is, they were no longer spendable by policy but still recoverable if users are able to somehow bypass standardness by mining their transactions themselves, or getting out-of-band assistance from some other miner.\r\n\r\nI understand that Bitcoin Core never intended to \"soft confiscate\" any UTXOs by policy changes.  This change addresses the problem.\r\n\r\nWith this change, only hybrid formatted keys and empty keys will cause early abort in CHECKMULTISIG operations. Otherwise, failing signature checks revert to their consensus behaviour of testing subsequent public keys.\r\n\r\nCounterparty UTXOs were never intended to make use of hybrid keys and thus shouldn't have any passing signatures using hybrid keys.\r\n",
+      "state": "open",
+      "user": "roconnor-blockstream",
+      "created_at": "2025-10-31T14:02:13Z",
+      "updated_at": "2025-11-24T19:11:06Z",
+      "comments": 24,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33755",
+      "labels": [
+        "TX fees and policy"
+      ]
+    },
+    {
+      "number": 33754,
+      "title": "ci: gha: Set debug_pull_request_number_str annotation",
+      "body": "GitHub Actions does not offer any way to determine the pull request number in a machine readable way from the checks API. See https://github.com/bitcoin/bitcoin/issues/27178#issuecomment-1503475232.\r\n\r\nHowever, the pull request number can be useful for external tools to act on CI results.\r\n\r\nFix that by using a check run annotation for a single task named `debug_pull_request_number_str`.\r\n\r\nThis should re-enable the 'CI Failed' labelling mechanism via https://github.com/maflcko/DrahtBot/commit/1f24cc1ab9be8ad35fbb3a44aaa073bf669a7685.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-10-31T11:12:33Z",
+      "updated_at": "2025-11-03T14:45:07Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33754",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33754.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/33754#issuecomment-3479767050), [willcl-ark](https://github.com/bitcoin/bitcoin/pull/33754#pullrequestreview-3411229739) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-31T11:12:39Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "(looks like it worked)",
+          "created_at": "2025-10-31T11:51:13Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "lgtm ack https://github.com/bitcoin/bitcoin/commit/fa9d0f994b45a94e3f26c01e395c58ff59f47f43\r\n\r\nhttps://github.com/bitcoin/bitcoin/actions/runs/18971691417/job/54180745411?pr=33754#step:2:11",
+          "created_at": "2025-10-31T16:59:50Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> lgtm ack [fa9d0f9](https://github.com/bitcoin/bitcoin/commit/fa9d0f994b45a94e3f26c01e395c58ff59f47f43)\r\n\r\nThe ack needs to be in all-upper case for the scripts to pick it up :sweat_smile: ",
+          "created_at": "2025-11-03T10:03:13Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "code review ACK fa9d0f994b45a94e3f26c01e395c58ff59f47f43",
+          "created_at": "2025-11-03T10:09:08Z"
+        }
+      ]
+    },
+    {
+      "number": 33753,
+      "title": "test: Format strings in `test_runner`",
+      "body": "`format!` strings may contain variables within the string representation. This is a lint as of a recent `rustc` nightly version.\r",
+      "state": "closed",
+      "user": "rustaceanrob",
+      "created_at": "2025-10-31T11:10:55Z",
+      "updated_at": "2025-10-31T15:40:31Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33753",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33753.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/33753#pullrequestreview-3404408458), [rkrux](https://github.com/bitcoin/bitcoin/pull/33753#pullrequestreview-3404583895), [maflcko](https://github.com/bitcoin/bitcoin/pull/33753#issuecomment-3473395016) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-31T11:11:00Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Thanks. It makes sense to be clippy-clean and just consistently apply the shorter and easier-to-read variant.\r\n\r\nlgtm ACK d305b865c9630646a6cf7d227c08ba4263a379f7",
+          "created_at": "2025-10-31T11:17:29Z"
+        },
+        {
+          "user": "rustaceanrob",
+          "body": "I found the lint in additional files and have updated accordingly in 78d4d36730d44de93690b43f900a9202517291f6",
+          "created_at": "2025-10-31T13:42:42Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 78d4d36730d44de93690b43f900a9202517291f6",
+          "created_at": "2025-10-31T14:41:06Z"
+        }
+      ]
+    },
+    {
+      "number": 33752,
+      "title": "rest: Query predecessor headers using negative count param",
+      "body": "There is currently no mechanism by which to batch-query headers from tip, backwards towards genesis.\r\nThis PR extends the REST Blockheaders API to support batch-querying predecessor headers, by providing a negative count parameter.",
+      "state": "open",
+      "user": "A-Manning",
+      "created_at": "2025-10-31T09:11:11Z",
+      "updated_at": "2025-11-17T13:02:53Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33752",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33752.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [stickies-v](https://github.com/bitcoin/bitcoin/pull/33752#pullrequestreview-3410832257) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-31T09:11:16Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Though, I wonder what the use case is. If someone knows a header, it seems likely they also know about the previous headers and a feature to support asking for them would have no users?",
+          "created_at": "2025-11-03T09:48:33Z"
+        },
+        {
+          "user": "A-Manning",
+          "body": ">Though, I wonder what the use case is. If someone knows a header, it seems likely they also know about the previous headers and a feature to support asking for them would have no users?\r\n\r\nKnowing a header only means that you know the previous block hash. If you want to request headers from best tip to genesis, There is no existing mechanism other than requesting headers one-at-a-time. This makes it possible to *batch* request headers from tip to genesis, which is much more efficient than requesting one-at-a-time.",
+          "created_at": "2025-11-03T10:21:09Z"
+        },
+        {
+          "user": "A-Manning",
+          "body": ">Request the starting hash with GET /rest/blockhashbyheight/<HEIGHT>.<bin|hex|json> and then request headers upward with /rest/headers/?\r\n\r\nWe currently use this approach at L2L. This strategy is far from ideal - any of the upward requests may return headers from a different active chain, in the event of a re-org. It is necessary to check that the final block hash is the same as the tip hash we want to sync to, and if it is not, then the only way to retrieve the headers would be requesting headers via JSON-RPC, one at a time.",
+          "created_at": "2025-11-03T13:11:10Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "The reorg potential does make using the interface more cumbersome in general, I'm not sure your approach solves that? You're still limited by what's in the `active_chain`, so you still need logic to deal with what if the index you're requesting a negative count from isn't in the active chain anymore?",
+          "created_at": "2025-11-03T14:25:02Z"
+        },
+        {
+          "user": "A-Manning",
+          "body": "@stickies-v Updated to handle the case where the requested block header is no longer in the active chain.",
+          "created_at": "2025-11-06T17:55:28Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33758,
+      "title": "BlockTemplate Manager Tracking issue",
+      "body": "The main motivation and design rationale are discussed in #33389.\n\nWhat to review\n\n* #33421\n\n### Plan\n\n* [ ] **Introduce the Block Template Cache (Manager) #33421**\n  Implement a cache layer. All newly created block templates should be stored along with their respective configuration options. Client requests for block templates will specify the **maximum age** of the template; that is, how fresh they want the template to be:\n\n  * If a template with matching options exists in the cache and the interval has not elapsed, a cached template is returned.\n  * If no template exists or the interval has elapsed, a new template is generated, stored in the cache, and returned.\n  * After insertion, the oldest template is evicted if the cache exceeds its maximum size.\n    The cache has a configurable maximum size (default: 10).\n    It also subscribes to the validation interface’s `BlockConnected` notification and clears the cache when a new block is connected or disconnected, preventing stale templates from being served.\n    If `test_block_validity` is set to `true` in the block creation options and the cached template found has not yet been validated, it is checked and then returned.\n    This stage will also allow sharing of template metadata built from the mining interface for a fee estimation mechanism that requires building a block template to obtain package fee rates and use them for fee estimation, and vice versa. See the discussion in #33389.\n\n* [ ] Create a block template manager that will own the `BlockTemplateCache`. Block template requests from node components and other block template-related operations will be handled via this cache.\n\n* [ ] Prune `WaitAndCreateNewBlock` and move its implementation to the block template manager under `GetNext`. This method will use the block template cache for decisions to build a block template. This approach is cleaner and should allow reusing the logic in `getblocktemplate`, thereby removing the global state.\n  [https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/rpc/mining.cpp#L776](https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/rpc/mining.cpp#L776)\n  [https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/rpc/mining.cpp#L859-L861](https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/rpc/mining.cpp#L859-L861)\n  This will also allow pruning `WaitTipChanged` and exposing information to retrieve the metadata of the last built block template, enabling the removal of additional global state.\n  [https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/node/miner.h#L186-L189](https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/node/miner.h#L186-L189)\n\n* [ ] **Implement trimming of transactions** in larger block templates to enable reuse when configurations do not match (see the idea here: [https://github.com/bitcoin/bitcoin/issues/33389#issuecomment-3295505510](https://github.com/bitcoin/bitcoin/issues/33389#issuecomment-3295505510))\n  This will allow reusing block templates from `SENDTEMPLATE` for mining and fee estimation, but not vice versa, because `SENDTEMPLATE` builds templates larger than 4 MB.\n\n* [ ] **Introduce a push-based subscription mechanism** that allows clients to subscribe to fee updates for a given block template and receive a new template when the fee threshold is reached or when the tip changes. This is what `waitnext` should use.\n  See the related discussion here:\n  [https://delvingbitcoin.org/t/determining-blocktemplate-fee-increase-using-fee-rate-diagram/2052](https://delvingbitcoin.org/t/determining-blocktemplate-fee-increase-using-fee-rate-diagram/2052)\n  This feature depends on cluster mempool.\n\n",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-10-31T17:55:33Z",
+      "updated_at": "2026-01-13T13:05:44Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33758",
+      "labels": [
+        "Mining",
+        "Tracking Issue"
+      ]
+    },
+    {
+      "number": 33756,
+      "title": "Header-only support for waitNext()",
+      "body": "I'd like to expand the `waitNext()` Mining IPC function to optionally (via `BlockWaitOptions`) return a (empty) new template as soon as we have a header with enough proof-of-work, pending block download and/or validation.\n\nhttps://github.com/bitcoin/bitcoin/blob/3cd4263bf66408760ec3b4ce6ccedcc87e0d53de/src/interfaces/mining.h#L63-L74\n\nI suspect there's little benefit if compact block reconstruction succeeds, and IIUC we hold cs_main during this process anyway so there's no way to generate a template.\n\nBut if we need a round trip to our peer because compact block construction didn't finish, it might be useful to create an empty block template and push it.\n\nThis can hopefully be implemented without touching validation code, as long as the kernel can provide a notification. Currently it only notifies us of a better tip, not a better header.\n\n---\n\nClosely related to this is the Stratum v2 concept of sending an empty (or optimistically filled) \"future\" template downstream for mining devices to load, followed by a `prevhash` messages when a new header is found. Whether that's actually more performant than the above probably depends on the details of ASIC firmware.\n\nImplementation wise, we'd need the same kernel notification for it. At the interface level it might look like a `getFuture()` method on `BlockTemplate` which could return a `FutureTemplate` interface with a `wait()` method on it. That would return a prevhash once we validated a header. The client then sends that downstream and immediately calls `waitNext()` on the original template in order to get a fresh full block template as soon as we processed the full block.\n\n---\n\nIn both cases, we'd need a way to notify the TP if it the block turned out to be invalid. That way it can revert to the previous template.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-10-31T16:38:26Z",
+      "updated_at": "2025-11-18T16:41:07Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33756",
+      "labels": [
+        "Feature",
+        "Mining"
+      ],
+      "comment_list": [
+        {
+          "user": "Fi3",
+          "body": "it make sense for the TP to optimistically create templates as soon as there is a possible new block since this will reduce the time that a miner waste on stale jobs. Is kinda safe since the TP can stop following the optimistic path when 2 or more consecutive invalid blocks are received. If we leave it like it is now the miner will keep mine on the old job until the block template do not provide a new job.\n\nSo worst case we waste a bunch of hundreds milliseconds mining invalid jobs, that we are still going to waste mining on old jobs.",
+          "created_at": "2025-10-31T16:47:45Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "> I'd like to expand the `waitNext()` Mining IPC function to optionally (via `BlockWaitOptions`) return an (empty) new template as soon as we have a header with sufficient proof-of-work, pending block download and/or validation.\n\nWhy? you should expand on the motivations behind this and what exactly you aim to achieve with this feature.\n\n> I suspect there’s little benefit if compact block reconstruction succeeds. And, if I understand correctly, we hold `cs_main` during this process anyway, so there’s no way to generate a template.\n\nEven if there is way to generate a template you haven’t validated the block, activate a new tip and evicted conflicts from the mempool yet, so generating a block template with the block assembler is likely to produce the same result as the one you’re currently working on.\n\nTo construct an empty block that builds on the header you validated, you have two options:\n\n1. Update the block assembler code to accept a custom chain tip.\n   This would require some refactoring instead I think it would be better to\n2. Isolate the header creation section of the block assembler into a function that takes the current block index and consensus parameters, then loads the next block header into the proposed block template.\n  This subroutine could then be used by the mining interface/block template manager to generate an empty block template.\n\nRe: https://github.com/bitcoin/bitcoin/issues/33389#issuecomment-3473950791\n\nYes, it is compatible. However, the approach I am aiming for in #33758 relies on non-blocking validation interface notifications, so we should simply add a new notification that is executed once a new valid header is known.\nThis notification will wake up the block template manager, which will then use the subroutine isolated in step 2 above to construct a header with an empty template and push it to subscribed clients.\n\nAs I mentioned in #33758, I would like to prune `WaitAndCreateNewBlock` and create a new `GetNext()` function on a block template manager that is decoupled from kernel notifications internals, the `cs_main` lock, and the kernel notification’s condition variable.\nThe block template manager should have its own internal locks, maintain a copy of the chain tip, and wake up its own condition variables to execute what’s needed on the scheduler thread after receiving validation interface notifications.\n\nSo subscriptions to next block template, next block header, can easily be added and tested in isolation.\n",
+          "created_at": "2025-11-07T11:41:50Z"
+        },
+        {
+          "user": "Sjors",
+          "body": ">> I'd like to expand the `waitNext()` Mining IPC function to optionally (via BlockWaitOptions) return an (empty) new template as soon as we have a header with sufficient proof-of-work, pending block download and/or validation.\n\n> Why? you should expand on the motivations behind this and what exactly you aim to achieve with this feature.\n\nTo allow miners to start hashing on an empty block template as soon as we see a new header, rather than waiting for the block to be fully downloaded and validated. This provides miners with additional revenue because they are less likely to mine a stale block [0]. The risk however is that the new block was invalid, in which case they're (briefly) mining on top of an invalid block.\n\n[0] if they happen to find a solution during this time, afaik we won't even broadcast it because it's not better than our current tip. But even if we did broadcast it, other nodes won't prefer it because of the first-seen rule. ",
+          "created_at": "2025-11-07T17:12:30Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Thanks for the context.\n\n> This provides miners with additional revenue because they are less likely to mine a stale block [0]\n\nBefore doing this, I think we should benchmark in practice the usual latency between knowing about a valid new block header, downloading, validating, and switching the chain tip.\nAs you mentioned, for a node with a good connection and reasonable policy rules, compact block reconstruction should prevent any measurable latency. Also, we are likely going to have `SENDTEMPLATE`, which will help as well so might not be worth it if the time delta is not going to have impact with relation to the time it will take to generate the empty block, send to tp, and sending the new work to the miners in the pool.\nIf the latency is not much, we just increase the chances of getting empty blocks and make miners lose on fees.\n\nWe could also do this smartly, and only send the empty block when the number of transaction not in mempool and extra pool is high after we get the compact block.\n\n<details>\n<summary>Possible (costly) theoretical attack that this could open up</summary>\n\nMalicious miners could collude to reduce the chances of smaller miners who use this mechanism from mining blocks and increasing their hashrate when they do this by default.\n\nWhenever the chain tip changes on the valid chain, the malicious miners could collaborate and start working on an invalid block, first broadcasting a header with valid PoW but an invalid block (by consensus). As a result, smaller miners who rely on this mechanism might unknowingly keep working on a block that is valid in isolation but built on an invalid chain, which would later be rejected by the network.\n\nThey can do this repeatedly, and since they have more hashrate, their chances of succeeding increase. The chance for smaller miners is further limited to the time between the tip changes and the larger miners mining an invalid block.\nBut I think this is not realistic and the time they spend finding the invalid block they should rather just be honest and use it to mine.\n</details>",
+          "created_at": "2025-11-07T18:10:54Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> we should benchmark in practice the usual latency between knowing about a valid new block header, downloading, validating, and switching the chain tip\n\nAgreed, ideally I'd like to see data from actual miners.\n\n> compact block reconstruction should prevent any measurable latency\n\nYes, but with the recent trend of people using incompatible policies, we should prepare for a scenario where compact block relay (often) doesn't work.\n\nI don't know if `SENDTEMPLATE` can fully compensate for broken compact relay or is more of a bandaid.\n\n> theoretical attack that this could open up\n\nI agree that mining on just headers is not without risk. It should be something the miner can turn on or off. Unless of course we decide it's really too unsafe, then we shouldn't support it.",
+          "created_at": "2025-11-07T18:17:35Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 2
+  }
+}

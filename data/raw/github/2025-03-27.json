@@ -1,0 +1,482 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:28:15.105707+00:00",
+  "date": "2025-03-27",
+  "pull_requests": [
+    {
+      "number": 32155,
+      "title": "miner: timelock the coinbase to the mined block's height",
+      "body": "The Consensus Cleanup soft fork proposal includes enforcing that coinbase transactions set their\r\nnLockTime field to the block height minus 1, as well as their nSequence such as to not disable the\r\ntimelock. If such a fork were to be activated by Bitcoin users, miners need to be ready to produce\r\ncompliant blocks at the risk of losing substantial amounts mining would-be invalid blocks. As miners\r\nare unfamously slow to upgrade, it's good to make this change as early as possible.\r\n\r\nAlthough Bitcoin Core's GBT implementation does not provide the `coinbasetxn` field, and mining\r\npool software crafts the coinbase on its own, updating the Bitcoin Core mining code is a first step\r\ntoward convincing pools to update their (often closed source) code. A possible followup is also to\r\nintroduce new fields to GBT. In addition, this first step also makes it possible to test future\r\nConsensus Cleanup changes.\r\n\r\nThe commit making the change also updates a bunch of seemingly-unrelated tests. This is because those tests were asserting error messages based on the txid of transactions involved, and changing the coinbase transaction structure necessarily changes the txid of all tests' transactions.",
+      "state": "closed",
+      "user": "darosior",
+      "created_at": "2025-03-27T19:30:36Z",
+      "updated_at": "2025-05-20T20:34:52Z",
+      "comments": 17,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32155",
+      "labels": [
+        "Mining"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32155.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/32155#issuecomment-2831098171), [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/32155#pullrequestreview-2814660224), [achow101](https://github.com/bitcoin/bitcoin/pull/32155#issuecomment-2867954774) |\n| Approach ACK | [ajtowns](https://github.com/bitcoin/bitcoin/pull/32155#pullrequestreview-2782594487) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32421](https://github.com/bitcoin/bitcoin/pull/32421) (test: refactor: overhaul (w)txid determination for `CTransaction` objects by theStack)\n* [#32420](https://github.com/bitcoin/bitcoin/pull/32420) (miner: don't needlessly append dummy OP_0 to bip34 by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\nBad snapshot format or truncated snapshot after deserializing 1 coins. → …deserializing 1 coin.\n\n",
+          "created_at": "2025-03-27T19:30:39Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Tested with Stratum v2 (https://github.com/Sjors/bitcoin/pull/68 + first commit here, SRI pool role connected to their custom signet, sv2 -> sv1 translator and a BitAxe). Indeed I'm seeing blocks at height N with `locktime` values of N-1 and `sequence` of 4294967294 (`0xFFFFFFFE`). I explained below why this just works(tm), unlike with Stratum v1.\r\n\r\nThere's a question about sequencing here, since it's a preparatory step towards the Great Consensus Cleanup proposal https://github.com/bitcoin/bips/pull/1800.\r\n\r\nIn a way it's similiar to #30681 and other PRs that prepared our mining code for the timewarp fix from that same BIP. But it's also different. Taking account of the timewarp fix only potentially impacts the timestamp of the first block in a retarget period, i.e. push it a bit in the future. This only happens under circumstances that are common on testnet4 but rare on mainnet. Whereas this PR impacts every mined block.\r\n\r\nMore specifically, for Stratum v1 this PR changes nothing, because `getblocktemplate` does not echo coinbase `nLockTime`. It will require expanding BIP22 / BIP23 and further changes downstream. But the Stratum v2 Template Provider (see #31098) does pass on this information, so any Stratum v2 pool out there will start doing this once it's in a release.\r\n\r\nThe fact that Stratum v1 support requires downstream changes is a good reason to get started early. Moreover, because deploying this soft fork is more involved than simply updating Bitcoin Core, it's potentially less safe. By changing the default mining behavior long before the fork activates (or even signals) the actual deployment would be a lot safer.\r\n\r\nHowever the BIP is brand new, so we shouldn't make these (specific) mining changes a fait accompli. Although nothing would break if we later abandon this approach in favor of another BIP30 fix, it still seems better to wait before doing this on mainnet until the BIP has been out there for a while.\r\n\r\nArguably, waiting for the v30 release is long enough and we can simply revert this PR if needed.\r\n\r\nAnother approach could be to make this testnet only, and then decide if we want to apply it to mainnet a bit closer to the release.\r\n\r\nI do think we should have this in v30 to at least enable downstream testing, along with any changes to `getblocktemplate`. And some people may prefer to test on mainnet. So yet another approach could be to put it behind a flag (default true for test networks).",
+          "created_at": "2025-03-28T09:01:48Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> Did a simple test with regtest\r\n\r\n> so this PR only affects to test networks?\r\n\r\nUnfortunately regtest is not representative here. It's the only network for which Bitcoin Core will mine by itself. For all other networks, including testnet (3 and 4), you need to use external software.",
+          "created_at": "2025-03-28T11:58:53Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "> Unfortunately regtest is not representative here. It's the only network for which Bitcoin Core will mine by itself. For all other networks, including testnet (3 and 4), you need to use external software.\r\n\r\nThis is what I though. So how does this change \"help\" or \"put pressure\" to add this new rule to miners software? Wouldn't help more implement the code that will check if a block is following it? Obviously code that would never be ran without another change to add an activation date.",
+          "created_at": "2025-03-28T12:14:15Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> Wouldn't help more implement the code that will check if a block is following it?\r\n\r\nThat's what activating the soft-fork does. But there's a chicken-egg problem, because one reason to delay activating a soft fork is because part of the ecosystem isn't ready.\r\n\r\n> So how does this change \"help\" or \"put pressure\" to add this new rule to miners software? \r\n\r\nAs I explained in my first comment, for Stratum v2 this just works(tm). For Stratum v1 additional changes are needed in other software. Not sure what the best approach is there. For them the change here is a bit like the proverbial tree in the forest.",
+          "created_at": "2025-03-28T13:00:50Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "> That's what activating the soft-fork does. But there's a chicken-egg problem, because one reason to delay activating a soft fork is because part of the ecosystem isn't ready\r\n\r\nSorry maybe I didn't explain myself. I meant to introduce the code, but without activating it and without activation date. So if this consensus change doesn't go forward, we make sure that we will not have hard fork because of nodes running a version with the check code implemented. Just put it there to say: \"Here it is this new condition, at some point this is going to have an activation date, start implementing it\". Maybe that's not the way to do it, just dropping ideas. \r\n\r\nAs @darosior said:\r\n> updating the Bitcoin Core mining code is a first step toward convincing pools to update their (often closed source) code\r\n\r\nSo I think that this is a more \"aggressive\" (or convincing 😉) way to convince them.",
+          "created_at": "2025-03-28T17:56:25Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Rebased.",
+          "created_at": "2025-04-08T20:54:25Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Do people think i should change the value of the coinbase transaction used in the fuzz test here as well? I previously kept it along with the PR introducing validation for those fields, but since i change this in unit tests already it might make sense to do it here.",
+          "created_at": "2025-04-21T18:23:33Z"
+        },
+        {
+          "user": "darosior",
+          "body": "I have added a commit to also set nLocktime / nSequence for coinbase transactions created in fuzz targets.\r\n\r\n> The churn in the first commit is pretty annoying.\r\n\r\n@Sjors (from this and in-person discussions) i have split as much as possible of the changes from this commit into preparatory commits. Now there is in the main commit only the necessary churn to keep commits hygienic. Hopefully it helps.",
+          "created_at": "2025-04-21T19:58:08Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/41019009412</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-04-23T15:20:47Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Failure in `interface_usdt_coinselection` seems to be an instance of #32322.\r\n\r\n---\r\n\r\nThanks for splitting out some of the stuff in to new commits.\r\n\r\nI think you lost the comment announced here: https://github.com/bitcoin/bitcoin/pull/32155#discussion_r2056629920\r\n\r\nOther than it looks good.",
+          "created_at": "2025-04-24T07:46:18Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> I think you lost the comment announced here: [#32155 (comment)](https://github.com/bitcoin/bitcoin/pull/32155#discussion_r2056629920)\r\n> \r\n> Other than it looks good.\r\n\r\nI did not: https://github.com/bitcoin/bitcoin/pull/32155/commits/67267b147f8c48e0775602395fba9db0105dccf4#diff-6b810fb346def9cc80a9d9ab75184dd9f41c4ac63493135a7bdfcb98f75b1ce8R39\r\n\r\n> Failure in `interface_usdt_coinselection` seems to be an instance of #32322.\r\n\r\nYes. Rebased on master to avoid the unrelated CI failure after it was fixed in #32336.",
+          "created_at": "2025-04-25T16:47:00Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Code review ACK a58cb3b1c12c8cb75a87375c50f94c4605bb805d\r\n\r\nI'm a bit reluctant to have this merged while BIP54 is in limbo (https://github.com/bitcoin/bips/pull/1800).\r\n\r\nAdditionally I think it's worth waiting a few weeks (?) to see if someone responds to https://delvingbitcoin.org/t/great-consensus-cleanup-revival/710/85 about the use of `nLockTime` as an extranonce.\r\n\r\nLet's add this to the v30 milestone though. Unless by that time someone advocates a different approach, it's better to just pick one approach and encourage all miners to do it. This is the only part of the proposal where normal BIP9 style signalling is of no use, because miners will certainly produce an invalid block if they don't modify their pool software. And that might take ages.",
+          "created_at": "2025-04-25T18:12:11Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "> I'm a bit reluctant to have this merged while BIP54 is in limbo (https://github.com/bitcoin/bips/pull/1800).\r\n\r\nBIP54 draft merged.",
+          "created_at": "2025-04-29T22:31:31Z"
+        },
+        {
+          "user": "achow101",
+          "body": "In 8f2078af6a55448c003b3f7f3021955fbb351caa \"miner: timelock coinbase transactions\"\r\n\r\nI'm having a hard time understanding why `rbf_tests.cpp` and `mempool_package_rbf.py` are changed? These are not hardcoded txid changes. Rather the specific changes suggest to me that somehow the semantics of rbf have somehow changed? But that doesn't make sense if the only changes are to the coinbase transaction, why would that affect mempool policy?\r\n\r\nEdit: Oh, is it because of set ordering by txid or something like that, and the error message depends on which tx is checked first? If so, it would be nice to have that in the commit message.",
+          "created_at": "2025-05-06T23:09:12Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK a58cb3b1c12c8cb75a87375c50f94c4605bb805d",
+          "created_at": "2025-05-09T21:59:02Z"
+        },
+        {
+          "user": "sedited",
+          "body": "> Edit: Oh, is it because of set ordering by txid or something like that, and the error message depends on which tx is checked first? If so, it would be nice to have that in the commit message.\r\n\r\nYes, see https://github.com/bitcoin/bitcoin/pull/32155#discussion_r2052783821 above.",
+          "created_at": "2025-05-10T08:58:20Z"
+        }
+      ]
+    },
+    {
+      "number": 32154,
+      "title": "fuzz: Avoid integer sanitizer warnings in policy_estimator target",
+      "body": "It seems odd to write a fuzz target to trigger integer sanitizer warnings in `CBlockPolicyEstimator::processBlockTx` and then suppress them. If the scenario can happen in reality, the code should be properly fixed to handle the cases. If not, it seems better to fix the fuzz target to not trigger meaningless traces.\r\n\r\nDo that here by keeping track of the current height and limiting mempool entries to at most this entry height.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-03-27T11:16:31Z",
+      "updated_at": "2025-10-30T13:59:43Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32154",
+      "labels": [
+        "Tests",
+        "Fuzzing"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32154.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [brunoerg](https://github.com/bitcoin/bitcoin/pull/32154#pullrequestreview-2736459866), [dergoegge](https://github.com/bitcoin/bitcoin/pull/32154#pullrequestreview-2775513656) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31382](https://github.com/bitcoin/bitcoin/pull/31382) (kernel: Flush in ChainstateManager destructor by TheCharlatan)\n* [#28676](https://github.com/bitcoin/bitcoin/pull/28676) ([WIP] Cluster mempool implementation by sdaftuar)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-27T11:16:33Z"
+        }
+      ]
+    },
+    {
+      "number": 32153,
+      "title": "wallet: remove redundant `Assert` call when block is disconnected",
+      "body": "It was highlighted in a PR discussion previously that the recently moved `Assert` macro call inside the block disconnected loop had been redundant for quite a while because of the presence of the `assert` macro call at the start of the function. Therefore, it is removed now.\r\n\r\nrefs #https://github.com/bitcoin/bitcoin/pull/31757#discussion_r1995416821",
+      "state": "closed",
+      "user": "rkrux",
+      "created_at": "2025-03-27T10:54:05Z",
+      "updated_at": "2025-03-28T15:14:48Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32153",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32153.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32153#pullrequestreview-2720994104), [fjahr](https://github.com/bitcoin/bitcoin/pull/32153#issuecomment-2758361395), [hodlinator](https://github.com/bitcoin/bitcoin/pull/32153#pullrequestreview-2723786825), [Prabhat1308](https://github.com/bitcoin/bitcoin/pull/32153#pullrequestreview-2724166661) |\n| Concept ACK | [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/32153#pullrequestreview-2721901787) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-27T10:54:08Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "utACK ae6b6ea296a228f342c3c635dc9e14c101e9534d",
+          "created_at": "2025-03-27T14:52:46Z"
+        }
+      ]
+    },
+    {
+      "number": 32152,
+      "title": "test: add p2pk support to wallet_implicity_segwit.py",
+      "body": "This pull request modifies `wallet_implicity_segwit.py` by adding support for Pay-to-Public-Key (P2PK) transactions. It addresses a previously noted TODO, which suggested that P2PK transactions will be nice to be tested as part of the wallet implicit segwit functionality. The modification expands the test to include transactions involving P2PK outputs, which are handled by Bitcoin Core in a non-native way (simulated using legacy addresses). The updated test ensures that Bitcoin Core correctly processes and recognizes P2PK transactions alongside legacy, Bech32, and P2SH-SegWit address types.\r\n\r\nThe reason behind this PR is to address the standing TODO—\"Might be nice to test p2pk here too\"—by explicitly testing the P2PK scenario. By generating a legacy address to retrieve the public key, creating a raw transaction, modifying its scriptPubKey to a P2PK format, and then funding, signing, and broadcasting it, this enhancement confirms that P2PK transactions are correctly processed both before and after node restarts.",
+      "state": "closed",
+      "user": "musaHaruna",
+      "created_at": "2025-03-27T10:31:13Z",
+      "updated_at": "2025-03-27T11:27:16Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32152",
+      "labels": [
+        "Tests",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32152.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n",
+          "created_at": "2025-03-27T10:31:16Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/39507566360</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-27T11:15:48Z"
+        },
+        {
+          "user": "musaHaruna",
+          "body": "> the bdb wallet will be removed, so i guess it seems easier to just wait for that to happen instead of modifying code that will be deleted\r\n\r\nOkay thanks for the heads up, should I close the PR then?\r\n",
+          "created_at": "2025-03-27T11:25:23Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "See https://github.com/bitcoin/bitcoin/pull/31250",
+          "created_at": "2025-03-27T11:27:16Z"
+        }
+      ]
+    },
+    {
+      "number": 32151,
+      "title": "Follow-ups for txgraph #31363",
+      "body": "This addresses a few review comments in #31363 after merge:\r\n* https://github.com/bitcoin/bitcoin/pull/31363#discussion_r2012730654 (rename `group_data` to `group_entry`)\r\n* https://github.com/bitcoin/bitcoin/pull/31363#discussion_r2015001561 (introduce `GetConnectedComponent` and use it in the txgraph fuzz test).\r\n* https://github.com/bitcoin/bitcoin/pull/31363#discussion_r2015003889 (typo in `FixLinearization`)\r\n* https://github.com/bitcoin/bitcoin/pull/32151#discussion_r2015764185 (more typos)",
+      "state": "closed",
+      "user": "sipa",
+      "created_at": "2025-03-27T03:02:18Z",
+      "updated_at": "2025-03-28T02:32:53Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32151",
+      "labels": [
+        "Mempool"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32151.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [instagibbs](https://github.com/bitcoin/bitcoin/pull/32151#issuecomment-2759347557), [glozow](https://github.com/bitcoin/bitcoin/pull/32151#pullrequestreview-2723274763) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-27T03:02:20Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "ACK https://github.com/bitcoin/bitcoin/pull/32151/commits/a52b53926b5c6a5b92255435e3c204cdf18665a2",
+          "created_at": "2025-03-27T20:02:16Z"
+        }
+      ]
+    },
+    {
+      "number": 32150,
+      "title": "coinselection: Optimize BnB exploration",
+      "body": "This PR rewrites the implementation of the BnB coinselection algorithm\r\nto skip the duplicate evaluation of previously visited input selections.\r\n\r\nIn the original implementation of BnB, the state of the search is\r\nbacktracked by explicitly walking back to the omission branch and then\r\ntesting again. This retests an equivalent candidate set as before, e.g.,\r\nafter backtracking from {ABC}, it would evaluate {AB_}, before trying\r\n{AB_D}, but {AB_} is equivalent to {AB} which was tested before.\r\n\r\nCoinGrinder tracks the state of the search instead by remembering which\r\nUTXO was last added and explicitly shifting from that UTXO directly to\r\nthe next, so after {ABC}, it will immediately move on to {AB_D}. We\r\nreplicate this approach here.\r\n\r\nAs fewer nodes are visited, this approach will enumerate more possible\r\ncombinations than the original implementation given the same limit for \r\niterations.",
+      "state": "open",
+      "user": "murchandamus",
+      "created_at": "2025-03-27T02:33:51Z",
+      "updated_at": "2025-08-21T17:26:18Z",
+      "comments": 16,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32150",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32150.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [yancyribbens](https://github.com/bitcoin/bitcoin/pull/32150#issuecomment-3181000371) |\n| Stale ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/32150#issuecomment-2972167678) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- \"als well as\" -> \"as well as\" [typo in “as well as”]  \n- \"matches the the effective value\" -> \"matches the effective value\" [duplicate “the”]\n\n<sup>drahtbot_id_4_m</sup>\n",
+          "created_at": "2025-03-27T02:33:54Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Concept ACK",
+          "created_at": "2025-03-27T16:05:49Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "I ran benchmarking on master and benchmarking on this branch since it's fairly large change.\r\n\r\nmaster:\r\n```\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|       43,633,696.00 |               22.92 |    0.1% |      0.48 | `CoinSelection`\r\n```\r\n\r\nhttps://github.com/bitcoin/bitcoin/pull/32150/commits/e2a4d86131e8f1661eb450c50b8072147965b111:\r\n```\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|       40,433,894.00 |               24.73 |    0.1% |      0.44 | `CoinSelection`\r\n```\r\n\r\nlooks like a marginal improvement in bechmarked performance.\r\n",
+          "created_at": "2025-03-27T16:12:30Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Rebased on #29532",
+          "created_at": "2025-04-01T00:05:57Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "> I ran benchmarking on master and benchmarking on this branch since it's fairly large change.\r\n\r\nIf I remember right the Coin Selection benchmark is rather non-representative. I have a todo to update it somewhere in my backlog.",
+          "created_at": "2025-04-02T16:14:13Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "> If I remember right the Coin Selection benchmark is rather non-representative. I have a todo to update it somewhere in my backlog.\r\n\r\nGood point.  I took a quick look, and the current benchmark runs BnB for only `4` iterations.  there are `1,000` clones and one non clone so most of the work is done by skipping clones which isn't very representative as you say.\r\n\r\nInstead of keeping this in your backlog, shouldn't there be an issue opened so it doesn't get overlooked?  Maybe someone else has the bandwidth to pick it up.  Possibly I could but I also have a large backlog of I'd like to work on.\r\n\r\nAlso, I note there is also `BnBExhaustion(benchmark::Bench& bench)` which is probably more \"representative\" although it also looks like you have a [TODO](https://github.com/bitcoin/bitcoin/pull/29532/files#diff-36ddaeb9e3a5c1aaaccd6b1ed6c770e8344e33dbfd4876b5f0726d84ab47cbab) to re-write that as well:\r\n\r\n> Worth noting that src/bench/coin_selection.cpp makes a copy of the make_hard_case function (commenting as such), so removal here may lead to confusion unless that benchmark is also updated.\r\n",
+          "created_at": "2025-04-03T16:04:18Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "The preceding PR https://github.com/bitcoin/bitcoin/pull/29532 got merged, so this is now ready for review.",
+          "created_at": "2025-05-08T21:57:54Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Ready for Review",
+          "created_at": "2025-06-12T19:12:54Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Sorry, I forgot to reply to this comment:\r\n\r\n> I think the last 2 commits \"opt: Skip evaluation of equivalent input sets\" and \"opt: Skip evaluation of equivalent input sets\" could be combined. The change the last commit makes is to the comment introduced in the commit before it, and removing a line introduced in the commit before it. We generally don't want to add code just to immediately remove it, so I think these can be squashed together.\r\n\r\nI think of the last two commits as two separate optimizations. The idea that you only have to explore all combinations with the first of several clones in itself can use explaining. The separate step to present the realization that we can skip any UTXO that ties the predecessor on effective value due to the way the UTXO sorting is tie-broken by minimal waste seemed easier to review. The second commit also adds six more lines of documentation and shows per the test that the iteration count is further reduced. I prefer to keep them as two commits.",
+          "created_at": "2025-06-14T02:58:14Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK cf36d1af18f1fdb2f9846634032f468d00d7ddfb",
+          "created_at": "2025-06-14T02:59:56Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "I think DrahtBot has had too much caffine, he keeps pinging me to review.",
+          "created_at": "2025-06-19T19:37:15Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "> Thanks for your review, @yancyribbens.\r\n\r\nSure, of course  It's on my TODO list to go over it again in more detail since I've really only done a surface level inspection so far.",
+          "created_at": "2025-06-21T21:52:30Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Fixed the merge conflict with #33060.",
+          "created_at": "2025-08-05T00:09:09Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `multiprocess, i686, DEBUG`: https://github.com/bitcoin/bitcoin/runs/47377999369</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by the failure of the \"coinselection_tests\" test.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-08-05T01:01:03Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "I reviewed this and so far it looks good.  I plan to give it one more pass over shortly to finish review.",
+          "created_at": "2025-08-10T22:11:17Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "ACK cdc25b417a1cf09f9b0d9a9bf197f853daa24cdb\r\n\r\nI also tested the updates on secondary group of tests I wrote and there where no unexpected failures.\r\n\r\nI still have mild preference to using a loop condition of while `tries < TOTAL_TRIES` instead of while `!is_done`, and then break when done.\r\n\r\nAs for variable naming on cosmetic note, I made a note of some alternate suggestions where I feel like it's shorter and/or more concise. (just a suggestion):\r\n\r\n`curr_amount -> selected_amount`\r\n`curr_selection_waste -> selection_waste`\r\n`curr_weight -> selection_weight`\r\n`next_utxo -> next_utxo_index`\r\n`is_done -> search_complete`\r\n`should_shift -> shift`\r\n`should_cut -> cut`\r\n",
+          "created_at": "2025-08-12T20:56:13Z"
+        }
+      ]
+    },
+    {
+      "number": 32149,
+      "title": "wallet, migration: Fix empty wallet crash",
+      "body": "Same as with a blank wallet (#28976), wallets with no legacy records (i.e. empty, non-blank, watch-only wallet) do not require to be migrated.\r\n\r\nSteps to reproduce the issue:\r\n\r\n1.- `createwallet \"empty_wo_noblank_legacy_wallet\" true false \"\" false false`\r\n2.- `migratewallet`\r\n\r\n```\r\nwallet/wallet.cpp:4071 GetDescriptorsForLegacy: Assertion `legacy_spkm' failed.\r\nAborted (core dumped)\r\n```",
+      "state": "closed",
+      "user": "pablomartin4btc",
+      "created_at": "2025-03-27T02:32:08Z",
+      "updated_at": "2025-04-17T21:40:35Z",
+      "comments": 20,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32149",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32149.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [furszy](https://github.com/bitcoin/bitcoin/pull/32149#pullrequestreview-2744240527), [BrandonOdiwuor](https://github.com/bitcoin/bitcoin/pull/32149#pullrequestreview-2748830525), [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32149#issuecomment-2787720175), [fjahr](https://github.com/bitcoin/bitcoin/pull/32149#issuecomment-2789996554), [achow101](https://github.com/bitcoin/bitcoin/pull/32149#issuecomment-2791240970) |\n| Concept ACK | [rkrux](https://github.com/bitcoin/bitcoin/pull/32149#pullrequestreview-2736045340) |\n| Stale ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/32149#issuecomment-2773703041) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31423](https://github.com/bitcoin/bitcoin/pull/31423) (wallet: migration, don't create spendable wallet from a watch-only legacy wallet by furszy)\n* [#30343](https://github.com/bitcoin/bitcoin/pull/30343) (wallet, logging: Replace WalletLogPrintf() with LogInfo() by ryanofsky)\n* [#29124](https://github.com/bitcoin/bitcoin/pull/29124) (wallet: Automatically repair corrupted metadata with doubled derivation path by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-27T02:32:12Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "_<ins>Updates</ins>:_\r\n- Addressed @furszy's feedback.",
+          "created_at": "2025-03-27T16:55:18Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "_<ins>Updates</ins>:_\r\n- Addressed @furszy's [feedback](https://github.com/bitcoin/bitcoin/pull/32149#discussion_r2018614237).",
+          "created_at": "2025-03-28T16:28:43Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "_<ins>Updates</ins>:_\r\n- Addressed [feedback](https://github.com/bitcoin/bitcoin/pull/32149#discussion_r2019486082).",
+          "created_at": "2025-03-29T11:38:25Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "_<ins>Updates</ins>:_\r\n- Addressed @fjahr's feedback.",
+          "created_at": "2025-03-31T10:28:08Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "Fixed a typo.",
+          "created_at": "2025-03-31T14:12:10Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "re-ACK eb4333c8aa4a8f1a66ecbe5c48dbe15467332864",
+          "created_at": "2025-03-31T14:21:38Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "ACK eb4333c8aa4a8f1a66ecbe5c48dbe15467332864\r\n\r\nTested that this fixes the issue in the PR description and also fixes another issue, #32112 (see https://github.com/bitcoin/bitcoin/issues/32112#issuecomment-2770913130). Reviewed and manually verified that the test case added here in `test/functional/wallet_migration.py` catches the issue in master. This refactor also improves readability of `LoadLegacyWalletRecords()`.\r\n\r\n",
+          "created_at": "2025-04-02T00:05:25Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "_<ins>Updates</ins>:_\r\n- Addressed @davidgumberg's, @rkrux's and @maflcko's feedbacks (thanks all!)",
+          "created_at": "2025-04-02T16:11:22Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "Sorry for the mess, I thought there was a failure (individual commits) due to missing rebase but I checked it was unrelated so reverted it back.",
+          "created_at": "2025-04-02T16:49:22Z"
+        },
+        {
+          "user": "w0xlt",
+          "body": "Code review ACK https://github.com/bitcoin/bitcoin/pull/32149/commits/aa7ec12d081b6ca34f5550141214810383df5b8d",
+          "created_at": "2025-04-02T20:46:52Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "_<ins>Updates</ins>:_\r\n- Addressed [feedback](https://github.com/bitcoin/bitcoin/pull/32149#discussion_r2025328516).",
+          "created_at": "2025-04-03T10:49:13Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "Rebased to fix test-each-commit CI failure.",
+          "created_at": "2025-04-03T10:57:05Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "> the second commit has a typo in its title\r\n\r\nFixed.",
+          "created_at": "2025-04-03T15:17:35Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "untested reACK https://github.com/bitcoin/bitcoin/commit/0f602c5693ef5d0c63b1e5b7dc0990dced3655d6",
+          "created_at": "2025-04-08T21:37:04Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "re-ACK 0f602c5693ef5d0c63b1e5b7dc0990dced3655d6",
+          "created_at": "2025-04-09T14:47:53Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 0f602c5693ef5d0c63b1e5b7dc0990dced3655d6",
+          "created_at": "2025-04-10T00:14:36Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Looks like this broke the wallet migration benchmark: #32277.",
+          "created_at": "2025-04-15T10:45:01Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> Looks like this broke the wallet migration benchmark: #32149.\r\n\r\nThat's this PR, you meant to link to this  I guess: #32277",
+          "created_at": "2025-04-15T10:53:40Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "checking...",
+          "created_at": "2025-04-15T11:31:29Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32156,
+      "title": "Consensus code without testing",
+      "body": "https://github.com/bitcoin/bitcoin/pull/32155\n\nThis pull request is not discussed, reviewed, tested etc. enough to be merged in core. \n\nI cannot comment in https://github.com/bitcoin/bitcoin/pull/32155 because they have blocked me on GitHub.",
+      "state": "closed",
+      "user": "1440000bytes",
+      "created_at": "2025-03-27T21:35:01Z",
+      "updated_at": "2025-07-31T19:15:32Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32156",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "sipa",
+          "body": "That PR is not a consensus change.",
+          "created_at": "2025-03-27T21:49:29Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "The pull request was opened two hours ago. It would be surprising if anyone looked at it, let alone review and test. So it not being reviewed/tested/merged is normal and expected and there is no need to open an issue about it.",
+          "created_at": "2025-03-27T21:49:36Z"
+        },
+        {
+          "user": "1440000bytes",
+          "body": "> It would be surprising if anyone looked at it, let alone review and test. So it not being reviewed/tested/merged is normal and expected and there is no need to open an issue about it.\n\nI am the only bitcoin core contributor who cannot comment in the pull request. So it makes sense for me to create a new issue.\n\nI might do it in future as well.",
+          "created_at": "2025-03-27T21:57:54Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> I might do it in future as well\n\nTry finding a way that isn't so hostile, not everything's an attack...",
+          "created_at": "2025-03-27T22:08:16Z"
+        },
+        {
+          "user": "1440000bytes",
+          "body": "Sorry @sipa @maflcko ",
+          "created_at": "2025-03-27T22:16:55Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@1440000bytes hopefully I've addressed some of your concerns here: https://github.com/bitcoin/bitcoin/pull/32155#issuecomment-2760609125\n\nI'll keep an eye on this thread as well.",
+          "created_at": "2025-03-28T09:34:34Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 7,
+    "issues": 1
+  }
+}

@@ -1,0 +1,316 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:13:08.969590+00:00",
+  "date": "2025-01-29",
+  "pull_requests": [
+    {
+      "number": 31760,
+      "title": "test: make sure we are on sync with a peer before checking if they have sent a message",
+      "body": "p2p_orphan_handling checks whether a message has not been requested slightly too soon, making the check always succeed. This passes unnoticed since the expected result is for the message to not have been received, but it will make the test not catch a relevant change that should make it fail.\r\n\r\nAn easy way to check this is the case is to modify one of the test cases to force a request within the expected time, and check how the request is not seen. After the change, the test would crash as expected:\r\n\r\n```diff\r\nindex 963d92485c..30ab5f2035 100755\r\n--- a/test/functional/p2p_orphan_handling.py\r\n+++ b/test/functional/p2p_orphan_handling.py\r\n@@ -186,9 +185,12 @@ class OrphanHandlingTest(BitcoinTestFramework):\r\n         parent_inv = CInv(t=MSG_WTX, h=int(tx_parent_arrives[\"tx\"].getwtxid(), 16))\r\n         assert_equal(len(peer_spy.get_invs()), 0)\r\n         peer_spy.assert_no_immediate_response(msg_getdata([parent_inv]))\r\n+        txid = 0xdeadbeef\r\n+        peer_spy.send_and_ping(msg_inv([CInv(t=MSG_WTX, h=txid)]))\r\n\r\n         # Request would be scheduled with this delay because it is not a preferred relay peer.\r\n         self.nodes[0].bumpmocktime(NONPREF_PEER_TX_DELAY)\r\n+        peer_spy.assert_never_requested(int(txid))\r\n         peer_spy.assert_never_requested(int(tx_parent_arrives[\"txid\"], 16))\r\n         peer_spy.assert_never_requested(int(tx_parent_doesnt_arrive[\"txid\"], 16))\r\n         # Request would be scheduled with this delay because it is by txid.\r\n```\r\n\r\nIt is worth noting that this is not seen in the cases where the message is expected to be received, because in such cases `assert_never_requested` is always after a `wait_....` method, which is already waiting for the node to sync on their end.\r\n",
+      "state": "closed",
+      "user": "sr-gi",
+      "created_at": "2025-01-29T19:47:40Z",
+      "updated_at": "2025-02-06T05:02:25Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31760",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31760.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [i-am-yuvi](https://github.com/bitcoin/bitcoin/pull/31760#pullrequestreview-2583021496), [instagibbs](https://github.com/bitcoin/bitcoin/pull/31760#pullrequestreview-2596001593), [glozow](https://github.com/bitcoin/bitcoin/pull/31760#pullrequestreview-2597653967) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-01-29T19:47:43Z"
+        }
+      ]
+    },
+    {
+      "number": 31759,
+      "title": "test: fixes p2p_ibd_txrelay wait time",
+      "body": "`p2p_ibd_txrelay` expects no GETDATA to have been received by a peer after announcing a transaction. The reason is that the node is doing IBD, so transaction requests are not replied to. However, the way this is checked is wrong, and the check will pass even if the node **was not** in IBD.\r\n\r\nThis is due to the mocktime not being properly initialized, so the check is always performed earlier than it should, making it impossible for the request to be there.\r\n\r\nThis can be checked by modifying the test so the peer **is not doing IBD**, and checking how the test succeeds on that assert (even though it fails later on, given the nature of the test):\r\n\r\n```diff\r\nindex 882f5b5c13..3a69ae5860 100755\r\n--- a/test/functional/p2p_ibd_txrelay.py\r\n+++ b/test/functional/p2p_ibd_txrelay.py\r\n@@ -34,7 +34,7 @@ NORMAL_FEE_FILTER = Decimal(100) / COIN\r\n\r\n class P2PIBDTxRelayTest(BitcoinTestFramework):\r\n     def set_test_params(self):\r\n-        self.setup_clean_chain = True\r\n+        # self.setup_clean_chain = True\r\n         self.num_nodes = 2\r\n         self.extra_args = [\r\n             [\"-minrelaytxfee={}\".format(NORMAL_FEE_FILTER)],\r\n@@ -43,9 +43,11 @@ class P2PIBDTxRelayTest(BitcoinTestFramework):\r\n\r\n     def run_test(self):\r\n         self.log.info(\"Check that nodes set minfilter to MAX_MONEY while still in IBD\")\r\n-        for node in self.nodes:\r\n-            assert node.getblockchaininfo()['initialblockdownload']\r\n-            self.wait_until(lambda: all(peer['minfeefilter'] == MAX_FEE_FILTER for peer in node.getpeerinfo()))\r\n+        # for node in self.nodes:\r\n+        #     assert node.getblockchaininfo()['initialblockdownload']\r\n+        #     self.wait_until(lambda: all(peer['minfeefilter'] == MAX_FEE_FILTER for peer in node.getpeerinfo()))\r\n```",
+      "state": "closed",
+      "user": "sr-gi",
+      "created_at": "2025-01-29T19:27:00Z",
+      "updated_at": "2025-02-06T16:13:33Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31759",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31759.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [i-am-yuvi](https://github.com/bitcoin/bitcoin/pull/31759#pullrequestreview-2582919327), [glozow](https://github.com/bitcoin/bitcoin/pull/31759#pullrequestreview-2597720235) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-01-29T19:27:03Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "meta: do we ever want a test to bumpmocktime without setting it first? ",
+          "created_at": "2025-02-05T14:57:46Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "@glozow managed to misread the changeset, nevermind",
+          "created_at": "2025-02-06T16:13:32Z"
+        }
+      ]
+    },
+    {
+      "number": 31758,
+      "title": "test: deduplicates p2p_tx_download constants",
+      "body": "Some of the networking constants defined in p2p_tx_download.py are more generally defined in p2p.py",
+      "state": "closed",
+      "user": "sr-gi",
+      "created_at": "2025-01-29T19:13:49Z",
+      "updated_at": "2025-02-14T09:47:29Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31758",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31758.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [i-am-yuvi](https://github.com/bitcoin/bitcoin/pull/31758#issuecomment-2640833530), [danielabrozzoni](https://github.com/bitcoin/bitcoin/pull/31758#pullrequestreview-2615727315), [tdb3](https://github.com/bitcoin/bitcoin/pull/31758#pullrequestreview-2616521405), [maflcko](https://github.com/bitcoin/bitcoin/pull/31758#issuecomment-2658397438) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n",
+          "created_at": "2025-01-29T19:13:53Z"
+        },
+        {
+          "user": "sr-gi",
+          "body": "@tdb3 I de-duplicated even more, plus renamed some of the remaining ones to match the actual names in `txdownloadman.h` (and updated the comment referring to `net_processing`, given the constants do not live there anymore).\r\n\r\nAs mentioned in-line, notice how `INBOUND_PEER_TX_DELAY` and `NONPREF_PEER_TX_DELAY` refer to the same concept. The latter was introduced in #20171 instead of remaining (or re-using) the former.",
+          "created_at": "2025-01-30T17:17:35Z"
+        },
+        {
+          "user": "sr-gi",
+          "body": "Rebased to fix merge conflicts.\r\n\r\nThanks for the review @tdb3 @danielabrozzoni @i-am-yuvi ",
+          "created_at": "2025-02-06T15:56:29Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "re-ACK 0a02e7fdeaca26455b3710ef76b11101ac816e53",
+          "created_at": "2025-02-06T19:42:50Z"
+        },
+        {
+          "user": "sr-gi",
+          "body": "@tdb3 @danielabrozzoni  can you give this another look? The changes should be trivial ",
+          "created_at": "2025-02-13T16:28:07Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review ACK 0a02e7fdeaca26455b3710ef76b11101ac816e53 🔖\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK 0a02e7fdeaca26455b3710ef76b11101ac816e53 🔖\r\njwepvbYV1gQLs1UZ9KxP6py22frJ6KEnwpkEv92Yl2aCC/5z7nmNDGrLnib/Rr1nVykvGBpPblkyvCq8YjX2AQ==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-02-14T06:34:57Z"
+        }
+      ]
+    },
+    {
+      "number": 31757,
+      "title": "wallet: fix crash on double block disconnection",
+      "body": "The wallet crashes if it processes the same block disconnection event twice in a row due\r\nto an incompatible coinbase transaction state.\r\nThis happens because `disconnectBlock` provides `TxStateInactive` without the \"abandoned\"\r\nflag for coinbase transactions to `SyncTransaction`, while `AddToWallet()` internally modifies\r\nit to retain the abandoned state.\r\n\r\nThe crash flow is as follows:\r\n1) On the first disconnection, the transaction state transitions from \"confirmed\" to\r\n\"inactive,\" bypassing the state equality check since the provided state differs. Then,\r\n`AddToWallet` internally updates the state to \"inactive + abandoned\"\r\n\r\n2) On the second disconnection, as we provide only the \"inactive\" state\r\nto `SyncTransaction()`, the state equality assertion fails and crashes the wallet.\r\n\r\nReviewers Note:\r\nThe crash can easily be replicated by cherry-picking the test commit in master.",
+      "state": "closed",
+      "user": "furszy",
+      "created_at": "2025-01-29T18:46:19Z",
+      "updated_at": "2025-06-18T08:41:22Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31757",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31757.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [mzumsande](https://github.com/bitcoin/bitcoin/pull/31757#pullrequestreview-2662599068), [rkrux](https://github.com/bitcoin/bitcoin/pull/31757#pullrequestreview-2663779609), [pinheadmz](https://github.com/bitcoin/bitcoin/pull/31757#pullrequestreview-2674634683) |\n| Concept ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/31757#issuecomment-2660425278), [naiyoma](https://github.com/bitcoin/bitcoin/pull/31757#pullrequestreview-2657287497) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#30221](https://github.com/bitcoin/bitcoin/pull/30221) (wallet: Ensure best block matches wallet scan state by achow101)\n* [#29500](https://github.com/bitcoin/bitcoin/pull/29500) (test: create assert_not_equal util by kevkevinpal)\n* [#27865](https://github.com/bitcoin/bitcoin/pull/27865) (wallet: Track no-longer-spendable TXOs separately by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-01-29T18:46:23Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/36373842434</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-01-29T19:01:12Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Concept ACK",
+          "created_at": "2025-02-14T22:52:23Z"
+        },
+        {
+          "user": "furszy",
+          "body": "Ended up changing the testing approach, opting for a functional test over a unit test due to its reduced maintenance costs across code refactorings. Made a few modifications to mzumzande's #31824 functional tests.",
+          "created_at": "2025-02-18T22:16:34Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #32589.",
+          "created_at": "2025-06-18T08:41:22Z"
+        }
+      ]
+    },
+    {
+      "number": 31755,
+      "title": "doc: Add test coverage troubleshooting tip",
+      "body": "This PR adds troubleshooting information to explain how to overcome two errors that may arise when running the tests with coverage as described in `doc/developer-notes.md`.\r\n\r\nSpecifically, running the `cmake -P build/Coverage.cmake` step may produce geninfo mismatch errors of the following sort (Ubuntu 24.04, GNU 13.3.0 compiler, LCOV version 2.0-1):\r\n\r\n```\r\n$ cmake -B build -DCMAKE_BUILD_TYPE=Coverage\r\n$ cmake --build build\r\n$ cmake -P build/Coverage.cmake\r\n\r\ngeninfo: ERROR: mismatched end line for _ZN7Num30723SerI10DataStreamEEvRT_RKS_ at /home/espi3/src/bitcoin/src/crypto/muhash.h:62: 67 -> 62\r\n        (use \"geninfo --ignore-errors mismatch ...\" to bypass this error)\r\nCMake Error at build/CoverageInclude.cmake:45 (execute_process):\r\n  execute_process failed command indexes:\r\n\r\n    1: \"Child return code: 1\"\r\n\r\nCall Stack (most recent call first):\r\n  build/Coverage.cmake:5 (include)\r\n``````\r\n\r\nThis may be due to multiline macros such as `SERIALIZE_METHODS`, so I would expect others to run into the same issue.\r\n\r\nAdditionally, after suppressing the mismatch errors, I get a geninfo negative count error:\r\n\r\n```\r\ngeninfo: ERROR: Unexpected negative count '-185' for /home/espi3/src/bitcoin/src/secp256k1/src/field_5x52_impl.h:183.\r\n        Perhaps you need to compile with '-fprofile-update=atomic\r\n        (use \"geninfo --ignore-errors negative ...\" to bypass this error)\r\nCMake Error at build/Coverage.cmake:21 (execute_process):\r\n  execute_process failed command indexes:\r\n\r\n    1: \"Child return code: 1\"\r\n```\r\n\r\nI don't know the cause, and don't yet know enough C++ to investigate it properly. This PR takes the approach of describing a workaround.\r\n",
+      "state": "closed",
+      "user": "espi3",
+      "created_at": "2025-01-29T08:21:47Z",
+      "updated_at": "2025-02-05T04:33:46Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31755",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31755.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n",
+          "created_at": "2025-01-29T08:21:50Z"
+        },
+        {
+          "user": "espi3",
+          "body": "Closing, as the troubleshooting tips in this PR are too narrow. I ran the same commands on MacOS and got an entirely different set of lcov errors.",
+          "created_at": "2025-02-05T04:33:30Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 31756,
+      "title": "RFC: Adding bitcoin-{node,gui} binaries for IPC in 30.0 release",
+      "body": "This issue is open to discuss whether to include `bitcoin-node` and `bitcoin-gui` binaries supporting an `-ipcbind` option in a release. This was originally intended to happen in the [29.0](https://github.com/bitcoin/bitcoin/issues/31029) release but got postponed after an [irc discussion](https://www.erisian.com.au/bitcoin-core-dev/log-2025-01-23.html#l-303) before that release. The change currently implementing it is  #31802.\n\n---\n\nI think it would be helpful if people who had concerns about including `bitcoin-node` and `bitcoin-gui` binaries in a release (assuming they are not in `bin/` and not on the `PATH`, see #31679) could clarify what their concerns are in practical terms. For example:\n\n1. Is the primary concern that the new `-ipcbind` option might not work well, or might cause instability?\n2. Or is it that the new `bitcoin-node` and `bitcoin-gui` executables might have problems even if `-ipcbind` is not specified?\n3. Or is it a signalling issue, like if we released an experimental feature, it could cause backlash later if the feature had to be changed or removed?\n4. Or is adding opt-in, experimental features just always bad? Is it bad to add any new feature in a disabled state and label it as new and less tested and likely to change, and ask users to help test and improve it?\n5. Or is the concern not about bad external outcomes but about bad internal outcomes? For example that treating features as \"experimental\" could lower the bar for code review.\n\nI'd like to know what the biggest concerns are (from @darosior @fanquake @theuni @sipa @stickies-v or anyone else) not to have a debate about them but to know what I / we should be working on and prioritizing to address them. I would appreciate concrete input here and would like to know what, specifically, people are collectively or individually worried about.\n\nFor clarity, I do want to describe the actual release change being proposed in #31802 and the steps we have taken to reduce technical risks of this change:\n\n1. The change introduces two new `bitcoin-node` and `bitcoin-gui` binaries that behave the same as existing `bitcoind` and `bitcoin-qt` binaries, and even contain the **same compiled objects**, they are just linked differently.\n2. The new binaries have **only two differences in behavior** from existing binaries: (1) They introduce a new `-ipcbind` option **disabled by default**, that, if specified, will listen on a unix socket and expose a small [mining interface](https://github.com/bitcoin/bitcoin/blob/master/src/ipc/capnp/mining.capnp). And (2) they they have an [`echoipc`](https://github.com/bitcoin/bitcoin/blob/b432e367427f1f9fe0f0a5800e31e496f00cd38d/src/rpc/node.cpp#L307-L343) RPC method implementation that will test spawning and communicating with a subprocess. There are no other differences. The new binaries behave exactly the same as the existing ones unless you are actively using new features. [#10102](https://github.com/bitcoin/bitcoin/pull/10102) would create bigger differences but [#10102](https://github.com/bitcoin/bitcoin/pull/10102) is not targeted for 29.0.\n3. The new mining interface has smallest possible [implementation](https://github.com/bitcoin/bitcoin/blob/b432e367427f1f9fe0f0a5800e31e496f00cd38d/src/node/interfaces.cpp#L945-L997), sharing as much code as possible with RPC's, and exposing as many features as it is possible to expose with RPC's.\n4. The new binaries have two new dependencies: [capnproto](https://capnproto.org/) and [libmultiprocess](https://github.com/chaincodelabs/libmultiprocess). Since there is risk in adding new dependencies, we are creating separate binaries specifically so nobody who does not actually want these dependencies will have them.\n5. To further isolate the new dependencies, no code outside of the [`src/ipc/`](https://github.com/bitcoin/bitcoin/tree/master/src/ipc) directory and `libbitcoin_ipc.a` library includes them or links against them.\n\nBecause #31802 adds a feature that is isolated in the ways described above and disabled by default, it seems very low risk to me. It actually seems less risky than the average PR.\n\n---\n\nThis issue is part of the [process separation project](https://github.com/bitcoin/bitcoin/issues/28722).",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-01-29T17:25:46Z",
+      "updated_at": "2025-10-28T08:01:46Z",
+      "comments": 20,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31756",
+      "labels": [
+        "Brainstorming"
+      ],
+      "comment_list": [
+        {
+          "user": "ryanofsky",
+          "body": "Responding to fanquake's [post](https://github.com/bitcoin/bitcoin/pull/30975#issuecomment-2610191420) a few minutes before the meeting which was very useful and constructive, but also one sided and I think did not result in a balanced discussion at the meeting.\n\n> Given that merging this PR for `29.x` is going to be discussed further, I wanted to leave a few general thoughts here.\n>\n> #### The mining interface isn't finished yet?\n> Looking at #31098, there are still un-merged changes in the \"To complete the interface list\" (also unclear if there are more PRs missing from that list). It seems premature to do this if the thing that is meant to be utilising it isn't even finished.\n\n#31283 introducing `waitNext()` is the only unmerged change, but it is critical and multiprocess binaries should not be released without it. It implements a feature that's had a lot of iteration and discussion (there and in a previous closed PR) and finally became ready for review 3 weeks ago.\n\n> #### Development process\n> Big new features / changes are done early after a branch off, so they have plenty of time to sit, be tested, devs can adjust etc. If this is merged now, it's close to the last minute, with basically no real testing from inside the project.\n\nThis is very vague to me. I don't have a conception what \"sitting\" and \"adjusting\" mean in the context of #30975 because for vast majority of users #30975 has no effect. It seems less risky than the PRs we merge every day which contain code changes in actual binaries used by normal users.\n\nThe only people affected by #30975 should be people going out of their way to use the new binaries. So maybe the idea is that these people would be better off without the binaries? But in any case I think it would good to be more clear and specific when discussing this.\n\n> #### Known bugs / test failures:\n> I don't think we should be starting to ship / turning something on by default, when there are multiple known intermittent test failures, or other outstanding issues. i.e\n\nAgree, but nothing is turned on by default. [EDIT: nothing is turned on by default for users. but fanquake was probably referring to the default for new CI variants here so his statement is correct.] The intermittent test failures you are referencing were reported one time, 3 months ago in https://github.com/bitcoin/bitcoin/issues/31151. At that time I debugged the issue as much as I could given the available information and waited to see if the issue would ever happen again. Then there was another report, last Tuesday, which led me to try to reproduce the failure myself, which I was able to do and posted a fix Thursday morning.\n\nThe other issues referenced are issues in dead code, or not related to this release. I honestly have not been focusing on them. Other parts of https://github.com/bitcoin/bitcoin/issues/31098 have seemed more critical.\n\n> Some of these are months old, without a fix. That's just opting the project into random CI failures.\n\nGiven what i described above, I don't think that is an accurate characterization of what happened or what is likely to happen.\n\n> #### Build issues:\n> Basic usage of [building libmultiprocess yourself](https://github.com/chaincodelabs/libmultiprocess/blob/master/doc/install.md), on the current Ubuntu LTS release (24.04), for use with Core, doesn't currently work:\n\nThanks for reporting this. I made an issue for it https://github.com/chaincodelabs/libmultiprocess/issues/132 which is currently fixed.\n\n> Having to work around this was also mentioned here: [#10102 (comment)](https://github.com/bitcoin/bitcoin/pull/10102#issuecomment-2515554249).\n\nThanks, I misread that part of the comment. I thought it it was refering to an older issue https://github.com/chaincodelabs/libmultiprocess/pull/119 which was fixed and did not realize it was referring to a new issue.\n\n> We can likely work around this ourselves, but something this basic should be fixed before requiring developers to use this library.\n\nThis was easy to fix. I'm sorry I missed the first report.\n\n> Along with reporting & upstreaming fixes to what are now new (hard) dependencies for us.\n\nFair enough but just to be clear this is a bug specifically in a debian patch of capnproto. Capnproto does not actually have a bug, and if you install an unpatched capnproto on a debian system you will not see this problem.\n\n> #### Vendoring libmultiprocess\n> I think if we are going to do this, we should be vendoring libmultiprocess the same as secp256k1 or leveldb. Otherwise the dev experience is awkward, most will likely be building without, or might be forced to use depends (see above) etc.\n>\n> #### The default should (properly) change\n> `WITH_MULTIPROCESS=ON` should become the default, and a missing library  should be an error (unless `WITH_MULTIPROCESS=OFF` is passed). Changing the default in depends is not enough, as we just end up with this awkward middle ground, where devs or outside builders are likely no-longer even building/testing what we are actually shipping to users.\n\n@theuni said something similar in the IRC meeting, and and upped the ante with \"It'd be more consistent with our process to turn it on by default at the beginning of a release cycle, have all devs dogfood it for 6 months, then discuss shipping it once we're all on the same page.\"\n\nHonestly this sounds like a great process to have, and I wish somebody mentioned these ideas when we were talking about this release months ago, because I was able to implement vendoring pretty easily in just a few hours (with a huge amount of help from chatgpt deciphering the depends makefile and figuring out git subtree commands) in https://github.com/chaincodelabs/libmultiprocess/pull/136 and https://github.com/bitcoin/bitcoin/pull/31741. Even now, building multiprocess binary is enabled in the \"dev-mode\" preset, and flipping the non-dev-mode default will be easy once a vendoring PR is merged.\n\nI do think the discussion about process is detached from the reality of this PR though. I think if the vendoring was present earlier and cmake option was enabled by default it would have increased dogfooding, but slightly and not meaningfully.  Because unless developers actively use the new binaries with the `-ipcbind` flag or `echoipc`` features they are just testing the build or just testing binaries linked against the libbitcoin_ipc.a library without actually running any of code in that library.\n\n> #### (Longer term) Packaging has not been decided on\n> #31375 I don't think delaying figuring that out before we start using/shipping it, is a good idea. I think it's exactly the kind of thing we should have a rought/good idea about, before making substantial change to what the project is doing.\n\nThis is another claim that doesn't seem accurate to me. I don't think anything is undecided. #31375 just needs normal review.\n\n> #### A a new (core) dependency with a bus factor of 1\n> Libmultiprocess was written, and is currently maintained by Russ. It is unclear how many of the other developers in this project have ever (seriously) looked at the code. My understanding is it might be 1 or 2 others. For something that is going to become a core part of the binaries we ship, and external interfaces we provide, it'd be great if that wasn't the case.\n\nIt seems pretty obvious to me that an unreleased feature will have a small bus factor, and the way to fix that is to release the feature and see if it gains adoption. There will be a transition period. During that period if I get hit by bus, this will be sad, but course of action should be fairly straightforward. You can announce, \"Sadly, the IPC code in bitcoin core has lost its most active maintainer, and as a result, unless a new volunteer steps up and is able to handle issues that arise, IPC features are planned to be deprecated and disabled by default in the next release, and removed in the release after that.\" Then, if IPC features are being used for useful things, someone from within the project or outside will step up. And if someone does not step up, that fact itself would be telling and a sign that IPC features are not presently valuable or worth the costs and the right choice is to remove them.\n\n> #### Is this a new external API?\n> Is the mining interface exposed on bitcoin-node now considered a (stable) external API? If this ships, what sort of guarantees are we giving to consumers?\n\nI think it could be declared stable now and it would be easy to be backwards compatible. But when this was last discussed at coredev there didn't seem to be a strong appetite to declare it stable. I think any decision here would be fine.\n\n> #### Who will be harmed by waiting an extra release or two cycle for things to stabilize?\n> It'd be good to have a better idea of where the demand is coming from, such that we need to ship this now.\n\nI think I would be harmed by getting less feedback on IPC and multiprocess features than I would if there was a release. I think the mining API would also be worse off for not getting more usage and testing. Maybe these aren't the biggest concerns because the practical risks of #30975 are too great. I would like to see the risks of #30975 clearely articulated though. I tried to steelman them at top of this issue, but it would be better to hear from people who actually think these risks are significant.\n",
+          "created_at": "2025-01-29T17:27:52Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Sorry about changing the title and scope of #30975 from under you right before you opened this. It now only changes the CI to run multiprocess everywhere and avoids enabling it by default (including it in the release, since this follows what's in depends). But the latter of course is what the main discussion is about.",
+          "created_at": "2025-01-29T17:51:41Z"
+        },
+        {
+          "user": "darosior",
+          "body": "I'm not sure i'm the most legitimate to give my opinion here, but since you asked me explicitly i will share.\n\nFirst of all why is the default position that we should ship a new binary on short notice right before feature freeze, and people who are not comfortable with this should argue against it? It seems backward to me. The default should be business as usual and if people want to introduce new binaries for the project to release, they should be arguing for it.\n\nIf you start from this default position i think the feedback you received is objectively more than reasonable:\n1. What is the rush?\n2. Shouldn't we actually finish the project before releasing binaries enabling it?\n3. Shouldn't we get more people to run, let alone test, this before releasing binaries enabling it?\n\nSure, deciding as a project what binaries we should release is \"process\". But i don't think this feedback is \"detached from reality\".\n\n> not to have a debate about them but to know what I / we should be working on and prioritizing to address them.\n\nUnfortunately it seems to me what's needed isn't really more work for you, but more reviews of multiprocess from other contributors. More review from key people would allow to merge this work, then enable it and eventually ship it.\n\n> concrete input here and [..] what, specifically, people are [..] worried about.\n\nConcretely, i am personally \"worried about\" shipping binaries that have not received enough review and testing from other contributors. \"Worry\" may not be the right word, let's say i don't think it's a good idea.\n\nUltimately what @Sjors wants from Bitcoin Core releasing binaries, which i understand, is to break the chicken-and-egg problem of getting adoption of Stratum v2. The project is asking for users and users won't adopt it until they have the \"Bitcoin Core seal of approval\". And given the money they have on the line, it makes total sense!\n\nBut just releasing under-reviewed and under-tested binaries under the Bitcoin Core organization is most likely not going to have the intended effect, and erode trust in the said \"Bitcoin Core seal of approval\". What these companies want is quality assurance, there is no getting around proper review of the multiprocess project and proper testing of binaries to be shipped.",
+          "created_at": "2025-01-29T19:15:54Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Just to clarify it sounds like your opinion has nothing to to with ipc or process separation a mining interface.\nYou are just opposed as a matter of principle to releasing any new set of binaries including any experimental feature? This is a new pov to me if I am understanding it correctly so thanks for expressing ",
+          "created_at": "2025-01-29T19:44:33Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Yes, i would say the same about another feature in the same stage of development.",
+          "created_at": "2025-01-29T21:03:37Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> First of all why is the default position that we should ship a new binary on short notice right before feature freeze\n\n#30975 was opened late September and from the start had a clear intention of shipping these binaries in a release (I only reduced the scope yesterday). This goes back to several discussions in the months before that, including [at core dev](https://btctranscripts.com/bitcoin-core-dev-tech/2024-10/multiprocess-binaries) (the minutes aren't precise, so don't take them as gospel).\n\nSo it wasn't short notice. However, over the months review was limited to a small group of people. It wasn't until last week that it was discussed again in a larger setting. At that point we were getting pretty close to the release, so it does make sense to me to wait for the next one.\n\n@darosior the chicking-egg problem has two stages:\n\n1. Getting people to test Sv2\n2. Getting bigger companies to use it\n\nThe \"seal of approval\" argument is important for (2), but we're not there yet.\n\nIn the shorter run I'm more worried about (1). I think the main barrier to increased testing is that Stratum v2 has many moving parts. It makes deployment difficult and also just causes cognitive overload.\n\nThe [Getting Started guide](https://stratumprotocol.org/getting-started/) now includes an instruction to download self-sign a `bitcoind` binary that I ship. This adds extra confusion.\n\nI would like to see that instruction change to \"make sure you have Bitcoin Core v29/30+ and add -ipcconnect=unix to your config\". It can be accompanied by a warning that it's experimental.\n\nBecause Stratum v2 has so many moving parts it makes sense to package it in something like Umbrel or startOS. But this is made difficult by the need to manage two separate Bitcoin Core installations, one of which from a non-official source and unsigned.\n\nSince you can only run one instance of Bitcoin Core at a time, it means that when they're running my fork to mine, that also has access to any wallet they might use.\n\nA selling point for DATUM is its lower complexity, just one binary that works with Bitcoin Core (or Knots). And indeed they already have Umbrel integration: https://apps.umbrel.com/app/datum\n\nI could imagine SRI re-implementing my Template Provider https://github.com/Sjors/bitcoin/pull/48 in rust and then bundeling it with the Job Declarator Client and Translator roles into a single binary that would be just as easy to deploy on Umbrel. But not until we ship a release that allows this thing to connect via IPC.",
+          "created_at": "2025-01-30T08:23:03Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Thanks again for clarifying your concerns @darosior. Hopefully Sjors post added background and answered the specific questions you asked. I just wanted to respond to two things:\n\n> First of all why is the default position that we should ship a new binary on short notice right before feature freeze\n\nI think you can be assured that this is not the case. As a rule controversial PRs do not get merged. I'm just trying to get to the bottom of why #31756 + eb41f92c0889708045ce0a30c6d0f8d43cecd6d5 was controversial because with all the precautions we took listed in the issue description, it seemed to me less risky than the average PR, not more risky.\n\n> Sure, deciding as a project what binaries we should release is \"process\". But i don't think this feedback is \"detached from reality\".\n\nTalking about process is fine. My problem with the IRC discussion last week is that it was only talking about process without connecting it to specific and real possible outcomes. That's what I meant by detached from reality.\n\nOf course not everybody perceives the exact same reality. Your reference to a \"seal of approval\" seems to be describing a reality where features are developed, dogfooded internally, and then either ready for external use and included in a release, or not ready, and released/not released is the only distinction we should make.\n\nIn my reality, there is a vast spectrum of software readiness, and we should have more than a simple released/not released binary state. I think there should be a released but experimental state, where we can share features with an opt-in set of users before recommending them to be used more widely. I think this is particularly necessary for a mining API feature where we need external feedback and testing to make it stable and to even know if it is working.\n\nThere is also an older tradition in open source I believe in where users and developers can work together to test and improve features, and not all software deployment has to follow corporate model where software is delivered as finished product and users cannot to choose to have a level of participation. (This tradition may be becoming obsolete though, I admit.)",
+          "created_at": "2025-01-30T14:25:45Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> I think there should be a released but experimental state...\n\nFWIW, libsecp256k1 did release \"experimental\" modules.",
+          "created_at": "2025-01-30T15:04:18Z"
+        },
+        {
+          "user": "sipa",
+          "body": "I'm wondering if everyone in this discussion is using the term \"experimental\" with the same connotation. I feel like in the past we have fairly regularly had \"experimental\" features, in the sense that we didn't want to commit to this feature being a stable interface, but not in the sense that it had a lower bar of review (for the purpose of code quality, review, ...).",
+          "created_at": "2025-01-30T16:20:00Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I can't speak for anyone else but I am using \"experimental\" to mean that the feature is new and has not had as much testing as other features because it is new. Therefore, it is not recommended for widespread use, but is recommended for use by people who want to experiment and help improve it.\n\n> I feel like in the past we have fairly regularly had \"experimental\" features, in the sense that we didn't want to commit to this feature being a stable interface\n\nRight this is not really what I am talking about, but it could be a minor factor. Even though the `-ipcbind` feature is exposing an API, it's a very small API, and it is pretty easy to be backwards compatible.\n\n> it had a lower bar of review (for the purpose of code quality, review, ...).\n\nIf it's had a lower bar of review, this shouldn't have happened. The code has been reviewed, and review quality varies. Obviously I am biased but think the code quality is also good.\n\nI think the bigger issues here are the testing and deployment issues fanquake brought up. The code has just not been used by many people and not been tested in different environments. I think #31741 will help a little bit with this, but the amount it will help is very small unless bitcoin core developers are actively turning on the `-ipcbind` option and installing software that will connect to the socket. I think the best way we will be able to test this feature is by getting it into the hands of people who want to use it and fixing problems that are found. I think releasing separate binaries allows us to do this in a safe way without affecting other users.",
+          "created_at": "2025-01-30T16:53:50Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "Thank you for your effort in approaching this issue in a structural way, @ryanofsky . I'm not advocating for or against shipping multiprocess in 29.0 - I could be okay with either, I haven't reviewed the code enough to have an opinion on that yet. My concerns quite closely align with [darosior's write-up](https://github.com/bitcoin/bitcoin/issues/31756#issuecomment-2622618673). It appears more review and dog-fooding could be helpful, and I just haven't seen an urgent reason to ship this with 29.0, so I'm erring on the side of caution.\n\nDirectionally, I think I'm very aligned with your view on how we're using and shipping multiprocess, and I'm excited about the work that has been done in the past months, so I definitely don't mean to halt the project's progress. I think we need to have sufficient internal agreement on the interface (and review wrt quality), but once we have that I'm definitely okay with shipping experimental binaries the interface of which may change or be retracted entirely. I absolutely support a collaborative process between users and developers.\n\n> but the amount it will help is very small unless bitcoin core developers are actively turning on the `-ipcbind` option and installing software that will connect to the socket.\n\nMaybe, and we shouldn't stall this to infinity, but I think we should at least give that a try? There seem to be a lot of ideas floating around about building things with ipc, and I think encouraging those efforts and gathering feedback from it would be a worthwhile effort? It's important not to lose momentum, but I'm not convinced that this momentum will be materially affected by whether or not we ship binaries?\n\n",
+          "created_at": "2025-01-31T21:58:32Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "At this point `bitcoin-node` and `bitcoin-gui` binaries supporting an `-ipcbind` option will not make the 29.0 release. But it would still be helpful to know what specific concerns remain so we can figure out how to address them before the 30.0 release. In the issue description I listed 5 possible concerns: (1) and (2) are technical, (3) is about communication and (4) and (5) have to do with internal process and precedent. It would be very helpful to know from anyone with an opinion which of these concerns or others you think need to be addressed, and any ideas/suggestions/requirements for addressing them.\n\nThe biggest change since the IRC meeting was creation of #31741 adding a libmultiprocess git subtree, which could allow building binaries supporting `-ipcbind` by default and allowing more dogfooding and testing. Another concern which has been raised is lack of windows support which should be possible to address before 0.30, but I'm sure there are many other things that could be improved, and it would be helpful to know what to prioritize.\n\nIt's been really helpful to learn from fanquake, darosior, and stickies-v how you are thinking about this issue, and would welcome more thoughts from others as well.",
+          "created_at": "2025-02-27T15:05:00Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I'm planning to add this as a topic to this week's irc meeting to get another gauge of whether there is conceptual support for adding `bitcoin-node` and `bitcoin-gui` binaries to the next release. Again, the binaries are basically identical to existing `bitcoind` and `bitcoin-qt` binaries, with the only on difference being that they are linked with code adding a capnproto dependency and an `-ipcbind` option that exposes a mining interface. There would be no other differences and no other multiprocess features (like letting wallets run in separate in processes) which are implemented in later PRs like #10102. The specific change that would add the binaries is:\n\n- 2895a999f41a8d90033594cdc5c9839fc41f647e from #31802\n\nThis change does not technically depend on any other change but for better usability and testing, it would be good to merge some other PRs before it:\n\n- #31741\n- #30975\n- #31375\n- #31679\n- #31785\n\nI tried to list all possible concerns about making this change in the [issue description](https://github.com/bitcoin/bitcoin/issues/31756#issue-2818816927) but would be interested to know what the biggest concerns are to see if anything more can be done to address them.",
+          "created_at": "2025-04-08T17:01:46Z"
+        },
+        {
+          "user": "jimhashhq",
+          "body": "Like the multiprocess (MP) project; am in favor of the option to build extra binaries for an MP bitcoin.\nPersonally, would like either of the following:\n- a more complete MP implementation (with wallet process RPC listener, etc.), or\n- renaming of release package to something like \"IPC node\" only, for transparency, with a delayed libmultiprocess subtree merge #31741, hinging on the completion of MP wallet usages.\n\nQuestions follow:\n1) Don't understand how adding gui to node release could happen without a the MP wallet process too?\n   Thought there were two release paths either \"IPC node\" or \"MP node, gui, & wallet,\" doesn't gui depend on wallet. Apologies.\n\n2) What % complete is multiprocess?\n   Release without *earlier* prs \n-#19460\n-#19461\n (`--ipcconnect` for wallet and gui) is incomplete, especially as 19460 only connects and doesn't do anything.\n   Maybe too much \"interface rationalization\" needed to ever complete 19460?\n\n3) IPC node release would benefit mining usages; are MP proponents committed to completing the rest of MP feature?\n   Personally favor a more fully functional release, including wallet RPC listener.\n   Until wallet MP usages are complete, suggest leaving libmultiprocess as separate project.\n   Solutions to \"cmake w/external-library\" concerns [provided](https://github.com/bitcoin/bitcoin/pull/10102#issuecomment-2735072960) might help to guide \"cmake challenged\" devs, integrators, & testers more easily through external build process.\n\n4) Is there a plan to follow-through on related \"interface rationalization?\" What stands out is current degenerate behavior of node spawning a wallet with node acting as a go-between for gui <-> wallet interactions.\n\n5) Are there any additional tests that need to be developed? In addition to one for [bitcoin-core/libmultiprocess#169](https://github.com/bitcoin-core/libmultiprocess/issues/169).\n\n6) Doc additions: `--ipcbind=N` not covered in design spec or elsewhere.\n\n7) Was expecting a MULTIPROCESS project label be created long ago for this feature?\n\n8) Are there any unforeseen synchronization challenges adding KJ cooperative multitasking coroutines (for Cap'N Proto promise feature) to a mature Boost threaded project like bitcoin?\n\nOutside the scope of this:\n- Seems like some `--disablewallet` tests disappeared (or were superseded) over the years which I have not looked into, apologies. [comment on #19641](https://github.com/bitcoin/bitcoin/pull/19461#issuecomment-2756056144)\n- Would some sort of user guide benefit operators interested in MP deployment, preventing operator errors?\n\nIIUI, seems like the current proposed release packaging centers around a node with an IPC listener tailored to suit mining integrations. This doesn't address interface rationalizations to allow for true/complete MP deployment, with a working wallet process, servicing RPC requests without relying on the node to act as a go-between.\n",
+          "created_at": "2025-04-09T17:45:00Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "re: https://github.com/bitcoin/bitcoin/issues/31756#issuecomment-2790495347\n\nThanks for the questions and feedback @jimhashhq. Just be clear, this issue is about adding `bitcoin-node` and `bitcoin-gui` binaries that just have a single IPC feature: support for an `-ipcbind` option that exposes a [`Mining` interface](https://github.com/bitcoin/bitcoin/blob/master/src/ipc/capnp/mining.capnp) in 30.0.\n\nNo other IPC or multiprocess features like the `Chain` interface added in https://github.com/bitcoin/bitcoin/pull/29409, or the process separation implemented in https://github.com/bitcoin/bitcoin/pull/10102, or the GUI connection option implemented in https://github.com/bitcoin/bitcoin/pull/19461 have been merged yet, and if they were merged, it would make sense to treat these as developer-only options for a time before including them in a release. (I see the mining feature as being a little different from other IPC features because I think developers won't be very inclined to test it, and we will probably need to get feedback from actual stratum v2 users to know how well it works.)\n\nI responded to the rest of your questions in https://github.com/bitcoin-core/libmultiprocess/issues/170 just to keep discussion here focused on whether to enable the `-ipcbind` mining feature in a release.",
+          "created_at": "2025-04-10T13:11:24Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Latest IRC discussion was https://achow101.com/ircmeetings/2025/bitcoin-core-dev.2025-04-10_16_00.log.html with AI summary: \"Concerns were raised about build complexity and documentation consistency, but the group generally agreed to move forward if upcoming PRs resolving build issues (e.g. #31741) are merged. A bitcoin wrapper executable (#31375) was also discussed as a way to simplify usage, with consensus leaning toward updating documentation to encourage use of the wrapper while maintaining backward compatibility.\"\n\nOne question which I missed in the IRC meeting was from @TheCharlatan about windows compatibility, and the answer is that the `bitcoin` wrapper from #31375 works on windows and is turned on in windows releases but `bitcoin-node` and `bitcoin-gui` don't currently build on windows and are switched off on in #31802. Support for windows is tracked in https://github.com/bitcoin-core/libmultiprocess/issues/53 and shouldn't be difficult but I haven't had a lot motivation to work on it. I could get it done though if it would be useful or just important for uniformity.",
+          "created_at": "2025-04-10T17:42:32Z"
+        },
+        {
+          "user": "average-gary",
+          "body": "In the mining developer space, I am interested in seeing IPC shipped in v30 so we can leverage it for Sv2 purposes. Currently, we rely on @Sjors bitcoind branch with Sv2 Template Provider (TP) enabled. With IPC, we can more confidently develop and maintain an Sv2 specific application that leverages IPCs for mining purposes.",
+          "created_at": "2025-08-15T14:22:26Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Anything left to be done here?",
+          "created_at": "2025-08-21T08:30:18Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> Anything left to be done here?\n\nThere are some possible followups that can be done (listed in https://github.com/bitcoin/bitcoin/issues/30983#issuecomment-3451033643) but this issue can be closed",
+          "created_at": "2025-10-27T12:44:53Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "🎉\n\nThe sidecar application that connects to `bitcoin-node` / `bitcoin -m node` now lives here: https://github.com/sjors/sv2-tp\n\nIt can connect to the v30 release.",
+          "created_at": "2025-10-28T08:01:46Z"
+        }
+      ]
+    },
+    {
+      "number": 31754,
+      "title": "guix SWH vault Internal Server Error",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nFor the first time, running contrib/guix/guix-build, I ran into: \n\n```\nUpdating channel 'guix' from Git repository at 'https://git.savannah.gnu.org/git/guix.git'...\nSWH: found revision 53396a22afc04536ddf75d8f82ad2eafa5082725 with directory at 'https://archive.softwareheritage.org/api/1/directory/d6d830512c16e46521fab9a956c1842ab2fcdea9/'\nSWH vault: failure: Internal Server Error. This incident will be reported.\nThe full error was:\n\nTraceback (most recent call last):\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/vault/cookers/base.py\", line 135, in cook\n    self.prepare_bundle()\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/vault/cookers/git_bare.py\", line 168, in prepare_bundle\n    self.load_objects()\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/vault/cookers/git_bare.py\", line 413, in load_objects\n    self.load_revisions(revision_ids)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/vault/cookers/git_bare.py\", line 586, in load_revisions\n    ret: List[Optional[Revision]] = self.storage.revision_get(obj_ids)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/tenacity/__init__.py\", line 336, in wrapped_f\n    return copy(f, *args, **kw)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/tenacity/__init__.py\", line 475, in __call__\n    do = self.iter(retry_state=retry_state)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/tenacity/__init__.py\", line 376, in iter\n    result = action(retry_state)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/tenacity/__init__.py\", line 418, in exc_check\n    raise retry_exc.reraise()\n  File \"/opt/swh/.local/lib/python3.10/site-packages/tenacity/__init__.py\", line 185, in reraise\n    raise self.last_attempt.result()\n  File \"/usr/local/lib/python3.10/concurrent/futures/_base.py\", line 451, in result\n    return self.__get_result()\n  File \"/usr/local/lib/python3.10/concurrent/futures/_base.py\", line 403, in __get_result\n    raise self._exception\n  File \"/opt/swh/.local/lib/python3.10/site-packages/tenacity/__init__.py\", line 478, in __call__\n    result = fn(*args, **kwargs)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/storage/proxies/retry.py\", line 81, in newf\n    return getattr(storage, attribute_name)(*args, **kwargs)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/core/api/__init__.py\", line 196, in meth_\n    return self._post(meth._endpoint_path, post_data)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/core/api/__init__.py\", line 356, in _post\n    return self._decode_response(response)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/core/api/__init__.py\", line 443, in _decode_response\n    self.raise_for_status(response)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/storage/api/client.py\", line 45, in raise_for_status\n    super().raise_for_status(response)\n  File \"/opt/swh/.local/lib/python3.10/site-packages/swh/core/api/__init__.py\", line 433, in raise_for_status\n    raise exception from None\nswh.core.api.RemoteException: <RemoteException 500 ReadTimeout: ['Error from server: code=1200 [Coordinator node timed out waiting for replica nodes\\' responses] message=\"Operation timed out - received only 1 responses.\" info={\\'consistency\\': \\'LOCAL_QUORUM\\', \\'required_responses\\': 2, \\'received_responses\\': 1}']>\n\nSWH vault: retrying...\nSWH vault: requested bundle cooking, waiting for completion...\n```\nHas anyone else seen this before? Anyone else seeing this? Is it just me? Thank you.\n\n### Expected behaviour\n\nShould compile as normal.\n\n### Steps to reproduce\n\ncontrib/guix/guix-build\n\n### Relevant log output\n\n_No response_\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\ncommit b432e367427f1f9fe0f0a5800e31e496f00cd38d\n\n### Operating system and version\n\nUbuntu 24.04.1 LTS\n\n### Machine specifications\n\nancient machine, but good Ubuntu.\n\n$ guix --version\nguix (GNU Guix) 1.4.0\nCopyright (C) 2022 the Guix authors\n\n",
+      "state": "closed",
+      "user": "tofutim",
+      "created_at": "2025-01-29T00:50:47Z",
+      "updated_at": "2025-01-29T09:34:10Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31754",
+      "labels": [
+        "Upstream"
+      ],
+      "comment_list": [
+        {
+          "user": "fanquake",
+          "body": "I haven't seen this before, but it looks like a (hopefully intermittent) upstream issue.",
+          "created_at": "2025-01-29T09:34:09Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 2
+  }
+}

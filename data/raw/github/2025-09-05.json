@@ -1,0 +1,349 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:11:48.258671+00:00",
+  "date": "2025-09-05",
+  "pull_requests": [
+    {
+      "number": 33324,
+      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
+      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DENABLE_IPC=ON -DBUILD_GUI=ON\r\ncmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-09-05T23:51:29Z",
+      "updated_at": "2025-12-18T14:17:53Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33324.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [sedited](https://github.com/bitcoin/bitcoin/pull/33324#issuecomment-3265136162), [stickies-v](https://github.com/bitcoin/bitcoin/pull/33324#issuecomment-3268176314) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible places where named args for integral literals may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- notifications.progress(_(\"Reobfuscating blocks…\"), 0, false) in src/init.cpp\n- notifications.progress(_(\"Reobfuscating blocks…\"), percentage, false) in src/init.cpp\n- notifications.progress(_(\"Reobfuscating blocks…\"), 100, false) in src/init.cpp\n\n\n\n<sup>2025-12-10</sup>\n",
+          "created_at": "2025-09-05T23:51:33Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK",
+          "created_at": "2025-09-08T08:21:29Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "Concept ACK, this seems like useful functionality to expose.\r\n\r\n> Should we split ObfuscateBlocks out of init? I have split it into many local lambdas, but we may want to find better home for those methods...\r\n\r\nI don't like using startup options for one-time operations (I feel the same about e.g. `-reindex`). Without having thought it through too much yet, maybe we can bundle this e.g. as part of `bitcoin-util` or a separate `bitcoin-xor-blocks` utility?\r\n\r\n> Should we repurpose the existing -blocksxor arg instead?\r\n\r\nWith this PR, IIUC we'd have `-blocksxor`, `reobfuscate-blocks`, and the existence of the `xor.dat` file that all have some redundancy and thus potential for conflict (e,g. `blocksxor=0`, `reobfuscate-blocks=1`, and a non-zero `xor.dat` file). Reducing that complexity seems like it would be useful.\r\n",
+          "created_at": "2025-09-08T22:06:31Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "tidy wants emplace_back over push_back",
+          "created_at": "2025-09-15T07:32:02Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "I agree a separate utility for this seems better - this requires very little of the existing codebase, in theory.\r\n\r\nAlso suggest making the files with the same names, but in a new directory, and then atomically rename the directory when complete, rather than every single file.",
+          "created_at": "2025-09-18T01:29:22Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> I agree a separate utility for this seems better\r\n\r\nCan you quote what you're agreeing with specifically, not sure who suggested that.\r\nBesides, @andrewtoth already has a tool for that, it was mentioned in the PR description.\r\n\r\n> but in a new directory, and then atomically rename \r\n\r\nI will think about it, could make sense, but in that case unrelated files should also be copied over (maybe duplicated to be safe) - and listing the directory content wouldn't make the progress obvious. What's wrong with the current approach?",
+          "created_at": "2025-09-18T01:49:52Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Added kernel notifications (thanks @ryanofsky) and improved crash resistance at the very last step (final rename back to old names) - try it out with `./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1`.\r\n<img width=500 src=\"https://github.com/user-attachments/assets/95b72e06-63fe-4057-989d-24ab9e93bfac\" />\r\n",
+          "created_at": "2025-10-03T01:01:44Z"
+        }
+      ]
+    },
+    {
+      "number": 33322,
+      "title": "Update libmultiprocess subtree to improve build and logs",
+      "body": "Includes:\r\n\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/197\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/202\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/203\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/200\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/205\r\n\r\nThese changes should give better feedback when there are build errors, and also make IPC logs more readable.\r\n\r\nThe changes can be verified by running `test/lint/git-subtree-check.sh src/ipc/libmultiprocess` as described in [developer notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#subtrees) and [lint instructions](https://github.com/bitcoin/bitcoin/tree/master/test/lint#git-subtree-checksh)",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-09-05T20:51:58Z",
+      "updated_at": "2025-09-08T09:05:34Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33322",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33322.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/33322#issuecomment-3261747558) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-05T20:52:03Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Windows error seems to be a failing download of one of the previous release binaries, but would be good to re-run it.\r\n\r\nAssuming that passes:\r\n\r\nACK a4ee70e5b69c67c9caea1e97cb5b08f80536c7d3",
+          "created_at": "2025-09-06T10:10:39Z"
+        }
+      ]
+    },
+    {
+      "number": 33321,
+      "title": "kernel: make blockTip index const",
+      "body": "Notification interface subscribers need to view, but not mutate, the index.\r\n\r\nThis change allows improving the #30595 kernel interface, see e.g. `BlockTreeEntry` where [currently](https://github.com/bitcoin/bitcoin/pull/30595/files#diff-4d05cd02fdce641be603f0f9abcecfeaf76944285d4539ba4bbc40337fa9bbc2R617) a `View` is constructed from a non-const pointer, whereas really this should be a `const btck_BlockTreeEntry* entry`.",
+      "state": "closed",
+      "user": "stickies-v",
+      "created_at": "2025-09-05T15:01:48Z",
+      "updated_at": "2025-09-12T10:37:04Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33321",
+      "labels": [
+        "Validation"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33321.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/33321#pullrequestreview-3189781820), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33321#pullrequestreview-3189998416), [yuvicc](https://github.com/bitcoin/bitcoin/pull/33321#pullrequestreview-3191698366), [achow101](https://github.com/bitcoin/bitcoin/pull/33321#issuecomment-3282473712) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#30595](https://github.com/bitcoin/bitcoin/pull/30595) (kernel: Introduce initial C header API by TheCharlatan)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-05T15:01:55Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 75d9b72475708ee0da13fb23ef65dcced805b6af",
+          "created_at": "2025-09-11T20:10:36Z"
+        }
+      ]
+    },
+    {
+      "number": 33319,
+      "title": "ci: reduce runner sizes on various jobs",
+      "body": "These jobs can likely use reduced runner sizes to avoid wasting our CPU quota, as much of the long-running part of the job is single-threaded.\r\n\r\nThis will also give us more (job) parallelisem from the same number of CPU that we are using.\r\n\r\nSuggested in: https://github.com/bitcoin/bitcoin/pull/32989#discussion_r2321775620",
+      "state": "closed",
+      "user": "willcl-ark",
+      "created_at": "2025-09-05T12:35:37Z",
+      "updated_at": "2025-09-09T09:17:25Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33319",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33319.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [janb84](https://github.com/bitcoin/bitcoin/pull/33319#pullrequestreview-3189341103), [kevkevinpal](https://github.com/bitcoin/bitcoin/pull/33319#issuecomment-3263065907), [m3dwards](https://github.com/bitcoin/bitcoin/pull/33319#issuecomment-3267291957) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33229](https://github.com/bitcoin/bitcoin/pull/33229) (multiprocess: Don't require bitcoin -m argument when IPC options are used by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-05T12:35:43Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "ACK [5eeb2fa](https://github.com/bitcoin/bitcoin/pull/33319/commits/5eeb2facbbbbf68a2c30ef9e6747e39c85d7b116)\r\n\r\nLooks good to me, makes sense to me to use smaller runners.\r\nAll the checks passed on this PR and the longest running one only too 44 minutes\r\n\r\nis there any reason to keep `CentOS, depends, gui` and `MSan, depends` on a `lg` runner?",
+          "created_at": "2025-09-06T19:12:25Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @maflcko / @m3dwards ",
+          "created_at": "2025-09-08T09:45:23Z"
+        },
+        {
+          "user": "m3dwards",
+          "body": "ACK 5eeb2facbbbbf68a2c30ef9e6747e39c85d7b116",
+          "created_at": "2025-09-08T17:42:45Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "WIP stats collection (forked from @0xB10C project) here: https://willcl-ark.github.io/bitcoin-core-ci-stats",
+          "created_at": "2025-09-09T09:17:25Z"
+        }
+      ]
+    },
+    {
+      "number": 33317,
+      "title": "draft: CMake Goals and Guidelines",
+      "body": "",
+      "state": "closed",
+      "user": "purpleKarrot",
+      "created_at": "2025-09-05T09:33:20Z",
+      "updated_at": "2025-09-09T09:24:56Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33317",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33317.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [ryanofsky](https://github.com/bitcoin/bitcoin/pull/33317#issuecomment-3267190797) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-05T09:33:34Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Concept ACK. Seems nice to document goals of cmake build. To avoid confusion, I hope the document will be expanded to say which of the guidelines are currently being met, which are more aspirational, and what needs to change to meet the goals. i think it would also be helpful to link to PRs/issues where these topics have been discussed. Other ideas (not sure they are good but just in case):\r\n\r\n- Maybe add this to the doc/design/ folder instead of the doc/ folder, especially if you think if will will contain more information about the bitcoin core build, as opposed to cmake builds in general\r\n- Since a lot of advice here is related to making bitcoin core usable as a camke subproject, and since in #33077 and #33153 you've brought up changes that could be made to make the bitcoin core usable as a cmake package, it would seem good to have concrete examples somewhere of an external project using bitcoin core as a subproject, and external project using it as a package. Maybe these could be added in contrib/, or be separate repositories, or maybe there are already existing examples we could link to.",
+          "created_at": "2025-09-08T17:07:01Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "Thanks for the review, @ryanofsky.\r\n\r\nI wanted to write down the goals first, and then create issues/PRs to make changes towards the goals bottom up: that means starting from libmultiprocess, minisketch, secp256k1. bitcoin-core will serve as an example how those libraries are consumed as subprojects.\r\n\r\nIn the next step, bitcoin-core should follow the same goals and guidelines, because external clients may want to consume bitcoinkernel as a subproject, or because bitcoin-gui is extracted as another project that depends on bitcoin-core.\r\n\r\n@hebasto suggested offline to move this to the [Wiki](https://github.com/bitcoin-core/bitcoin-devwiki/wiki) instead. @fanquake, can you grant me write access to the Wiki?",
+          "created_at": "2025-09-08T17:35:15Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> can you grant me write access to the Wiki?\r\n\r\nYou should have access now. Will close this in favour of the using wiki.",
+          "created_at": "2025-09-09T09:24:56Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33323,
+      "title": "Potential systemic risk: OP_RETURN outputs as unintended governance signaling",
+      "body": "## Context\nIn `policy/policy.cpp`, inside `IsStandardTx`, OP_RETURN (NULL_DATA) outputs are limited in size (`nMaxDatacarrierBytes`, default 80 bytes). This effectively prevents arbitrarily large payloads but does not fully eliminate systemic risks from structured misuse.\n\n## Description of risk\nEven within the allowed size, OP_RETURN can be systematically repurposed as a signaling channel. For example:\n- Each UTXO could embed a short marker in its OP_RETURN.\n- These markers could be aggregated and interpreted as \"votes,\" weighted by UTXO value.\n- Such schemes open the door to unintended governance mechanisms, plutocratic signaling, or coordinated coercion.\n\n## Why this matters\nBitcoin’s governance model relies on *implicit consensus* (full-node validation, miner incentives, market dynamics), not *explicit on-chain signaling*.  \nIf OP_RETURN becomes a de facto signaling layer, it could:\n- Create social pressure to treat such outputs as binding \"votes.\"\n- Enable plutocratic influence proportional to coin holdings.\n- Incentivize coordination games or mempool spam outside Bitcoin’s intended scope.\n\n## Discussion\nThere is likely no definitive technical fix: stricter byte limits or per-tx rules can be easily circumvented.  \nThe more realistic risk is narrative: if OP_RETURN signaling is tolerated or left unaddressed, it may gain unintended legitimacy over time.  \n\n---\nThis is not a bug report but a design consideration. Input from maintainers on how to frame OP_RETURN’s role to avoid misinterpretation or misuse in the near future would be appreciated.\n",
+      "state": "closed",
+      "user": "Bottegatecnologica",
+      "created_at": "2025-09-05T23:36:58Z",
+      "updated_at": "2025-09-07T12:01:32Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33323",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "stwenhao",
+          "body": "The same things can be done without OP_RETURN. Even if you have P2PK-only, old, plain, ECDSA signatures, then still: they can commit to arbitrary data, through their R-values.\n\n> Each UTXO could embed a short marker in its OP_RETURN.\n\nNot only in OP_RETURN. Since miners started accepting out-of-band transactions, then different transaction versions can be used to signal things, just like they are used during soft-forks, to check, how many miners are ready to support some BIP.\n\n> These markers could be aggregated and interpreted as \"votes,\" weighted by UTXO value.\n\nEven if we talk about standard transactions, then still: they can be mined. And there are some altcoins, using that kind of schemes, for example: https://bitcointalk.org/index.php?topic=5535410\n\nAnd then, you can see transactions like that on-chain: https://mempool.space/tx/000000000fdf0c619cd8e0d512c7e2c0da5a5808e60f12f1e0d01522d2986a51\n\n> Incentivize coordination games or mempool spam outside Bitcoin’s intended scope.\n\nFor example sidechains? See: https://bitcointalk.org/index.php?topic=5552091.0\n\nCoordination games were always possible, since 2009. To stop them, it would require banning OP_SIZE, and blocking all ways of mining things, including vanity addresses, and stuff like that. I think the problem mentioned in the title is unavoidable, and now, the only thing to discuss is: how to deal with it?\n\nEdit: An example of a coordination game, where OP_RETURN is not needed. You support taproot? You want to say it out loud to some old users, by using some old address type? Then you use an address like that: https://mempool.space/address/bc1qtapr00t2sfghswc4tksfh2gx0yrn8rd84qw32r\n\nAnd then, by publicly announcing some proposal, and counting all vanity addresses with a given prefix, you can use it to count support from users, and make a coordination game, where if N people (or N coins) will meet a given vanity pattern, then something can be triggered.\n\nAnother way is Proof of Work inside Script: https://mempool.space/tx/8349df0753e80cce322322f1b76789e1d0fd6693aed2f4de4e49576423081ae7\n\nYou put some challenge, like in bc1qts0jh2d2nesmketmw3thedwrx939k2tqu04gy90x9hd4049g4uhs83ltjx to produce a DER signature, which is smaller than 54 bytes. You can even add more coins in, by signing a given input, along with some additional coins, like bc1q9nw84cph4dn2pw78pnaec68c82h7pxvv55cla8 did. And then, people can send \"shares\", by meeting the challenge partially, for example by sharing 55-byte signatures, and even form \"pools\", which will move given coins in a coordinated way.\n\nAnd then, if you require Proof of Work, which is enforced by consensus rules, then behind it, you can form any other network on top of it. Then, by attacking some altcoin, you will have to directly attack Bitcoin users, by breaking into a real transaction, and finding a bug in it. And then, attacking altcoins is no longer about making some subnetwork weaker, but it is then a real attack on real Bitcoin users, which will be much harder to justify, if that idea will spread, and if next altcoin makers will use similar schemes.",
+          "created_at": "2025-09-07T06:34:10Z"
+        },
+        {
+          "user": "Bottegatecnologica",
+          "body": "Thanks, I agree that signaling is substrate-agnostic and cannot be prevented: it can be done via ECDSA nonces, vanity patterns, version bits misuse, or even PoW-inside-script. My point is not to “ban signaling” but to avoid creating a salient Schelling point that lowers coordination costs and invites misinterpretation as governance.\n\nOP_RETURN is cheap to parse, indexable, and highly visible on explorers. That visibility can turn it into a de facto focal channel, even if the same is theoretically possible elsewhere. The question is not “can people signal” but “should Core policy and surrounding UX legitimize one obvious, countable channel”",
+          "created_at": "2025-09-07T11:38:21Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "This should be posted on the [bitcoin-dev mailing list](https://groups.google.com/g/bitcoindev), the [Delving Bitcoin forum](https://delvingbitcoin.org/) or some other platform where broad, protocol-level concepts are discussed. Conceptual questions and most usage questions can be posted on [Stack Exchange](https://bitcoin.stackexchange.com/). The Bitcoin Core issue tracker is reserved for discussion about this specific software project only, its implementation and usage.",
+          "created_at": "2025-09-07T12:01:22Z"
+        }
+      ]
+    },
+    {
+      "number": 33320,
+      "title": "rpc: analyzepsbt should explicitly check for an invalid taproot_key_path_sig",
+      "body": "While testing #29675 my final combined PSBT ended up having an invalid `taproot_key_path_sig`, which I found out by logging the `sigdata.complete` value at the end of `ProduceSignature`.\n\nWe should of course never produce such an invalid value and I'll continue digging for the root cause. But external applications could do this too.\n\nCurrently `analyzepsbt` will give a useless `\"next\": \"updater\"` status when this happens.\n\nWe should instead display an error.\n\nNot sure what the best approach would be.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-09-05T12:37:26Z",
+      "updated_at": "2025-09-05T15:03:18Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33320",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "Sjors",
+          "body": "FWIW this particular situation happened because a ledger signed one of the script paths and my WIP branch for HWI ended up putting that signature in the key path.",
+          "created_at": "2025-09-05T12:42:43Z"
+        }
+      ]
+    },
+    {
+      "number": 33318,
+      "title": "test: intermittent issue in p2p_1p1c_network.py",
+      "body": "Timeout failure in the TSAN job here https://github.com/bitcoin/bitcoin/actions/runs/17489459842/job/49675712585?pr=33317:\n```bash\n2025-09-05T10:51:37.2200865Z \u001b[0;33m node3 2025-09-05T10:51:30.541244Z [httpworker.7] [rpc/request.cpp:243] [void JSONRPCRequest::parse(const UniValue &)] [rpc] ThreadRPCServer method=getpeerinfo user=__cookie__ \u001b[0m\n2025-09-05T10:51:37.2201033Z \u001b[0;36m test  2025-09-05T10:51:31.542469Z TestFramework (ERROR): Unexpected exception \u001b[0m\n2025-09-05T10:51:37.2201165Z \u001b[0;36m                                   Traceback (most recent call last):\u001b[0m\n2025-09-05T10:51:37.2201494Z \u001b[0;36m                                     File \"/home/admin/actions-runner/_work/_temp/test/functional/test_framework/test_framework.py\", line 195, in main\u001b[0m\n2025-09-05T10:51:37.2201593Z \u001b[0;36m                                       self.run_test()\u001b[0m\n2025-09-05T10:51:37.2201851Z \u001b[0;36m                                     File \"/home/admin/actions-runner/_work/_temp/build/test/functional/p2p_1p1c_network.py\", line 155, in run_test\u001b[0m\n2025-09-05T10:51:37.2201964Z \u001b[0;36m                                       self.sync_mempools()\u001b[0m\n2025-09-05T10:51:37.2202246Z \u001b[0;36m                                     File \"/home/admin/actions-runner/_work/_temp/test/functional/test_framework/test_framework.py\", line 811, in sync_mempools\u001b[0m\n2025-09-05T10:51:37.2202421Z \u001b[0;36m                                       raise AssertionError(\"Mempool sync timed out after {}s:{}\".format(\u001b[0m\n2025-09-05T10:51:37.2202566Z \u001b[0;36m                                   AssertionError: Mempool sync timed out after 2400s:\u001b[0m\n2025-09-05T10:51:37.2216842Z \u001b[0;36m                                     {'74c951d3e1bc27437394377a48d6ff7f11b49c1e0bd05e169d54c5138deea7f2', '77708ea74fbffa47e192e5be99b03a72e830f22a8b60d02e262ba8cfbc3e9b47', '233c3760167a81cd6ffccae81bcb650bdbd9c84b72cf87bf329940d2ac97b8ee', '390ec58b4c5b017f557e30ead39f9921b3fec5729b07ff89415c5570275a87dc', 'c8ca64cb3da89905b3ccfc5423d908a17273f90c4893373af9354e61f3bd651c', \n```",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-09-05T10:56:58Z",
+      "updated_at": "2025-12-31T11:27:02Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33318",
+      "labels": [
+        "Tests",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "instagibbs",
+          "body": "I think I've nailed down what's happening from logs:\n\n1. test peer sends child to node1\n2. node1 has parent resolved normally, it's above minfee\n3. test peer is picked as unique peer to schedule resolution of child during test peer's next \"turn\" in networking thread\n4. node0 advertises child by wtxid (it's ignored currently because it's in orphanage and has no parents, test peer is already the unique reconsideration peer so that's fairly immaterial?)\n5. test peer disconnects before ProcessOrphanTx is called (and we never reconsider the orphan again because all parents are known!)\n6. now any peer can advertise the child again but in this test only node0 can, and it already has, so the transaction never makes it\n\nThe test does the disconnect earlier but from socket closing to clearing of peer state, this race can occur.\n\ndue to https://github.com/bitcoin/bitcoin/pull/31829 node1's orphanage will actually empty out on disconnect, so it's not actually testing much anymore, so that can be cleaned up and I expect the test to work better (especially if you assert the orphanage of each node is in the expected state)\n\nOverall, I think this is a vote in favor of forcing ProcessOrphanTx on disconnect by peer, or having the reconsiderable slot reassigned to a new peer to disallow them from playing similar games. Seems like it only effects \"catch up\" orphanage usage, not 1p1c, and relies on some incredible timing to disrupt it successfully\n\nSome discussion of this DoS strategy here: https://github.com/bitcoin/bitcoin/pull/31829#issuecomment-3001627814",
+          "created_at": "2025-10-10T17:31:19Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> The test does the disconnect earlier but from socket closing to clearing of peer state, this race can occur.\n\nIf it's a race, then this should go away if we make node3 the one that pre-receives orphans?\n\n\n```diff\n\ndiff --git a/test/functional/p2p_1p1c_network.py b/test/functional/p2p_1p1c_network.py\nindex e4d3b738c19..5567b4e7002 100755\n--- a/test/functional/p2p_1p1c_network.py\n+++ b/test/functional/p2p_1p1c_network.py\n@@ -109,14 +109,14 @@ class PackageRelayTest(BitcoinTestFramework):\n         # Assemble return results\n         packages_to_submit = [package_hex_1, package_hex_2, package_hex_3, package_hex_4]\n         # node0: sender\n-        # node1: pre-received the children (orphan)\n-        # node3: pre-received the parents (too low fee)\n+        # node2: pre-received the parents (too low fee)\n+        # node3: pre-received the children (orphan)\n         # All nodes receive parent_31 ahead of time.\n         txns_to_send = [\n             [],\n-            [child_1, child_2, parent_31, child_3, child_4],\n             [parent_31],\n-            [parent_1, parent_2, parent_31, parent_4]\n+            [parent_1, parent_2, parent_31, parent_4],\n+            [child_1, child_2, parent_31, child_3, child_4]\n         ]\n \n         return packages_to_submit, txns_to_send\n\n```",
+          "created_at": "2025-10-10T19:52:08Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "I don't think the pre-received child peer(s) make sense anymore, as we intentionally zero these out of the orphanage when all the announcing peers disconnect.\n\nIf we want to keep this part just to exercise that state space, we could make sure that we wait until all the node's orphan slots are empty via rpc before continuing with the ultimate submitpackage?",
+          "created_at": "2025-10-13T12:37:53Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Seen again in https://github.com/bitcoin/bitcoin/actions/runs/19173508101/job/54812101221?pr=33810.",
+          "created_at": "2025-11-07T16:53:44Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "I've also discovered that `create_package_2outs` has regressed since we lowered minrelay to 0.1s/vbyte. The `parent_4` now pays for itself rather than needing cppf.\n\nI think it'd be better if we do 0-fee parents to make the test less brittle. I have a branch that I can push along later shortly after cluster mempool and https://github.com/bitcoin/bitcoin/pull/33892 is merged: https://github.com/instagibbs/bitcoin/commits/2025-11-1p1c-test-timeout/\n\nAs per branch I think just making sure the orphanage is actually wiped before doing `submitpackage` would be a minimum viable improvement for now.",
+          "created_at": "2025-11-18T16:59:41Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "https://github.com/bitcoin/bitcoin/actions/runs/20277892656/job/58232592949#step:11:2724",
+          "created_at": "2025-12-16T19:51:57Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "Still waiting on https://github.com/bitcoin/bitcoin/pull/33892 which would make it a lot easier to make this test easier to reason about (no filling mempool and dealing with dynamic limits)",
+          "created_at": "2025-12-16T20:04:01Z"
+        }
+      ]
+    },
+    {
+      "number": 33316,
+      "title": "builds: add README with build flags",
+      "body": "### Please describe the feature you'd like to see added.\n\nFor the torrents for Bitcoin Core, as well as the [downloads on the site](https://bitcoincore.org/bin/bitcoin-core-29.1/), it would be useful to have a (small) readme with some information what the different binaries/targzs are.\n\n<img width=\"423\" height=\"745\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/222b0a0c-6f18-417d-9903-ffa4aa1f2abb\" />\n\nApparently there are **unsigned**, **signed**, **debug** and **codesigning** versions. \n\nWhat do they mean?\n\n`magnet:?xt=urn:btih:DSUYRPFMOPSLI7EZFH7VZ4QKT4GUU57A&dn=bitcoin-core-29.1&tr.1=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&tr.2=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&tr.3=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr.4=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969%2Fannounce&tr.5=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr.6=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr.7=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr.8=udp%3A%2F%2Ftracker.bitcoin.sprovoost.nl%3A6969`\n\n### Describe the solution you'd like\n\nPlease add a readme\n\n### Describe any alternatives you've considered\n\nI have found [some guides](https://github.com/fjahr/debugging_bitcoin), but I am not sure what flags were used for these.\n",
+      "state": "open",
+      "user": "AbelLykens",
+      "created_at": "2025-09-05T08:22:49Z",
+      "updated_at": "2025-09-05T15:08:18Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33316",
+      "labels": [
+        "Docs"
+      ]
+    },
+    {
+      "number": 33315,
+      "title": "build: suggest -DENABLE_IPC=OFF when missing capnp",
+      "body": "Placeholder for the closed PR #33290.\n\nCurrently being worked on in https://github.com/bitcoin-core/libmultiprocess/pull/205\n\nAfter which we'll need a subtree update.",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-09-05T06:42:52Z",
+      "updated_at": "2025-09-05T20:52:52Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33315",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "fanquake",
+          "body": "Thanks, but I don't think we need a separate issue to track the subtree update, which wont be forgotten.",
+          "created_at": "2025-09-05T09:30:07Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Subtree update is #33322",
+          "created_at": "2025-09-05T20:52:52Z"
+        }
+      ]
+    },
+    {
+      "number": 33314,
+      "title": "Is there way to sort balance address functionality just like btcrank.site showing",
+      "body": "### Please describe the feature you'd like to see added.\n\nIs there way to sort balance address functionality just like btcrank.site showing,\nSome invest want to get the real time live balance address with sort.\n\n\n### Is your feature related to a problem, if so please describe it.\n\n_No response_\n\n### Describe the solution you'd like\n\n_No response_\n\n### Describe any alternatives you've considered\n\n_No response_\n\n### Please leave any additional context\n\n_No response_",
+      "state": "closed",
+      "user": "www222fff",
+      "created_at": "2025-09-05T03:32:00Z",
+      "updated_at": "2025-09-05T10:18:36Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33314",
+      "labels": [
+        "Feature"
+      ],
+      "comment_list": [
+        {
+          "user": "pinheadmz",
+          "body": "No, Bitcoin Core does not have a built-in address indexer. ",
+          "created_at": "2025-09-05T10:18:35Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 6
+  }
+}

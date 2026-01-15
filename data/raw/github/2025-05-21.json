@@ -1,0 +1,362 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:44:37.807324+00:00",
+  "date": "2025-05-21",
+  "pull_requests": [
+    {
+      "number": 32581,
+      "title": "allocators: Apply manual ASan poisoning to `PoolResource`",
+      "body": "Currently ASan will not detect use-after-free issues for memory allocated by a `PoolResource`. This is because ASan is only aware of the memory chunks allocated by `PoolResource` but not the individual \"sub-chunks\" within.\r\n\r\nE.g. this test will not produce an ASan error even though the referenced coin has been deallocated:\r\n\r\n```c++\r\ndiff --git a/src/test/coins_tests.cpp b/src/test/coins_tests.cpp\r\nindex c46144b34b..aa6ca15ce1 100644\r\n--- a/src/test/coins_tests.cpp\r\n+++ b/src/test/coins_tests.cpp\r\n@@ -508,6 +508,17 @@ BOOST_FIXTURE_TEST_CASE(updatecoins_simulation_test, UpdateTest)\r\n     BOOST_CHECK(spent_a_duplicate_coinbase);\r\n }\r\n\r\n+BOOST_AUTO_TEST_CASE(asan_uaf)\r\n+{\r\n+    CCoinsMapMemoryResource cache_coins_memory_resource{};\r\n+    CCoinsMap map(0, SaltedOutpointHasher(/*deterministic=*/true), CCoinsMap::key_equal{}, &cache_coins_memory_resource);\r\n+    COutPoint outpoint{};\r\n+    map.emplace(outpoint, Coin{});\r\n+    auto& coin = map.at(outpoint);\r\n+    map.erase(outpoint);\r\n+    coin.coin.nHeight = 1;\r\n+}\r\n+\r\n BOOST_AUTO_TEST_CASE(ccoins_serialization)\r\n {\r\n     // Good example\r\n```\r\n\r\nFix this by applying [manual ASan poisoning](https://github.com/google/sanitizers/wiki/AddressSanitizerManualPoisoning) for memory allocated by `PoolResource`:\r\n\r\n* Newly allocated chunks are poisoned as a whole\r\n* \"Sub-chunks\" are unpoisoned/re-poisoned during allocation/deallocation\r\n\r\nWith the poisoning applied, ASan catches the issue in the test above:\r\n```\r\n$ ./build_unit/bin/test_bitcoin --run_test=\"coins_tests/asan_uaf\"\r\nRunning 1 test case...\r\n=================================================================\r\n==366064==ERROR: AddressSanitizer: use-after-poison on address 0x7f99c3204870 at pc 0x55569dab6f8a bp 0x7ffe0210e4d0 sp 0x7ffe0210e4c8\r\nREAD of size 4 at 0x7f99c3204870 thread T0 (b-test)\r\n```",
+      "state": "closed",
+      "user": "dergoegge",
+      "created_at": "2025-05-21T17:18:31Z",
+      "updated_at": "2025-08-05T09:47:07Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32581",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32581.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [marcofleon](https://github.com/bitcoin/bitcoin/pull/32581#pullrequestreview-2993932032), [achow101](https://github.com/bitcoin/bitcoin/pull/32581#issuecomment-3152410690) |\n| Concept ACK | [sipa](https://github.com/bitcoin/bitcoin/pull/32581#issuecomment-2899298395), [fanquake](https://github.com/bitcoin/bitcoin/pull/32581#issuecomment-2900383024), [l0rinc](https://github.com/bitcoin/bitcoin/pull/32581#issuecomment-2900521959) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-21T17:18:33Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "Draft until I sort out the CI failures",
+          "created_at": "2025-05-21T17:37:22Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `tidy`: https://github.com/bitcoin/bitcoin/runs/42652441080</sub>\n<sub>LLM reason (✨ experimental): The CI failure is due to the use of undeclared identifiers related to ASAN in the `pool.h` file, resulting in compilation errors.\n</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-05-21T21:30:21Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Concept ACK",
+          "created_at": "2025-05-21T21:32:15Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> This is because ASan is only aware of the memory chunks allocated by PoolResource but not the individual \"sub-chunks\" within\r\n\r\nWhat's the deeper explanation for this? Can we refactor the code or patch the sanitizers instead of annotating our code in places where we already know the code is problematic? Don't have a lot of experience in this area, I might be off, was just wondering if there's a more general solution.",
+          "created_at": "2025-05-22T08:30:09Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Concept ACK",
+          "created_at": "2025-05-22T08:38:56Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "> What's the depper explanation for this?\r\n\r\nAt a high level `PoolResource` allocates larger chunks of memory (by default 262144 bytes per chunk) and allows for smaller memory sections within those chunks to be allocated (in a way that is optimized for node based containers, e.g. `std::unordered_map`).\r\n\r\nASan instruments calls to e.g. `malloc`/`free` and `new`/`delete` to detect UaF and other issues, so for `PoolResource` it'll be aware of the allocations of the larger chunks. However, it does not instrument our custom `allocate`/`deallocate` functions and that is likely also not practical to do in a general way, because the exact instrumentation needed depends heavily on the allocator implementation.\r\n\r\nIn our case, `PoolResource` uses the memory allocated for the chunks for both allocating smaller sections as well as its internal free list. That is why if you look at the patch here, internally unpoisoning the free list pointers is necessary before accessing them. Every custom allocator implementation might have different implementation quirks like this and it does not seem feasible for ASan to figure this out on its own.",
+          "created_at": "2025-05-22T09:03:29Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks for clarifying.\r\nThough https://github.com/google/sanitizers/wiki/AddressSanitizerManualPoisoning seems quite old (2015), a recent https://blog.trailofbits.com/2024/05/16/understanding-addresssanitizer-better-memory-safety-for-your-code article also confirms `Incorrect access to memory managed by a custom allocator won’t raise an error unless the allocator performs annotations`.\r\nThe sanitizer description also mentioned thread safety warnings and alignment restrictions - but I think we should be okay in both cases here.\r\nConcept ACK",
+          "created_at": "2025-05-22T09:27:21Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `fuzzer,address,undefined,integer, no depends`: https://github.com/bitcoin/bitcoin/runs/42771108504</sub>\n<sub>LLM reason (✨ experimental): The CI failure is due to build errors caused by macro redefinitions of `ASAN_POISON_MEMORY_REGION` and `ASAN_UNPOISON_MEMORY_REGION`.\n</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-05-23T09:10:02Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Added this to 30.0. \r\ncc @marcofleon ",
+          "created_at": "2025-07-02T13:57:44Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK ad132761fc49c38769c09653a265fdbc3b93eda5",
+          "created_at": "2025-08-04T21:08:08Z"
+        }
+      ]
+    },
+    {
+      "number": 32580,
+      "title": "wallet, test: best block locator matches scan state follow-ups",
+      "body": "Few follows-ups from #30221: Use `SetLastBlockProcessedInMem` more in `AttachChain`, add not null locator check in `WriteBestBlock`. Add log and few assertions in `wallet_reorgstore` test.",
+      "state": "closed",
+      "user": "rkrux",
+      "created_at": "2025-05-21T14:50:16Z",
+      "updated_at": "2025-07-10T09:03:51Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32580",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32580.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/32580#issuecomment-3029243288), [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/32580#pullrequestreview-2981629314) |\n| Stale ACK | [Prabhat1308](https://github.com/bitcoin/bitcoin/pull/32580#pullrequestreview-2914299373) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-21T14:50:20Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 1b5c545e82fe3cf5027f16b43e2306aeb8d4ef9b",
+          "created_at": "2025-07-02T20:34:01Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "silent conflict fixed in https://github.com/bitcoin/bitcoin/pull/32932",
+          "created_at": "2025-07-10T09:03:51Z"
+        }
+      ]
+    },
+    {
+      "number": 32579,
+      "title": "p2p: Correct unrealistic headerssync unit test behavior",
+      "body": "### Background\r\n\r\nAs part of the release process we often run *contrib/devtools/headerssync-params.py* and increase the values of the constants `HEADER_COMMITMENT_PERIOD` and `REDOWNLOAD_BUFFER_SIZE` in *src/headerssync.cpp* as per *doc/release-process.md* (example: 11a2d3a63e90cdc1920ede3c67d52a9c72860e6b). This helps fine tune the memory consumption per `HeadersSyncState`-instance in the face of malicious peers.\r\n\r\n(The `REDOWNLOAD_BUFFER_SIZE`/`HEADER_COMMITMENT_PERIOD` ratio determines how many Headers Sync commitment bits must match between PRESYNC & REDOWNLOAD phases before we start permanently storing headers from a peer. For more details see comments in *src/headerssync.h* and *contrib/devtools/headerssync-params.py*).\r\n\r\n\r\n### Problem: Not feeding back headers until completing sync\r\n\r\nDuring v30 release process #33274 made `REDOWNLOAD_BUFFER_SIZE` exceed the `target_blocks` constant used to control the length of chains generated for testing Headers Sync (`15000`, *headers_sync_chainwork_tests.cpp*).\r\n\r\nThe `HeadersSyncState::m_redownloaded_headers`-buffer now does not reach the `REDOWNLOAD_BUFFER_SIZE`-threshold during those unit tests. As a consequence `HeadersSyncState::PopHeadersReadyForAcceptance()` will not start feeding back headers until the PoW threshold has been met. While this will not cause the unit test to start failing on master, it means we have gone from testing behavior that resembles mainnet (way more than `REDOWNLOAD_BUFFER_SIZE` headers to reach the PoW limit), to behavior that is not possible/expected there.\r\n\r\n\r\n### Solution\r\n\r\nAvoid testing this unrealistic condition of completing Headers Sync before reaching `REDOWNLOAD_BUFFER_SIZE` by making tests able to define their own values through the new `HeadersSyncParams` instead of having them hard-coded for all chains & tests.\r\n\r\n\r\n### Commits\r\n\r\n* First 6 commits refactor and improve the unit tests in order to clarify latter changes.\r\n* We then add checks for the behavior around the `REDOWNLOAD_BUFFER_SIZE` threshold.\r\n* The main change: we extract the section from *headerssync.cpp* containing the constants to *kernel/chainparams.cpp*, making `HeadersSyncState` no longer hard-coded to mainnet.\r\n\r\n\r\n### Notes\r\n\r\nThis PR used to be called \"headerssync: Preempt unrealistic unit test behavior\".",
+      "state": "closed",
+      "user": "hodlinator",
+      "created_at": "2025-05-21T13:48:16Z",
+      "updated_at": "2025-10-23T10:20:00Z",
+      "comments": 19,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32579",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32579.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32579#issuecomment-3290253231), [marcofleon](https://github.com/bitcoin/bitcoin/pull/32579#pullrequestreview-3230419017), [danielabrozzoni](https://github.com/bitcoin/bitcoin/pull/32579#pullrequestreview-3295765688) |\n| Concept ACK | [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/32579#issuecomment-2921899092), [jonatack](https://github.com/bitcoin/bitcoin/pull/32579#issuecomment-2931826727) |\n| Stale ACK | [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32579#issuecomment-3208186878), [sipa](https://github.com/bitcoin/bitcoin/pull/32579#pullrequestreview-3202085490) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32740](https://github.com/bitcoin/bitcoin/pull/32740) (refactor: Header sync optimisations & simplifications by danielabrozzoni)\n* [#31974](https://github.com/bitcoin/bitcoin/pull/31974) (Drop testnet3 by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-21T13:48:19Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/42636718296</sub>\n<sub>LLM reason (✨ experimental): The CI failure is due to a missing include guard in the `src/headerssync-params.h` file, as reported by the lint checks.\n</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-05-21T14:15:04Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK",
+          "created_at": "2025-05-30T10:09:35Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Concept ACK",
+          "created_at": "2025-06-02T17:55:54Z"
+        },
+        {
+          "user": "achow101",
+          "body": "It seems like this PR has several refactors that are really necessary for the goal of getting a configurable redownload window into `HeadersSyncState`.\r\n\r\nI find the last commit to not be compelling. Users are never going to see that warning, and if they did, there's nothing actionalbe for them to do. It's only a warning that is relevant to developers, and even then, it is not done in a way that is extremely obvious to developers as it's only a warning and not a fatal error. When we add checks for developers, they should really be something that causes a crash for developers, e.g. `Assume`. And in that case, there also doesn't need to be a unit test case for that either.\r\n\r\nLastly, changes are made to the chain params, but with no instructions of how or when to update the parameters for the other chains. And really, if the expectation is that these parameters do need to be updated for the other chains, then the `headerssync-params.py` script needs to be made easier to run for those other chains.",
+          "created_at": "2025-08-11T21:19:24Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Thanks for your feedback @achow101!\r\n\r\n> I find the last commit to not be compelling.\r\n\r\nDropped 538b9a4f4ee84749bd1b2fe32e61658c272ee7f9 as I agree the warning was a bit contrived, and the change feels less necessary, given how the PR has evolved.\r\n\r\nConsidered changing the first commit to add the following in `HeadersSyncState::PopHeadersReadyForAcceptance()`:\r\n```C++\r\n    // We haven't started feeding back headers from genesis but already reached\r\n    // the PoW threshold?! This is an unrealistic situation, maybe a fuzz test?\r\n    Assume(!(m_process_all_remaining_headers && m_chain_start->nHeight == 0 &&\r\n             m_redownload_buffer_first_prev_hash == m_chain_start->GetBlockHash()));\r\n```\r\nBut it would probably cause the fuzz test to fail.\r\n\r\n> ... no instructions of how or when to update the parameters for the other chains. And really, if the expectation is that these parameters do need to be updated for the other chains, then the `headerssync-params.py` script needs to be made easier to run for those other chains.\r\n\r\nAdded documentation to the commit message about how the `HeadersSyncParams` constants were calculated and argued for them not needing to be frequently updated. I could add comments with UTC dates corresponding to genesis block Unix epoch times for all `CreateGenesisBlock()` calls in *kernel/chainparams.cpp* to make it easier to re-run the script if deemed necessary.",
+          "created_at": "2025-08-12T08:15:44Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "reACK 342359f9538874a87b86b67dd98f81cb78237a1e\r\n\r\ntypo fix + `commit_offset` was change since last push to depend on `commitment_period `",
+          "created_at": "2025-08-14T15:30:27Z"
+        },
+        {
+          "user": "marcofleon",
+          "body": "Re-ACK 342359f9538874a87b86b67dd98f81cb78237a1e\r\n\r\nNice, everything lgtm. Just some basic cleanups and changing the headers sync fuzz target to choose the params since my original review.",
+          "created_at": "2025-08-14T16:01:35Z"
+        },
+        {
+          "user": "marcofleon",
+          "body": "Re ACK 53341ea10dc2f7df371b416060863bbc094b8773\r\n\r\nBreaking up the three scenarios into their own test cases makes sense. I checked to make sure the test logic is unchanged.",
+          "created_at": "2025-08-19T15:24:42Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "crACK 53341ea10dc2f7df3\r\n\r\nThe test changes here look good to me. I left some nits that can be addressed if following-up or rebasing. I sanity checked that a fresh node doing headers syncing for mainnet, testnet, and signet work on my machine with this branch.\r\n\r\nI think it would be good to have input from one of the authors/reviewers of #25717 on the non-test changes to headers sync in this PR (https://github.com/bitcoin/bitcoin/pull/32579/commits/4aea5fa3690310bfc2617e3bf31f555dae7d9337 and https://github.com/bitcoin/bitcoin/pull/32579/commits/1771e59f1a1fcaa6a1d79c93bc0c0c3b1003cf82) before merging.\r\n\r\n",
+          "created_at": "2025-08-20T21:50:31Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "@Sjors or @sdaftuar: would you mind doing some light review of 1771e59f1a1fcaa6a1d79c93bc0c0c3b1003cf82? It represents the meat of this PR, making the headers sync state params that affect memory usage able to be configured for tests/other chains instead of hard-coded to mainnet conditions.\r\n\r\n(davidgumberg also suggested (https://github.com/bitcoin/bitcoin/pull/32579#issuecomment-3208186878) reviewing 4aea5fa3690310bfc2617e3bf31f555dae7d9337 which also touches the `HeadersSyncState` implementation, replacing `vector`s with `span`s).\r\n\r\n(Made a list of author+reviewers from #25717 and used a RNG to select 2 to ping).",
+          "created_at": "2025-08-21T12:09:28Z"
+        },
+        {
+          "user": "achow101",
+          "body": "I generally disagree with the approach in this PR. It's doing a lot of refactoring that feels too much like refactoring for the sake of refactoring. I think this can be dropped from the milestone.",
+          "created_at": "2025-08-21T16:15:30Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "@achow101:\r\n\r\n> I generally disagree with the approach in this PR. It's doing a lot of refactoring that feels too much like refactoring for the sake of refactoring. I think this can be dropped from the milestone.\r\n\r\n### Commit order\r\n\r\n**I understand that given the current order of commits, the test refactorings seem less motivated.** Order used to be refactorings + main commit + illustrative test + additional log test (https://github.com/bitcoin/bitcoin/compare/37405238a8c4fe4dff82781c91fb668391eb51d4~9...37405238a8c4fe4dff82781c91fb668391eb51d4). Having all the refactoring first got the tests in better shape so that later behavior changes could be expressed clearer.\r\n\r\n@fanquake wrote on IRC 2 weeks ago (https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2025-08-07#1142169;):\r\n\r\n> would be good if it's clearer why #32579 needs to go into 30, or not\r\n\r\nThat made me think it would be better to have an independent commit at the beginning of the PR which breaks once the `REDOWNLOAD_BUFFER_SIZE` is increased. If you prefer the order: all refactorings + illustrative test + main commit, that also makes sense.\r\n\r\n### Context of headers sync changes\r\n\r\nI also must admit that the refactoring began in the context of my other WIP changes for `HeadersSyncState` - adding a cache (https://github.com/l0rinc/bitcoin/pull/3). Before proposing that one on the main repo, I'm also working on another change to make the number of parallel `HeadersSyncState` instances in *net_processing.cpp* more predictable, based off an old comment from 2022 (https://github.com/bitcoin/bitcoin/pull/25720#discussion_r936707629). Maybe I should have a tracking issue to show my larger interest in this area, rather than this PR appearing like a random drive-by.\r\n\r\n### Refactoring direction\r\n\r\nIf you think the test refactorings go in arbitrary directions, I would be curious to hear which parts you still disagree with now that I've used multiple test cases as you suggested (https://github.com/bitcoin/bitcoin/pull/32579#discussion_r2277678459).\r\n\r\n## Finishing thoughts\r\n\r\nIf you think that the changes in the main commit 1771e59f1a1fcaa6a1d79c93bc0c0c3b1003cf82 are also refactoring for the sake of refactoring, rather than parameters ending up where they should be to enable better testing, that's a different conversation.",
+          "created_at": "2025-08-21T19:12:29Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "(As I said on IRC, I respect the decision to drop it from the milestone. There's enough moving parts in the release process. It would've been neat to fix ahead of bumping `REDOWNLOAD_BUFFER_SIZE`, the tests on master will not fail when it happens though).",
+          "created_at": "2025-08-21T19:17:09Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Given that the current PR already demonstrates the production code is still correct, I tend to agree that we don't have to rush. Would have been cleaner, but it's not urgent.\r\n\r\nI do think however that the refactorings are necessary - but I'd keep the commits before the final fix, and if other reviewers think it's too risky, maybe we can do it in a separate PR - unifying it with @danielabrozzoni's change and your other related proposal either through a tracking issue or pushing the rest as drafts. I am fine with doing the refactorings here.\r\n\r\nEdit: note that [`42393d6` (#33274)](https://github.com/bitcoin/bitcoin/pull/33274/commits/42393d6447ad2b3e780aee2d99766f4844c22a06) was updated since",
+          "created_at": "2025-08-22T01:13:46Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "reACK 33d550d3044f9075cc866093c453158288f12dec\r\n\r\nWould be great if @sipa or @sdaftuar could also take a look.",
+          "created_at": "2025-09-05T16:13:01Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "reACK 794a17186d3019713d29213bedd866baa1c81378 - the only change since last ACK was the span nits being applied",
+          "created_at": "2025-09-09T19:21:17Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Latest push resolves conflict with #33332.\r\n\r\n(Also changed PR-title (category) from \"headerssync:\" to \"p2p:\" based off https://github.com/maflcko/DrahtBot/blob/14ccfd94bc7cc584e547e09582373cb87a0e4553/webhook_features/config.yml and the fact that #25717 used that topic. Maybe one could advocate for expanding the number of categories, but I'll punt on it for now. Hat-tip to l0rinc for the DrahtBot reference).",
+          "created_at": "2025-09-13T06:54:51Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "reACK cc5dda1de333cf7aa10e2237ee2c9221f705dbd9\r\n\r\nThe only difference after the rebase is a removal of a `constexpr` in one of the `base_uint` constructors.\r\n\r\n> changed PR-title (category) from \"headerssync:\" to \"p2p\r\n\r\nnit: the commits still state `headerssync` (fine by me, just noticed)",
+          "created_at": "2025-09-15T02:20:54Z"
+        }
+      ]
+    },
+    {
+      "number": 32577,
+      "title": "subprocess: Let shell parse command on non-Windows systems",
+      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/32574.\r\n\r\nThe `subprocess::Popen` constructor has two overloads: https://github.com/bitcoin/bitcoin/blob/7763e86afa045910a14ac9b2cd644927a447370b/src/util/subprocess.h#L938-L941\r\n\r\nDuring the migration from Boost.Process in https://github.com/bitcoin/bitcoin/pull/28981, the second was chosen for two reasons: (1) it minimized changes at the call sites, and (2) it [addressed](https://github.com/bitcoin/bitcoin/pull/28981#issuecomment-1837238921) quoting issues on Windows. This approach internally uses the `subprocess::util::split()` function, which currently fails to handle quoted tokens, such as in subshell invocations like `sh -c 'ls; echo'`.\r\n\r\nThis issue was not caught by our tests as they are broken. The last commit fixes the `system_tests/run_command` test. This commit can be applied on top of the master branch to reproduce the existing failure in `subprocess`.\r\n\r\nThe second commit is intended to be upstreamed. However, I'm seeking code review feedback first (please note that the `src/util/subprocess.h` code is C++11 compatible).",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-05-21T11:45:24Z",
+      "updated_at": "2025-11-19T14:32:30Z",
+      "comments": 21,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32577",
+      "labels": [
+        "Utils/log/libs",
+        "Needs rebase"
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32578,
+      "title": "windows: depends config fails",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\n\"cmake -B build --preset vs2022-static\" execute this config, and bitcoin--9.0\\build\\vcpkg_installed\\vcpkg\\blds\\libevent\\config-x64-windows-static-out.log display such info:\n\n[1/2] \"D:/Program Files/CMake/bin/cmake.exe\" -E chdir \"..\" \"D:/Program Files/CMake/bin/cmake.exe\" \"F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/libevent/src/.12-stable-1d4b950f74.clean\" \"-G\" \"Ninja\" \"-DCMAKE_BUILD_TYPE=Release\" \"-DCMAKE_INSTALL_PREFIX=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/pkgs/libevent_x64-windows-static\" \"-DFETCHCONTENT_FULLY_DISCONNECTED=ON\" \"-DEVENT__DISABLE_OPENSSL=ON\" \"-DEVENT__DISABLE_THREAD_SUPPORT=OFF\" \"-DEVENT__LIBRARY_TYPE=STATIC\" \"-DEVENT__MSVC_STATIC_RUNTIME=ON\" \"-DEVENT__DISABLE_BENCHMARK=ON\" \"-DEVENT__DISABLE_TESTS=ON\" \"-DEVENT__DISABLE_REGRESS=ON\" \"-DEVENT__DISABLE_SAMPLES=ON\" \"-DCMAKE_MAKE_PROGRAM=D:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\" \"-DBUILD_SHARED_LIBS=OFF\" \"-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/toolchains/windows.cmake\" \"-DVCPKG_TARGET_TRIPLET=x64-windows-static\" \"-DVCPKG_SET_CHARSET_FLAG=ON\" \"-DVCPKG_PLATFORM_TOOLSET=v143\" \"-DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY=ON\" \"-DCMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP=TRUE\" \"-DCMAKE_VERBOSE_MAKEFILE=ON\" \"-DVCPKG_APPLOCAL_DEPS=OFF\" \"-DCMAKE_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake\" \"-DCMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION=ON\" \"-DVCPKG_CXX_FLAGS=\" \"-DVCPKG_CXX_FLAGS_RELEASE=\" \"-DVCPKG_CXX_FLAGS_DEBUG=\" \"-DVCPKG_C_FLAGS=\" \"-DVCPKG_C_FLAGS_RELEASE=\" \"-DVCPKG_C_FLAGS_DEBUG=\" \"-DVCPKG_CRT_LINKAGE=static\" \"-DVCPKG_LINKER_FLAGS=\" \"-DVCPKG_LINKER_FLAGS_RELEASE=\" \"-DVCPKG_LINKER_FLAGS_DEBUG=\" \"-DVCPKG_TARGET_ARCHITECTURE=x64\" \"-DCMAKE_INSTALL_LIBDIR:STRING=lib\" \"-DCMAKE_INSTALL_BINDIR:STRING=bin\" \"-D_VCPKG_ROOT_DIR=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg\" \"-D_VCPKG_INSTALLED_DIR=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed\" \"-DVCPKG_MANIFEST_INSTALL=OFF\"\nFAILED: ../CMakeCache.txt \n\"D:/Program Files/CMake/bin/cmake.exe\" -E chdir \"..\" \"D:/Program Files/CMake/bin/cmake.exe\" \"F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/libevent/src/.12-stable-1d4b950f74.clean\" \"-G\" \"Ninja\" \"-DCMAKE_BUILD_TYPE=Release\" \"-DCMAKE_INSTALL_PREFIX=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/pkgs/libevent_x64-windows-static\" \"-DFETCHCONTENT_FULLY_DISCONNECTED=ON\" \"-DEVENT__DISABLE_OPENSSL=ON\" \"-DEVENT__DISABLE_THREAD_SUPPORT=OFF\" \"-DEVENT__LIBRARY_TYPE=STATIC\" \"-DEVENT__MSVC_STATIC_RUNTIME=ON\" \"-DEVENT__DISABLE_BENCHMARK=ON\" \"-DEVENT__DISABLE_TESTS=ON\" \"-DEVENT__DISABLE_REGRESS=ON\" \"-DEVENT__DISABLE_SAMPLES=ON\" \"-DCMAKE_MAKE_PROGRAM=D:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\" \"-DBUILD_SHARED_LIBS=OFF\" \"-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/toolchains/windows.cmake\" \"-DVCPKG_TARGET_TRIPLET=x64-windows-static\" \"-DVCPKG_SET_CHARSET_FLAG=ON\" \"-DVCPKG_PLATFORM_TOOLSET=v143\" \"-DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY=ON\" \"-DCMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP=TRUE\" \"-DCMAKE_VERBOSE_MAKEFILE=ON\" \"-DVCPKG_APPLOCAL_DEPS=OFF\" \"-DCMAKE_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake\" \"-DCMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION=ON\" \"-DVCPKG_CXX_FLAGS=\" \"-DVCPKG_CXX_FLAGS_RELEASE=\" \"-DVCPKG_CXX_FLAGS_DEBUG=\" \"-DVCPKG_C_FLAGS=\" \"-DVCPKG_C_FLAGS_RELEASE=\" \"-DVCPKG_C_FLAGS_DEBUG=\" \"-DVCPKG_CRT_LINKAGE=static\" \"-DVCPKG_LINKER_FLAGS=\" \"-DVCPKG_LINKER_FLAGS_RELEASE=\" \"-DVCPKG_LINKER_FLAGS_DEBUG=\" \"-DVCPKG_TARGET_ARCHITECTURE=x64\" \"-DCMAKE_INSTALL_LIBDIR:STRING=lib\" \"-DCMAKE_INSTALL_BINDIR:STRING=bin\" \"-D_VCPKG_ROOT_DIR=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg\" \"-D_VCPKG_INSTALLED_DIR=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed\" \"-DVCPKG_MANIFEST_INSTALL=OFF\"\nCMake Error at CMakeLists.txt:22 (cmake_minimum_required):\n  Compatibility with CMake < 3.5 has been removed from CMake.\n\n  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax\n  to tell CMake that the project requires at least <min> but has been updated\n  to work with policies introduced by <max> or earlier.\n\n  Or, add -DCMAKE_POLICY_VERSION_MINIMUM=3.5 to try configuring anyway.\n\n\n-- Configuring incomplete, errors occurred!\n[2/2] \"D:/Program Files/CMake/bin/cmake.exe\" -E chdir \"../../x64-windows-static-dbg\" \"D:/Program Files/CMake/bin/cmake.exe\" \"F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/libevent/src/.12-stable-1d4b950f74.clean\" \"-G\" \"Ninja\" \"-DCMAKE_BUILD_TYPE=Debug\" \"-DCMAKE_INSTALL_PREFIX=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/pkgs/libevent_x64-windows-static/debug\" \"-DFETCHCONTENT_FULLY_DISCONNECTED=ON\" \"-DEVENT__DISABLE_OPENSSL=ON\" \"-DEVENT__DISABLE_THREAD_SUPPORT=OFF\" \"-DEVENT__LIBRARY_TYPE=STATIC\" \"-DEVENT__MSVC_STATIC_RUNTIME=ON\" \"-DEVENT__DISABLE_BENCHMARK=ON\" \"-DEVENT__DISABLE_TESTS=ON\" \"-DEVENT__DISABLE_REGRESS=ON\" \"-DEVENT__DISABLE_SAMPLES=ON\" \"-DCMAKE_MAKE_PROGRAM=D:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\" \"-DBUILD_SHARED_LIBS=OFF\" \"-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/toolchains/windows.cmake\" \"-DVCPKG_TARGET_TRIPLET=x64-windows-static\" \"-DVCPKG_SET_CHARSET_FLAG=ON\" \"-DVCPKG_PLATFORM_TOOLSET=v143\" \"-DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY=ON\" \"-DCMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP=TRUE\" \"-DCMAKE_VERBOSE_MAKEFILE=ON\" \"-DVCPKG_APPLOCAL_DEPS=OFF\" \"-DCMAKE_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake\" \"-DCMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION=ON\" \"-DVCPKG_CXX_FLAGS=\" \"-DVCPKG_CXX_FLAGS_RELEASE=\" \"-DVCPKG_CXX_FLAGS_DEBUG=\" \"-DVCPKG_C_FLAGS=\" \"-DVCPKG_C_FLAGS_RELEASE=\" \"-DVCPKG_C_FLAGS_DEBUG=\" \"-DVCPKG_CRT_LINKAGE=static\" \"-DVCPKG_LINKER_FLAGS=\" \"-DVCPKG_LINKER_FLAGS_RELEASE=\" \"-DVCPKG_LINKER_FLAGS_DEBUG=\" \"-DVCPKG_TARGET_ARCHITECTURE=x64\" \"-DCMAKE_INSTALL_LIBDIR:STRING=lib\" \"-DCMAKE_INSTALL_BINDIR:STRING=bin\" \"-D_VCPKG_ROOT_DIR=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg\" \"-D_VCPKG_INSTALLED_DIR=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed\" \"-DVCPKG_MANIFEST_INSTALL=OFF\"\nFAILED: ../../x64-windows-static-dbg/CMakeCache.txt \n\"D:/Program Files/CMake/bin/cmake.exe\" -E chdir \"../../x64-windows-static-dbg\" \"D:/Program Files/CMake/bin/cmake.exe\" \"F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/libevent/src/.12-stable-1d4b950f74.clean\" \"-G\" \"Ninja\" \"-DCMAKE_BUILD_TYPE=Debug\" \"-DCMAKE_INSTALL_PREFIX=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/pkgs/libevent_x64-windows-static/debug\" \"-DFETCHCONTENT_FULLY_DISCONNECTED=ON\" \"-DEVENT__DISABLE_OPENSSL=ON\" \"-DEVENT__DISABLE_THREAD_SUPPORT=OFF\" \"-DEVENT__LIBRARY_TYPE=STATIC\" \"-DEVENT__MSVC_STATIC_RUNTIME=ON\" \"-DEVENT__DISABLE_BENCHMARK=ON\" \"-DEVENT__DISABLE_TESTS=ON\" \"-DEVENT__DISABLE_REGRESS=ON\" \"-DEVENT__DISABLE_SAMPLES=ON\" \"-DCMAKE_MAKE_PROGRAM=D:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\" \"-DBUILD_SHARED_LIBS=OFF\" \"-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/toolchains/windows.cmake\" \"-DVCPKG_TARGET_TRIPLET=x64-windows-static\" \"-DVCPKG_SET_CHARSET_FLAG=ON\" \"-DVCPKG_PLATFORM_TOOLSET=v143\" \"-DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY=ON\" \"-DCMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP=TRUE\" \"-DCMAKE_VERBOSE_MAKEFILE=ON\" \"-DVCPKG_APPLOCAL_DEPS=OFF\" \"-DCMAKE_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake\" \"-DCMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION=ON\" \"-DVCPKG_CXX_FLAGS=\" \"-DVCPKG_CXX_FLAGS_RELEASE=\" \"-DVCPKG_CXX_FLAGS_DEBUG=\" \"-DVCPKG_C_FLAGS=\" \"-DVCPKG_C_FLAGS_RELEASE=\" \"-DVCPKG_C_FLAGS_DEBUG=\" \"-DVCPKG_CRT_LINKAGE=static\" \"-DVCPKG_LINKER_FLAGS=\" \"-DVCPKG_LINKER_FLAGS_RELEASE=\" \"-DVCPKG_LINKER_FLAGS_DEBUG=\" \"-DVCPKG_TARGET_ARCHITECTURE=x64\" \"-DCMAKE_INSTALL_LIBDIR:STRING=lib\" \"-DCMAKE_INSTALL_BINDIR:STRING=bin\" \"-D_VCPKG_ROOT_DIR=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg\" \"-D_VCPKG_INSTALLED_DIR=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed\" \"-DVCPKG_MANIFEST_INSTALL=OFF\"\nCMake Error at CMakeLists.txt:22 (cmake_minimum_required):\n  Compatibility with CMake < 3.5 has been removed from CMake.\n\n  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax\n  to tell CMake that the project requires at least <min> but has been updated\n  to work with policies introduced by <max> or earlier.\n\n  Or, add -DCMAKE_POLICY_VERSION_MINIMUM=3.5 to try configuring anyway.\n\n\n-- Configuring incomplete, errors occurred!\nninja: build stopped: subcommand failed.\n\n### Expected behaviour\n\nsuccessfuly execute:\ncmake -B build --preset vs2022-static\n\n### Steps to reproduce\n\nexecute \ncmake -B build --preset vs2022-static\n\n### Relevant log output\n\n正在安装 40/93 个 libevent[core,thread]:x64-windows-static@2.1.12#7... \n正在生成 libevent[core,thread]:x64-windows-static@2.1.12#7...\nC:\\Users\\win11\\AppData\\Local\\vcpkg\\registries\\git-trees\\49a66da074def8806e42235e6c64af567987498f: info: installing from git registry git+https://github.com/microsoft/vcpkg@49a66da074def8806e42235e6c64af567987498f\n-- Using cached libevent-libevent-release-2.1.12-stable.tar.gz\n-- Extracting source C:/Users/win11/AppData/Local/vcpkg/downloads/libevent-libevent-release-2.1.12-stable.tar.gz\n-- Applying patch fix-file_path.patch\n-- Applying patch fix-LibeventConfig_cmake_in_path.patch\n-- Applying patch fix-usage.patch\n-- Applying patch fix-android-threads.patch\n-- Using source at F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/libevent/src/.12-stable-1d4b950f74.clean\n-- Found external ninja('1.12.1').\n-- Configuring x64-windows-static\nCMake Error at scripts/cmake/vcpkg_execute_required_process.cmake:127 (message):\n    Command failed: \"D:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\" -v\n    Working Directory: F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/libevent/x64-windows-static-rel/vcpkg-parallel-configure\n    Error code: 1\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\n29.0\n\n### Operating system and version\n\nmicrosoft visual studio 2022 17.14.0\n\n### Machine specifications\n\n_No response_",
+      "state": "closed",
+      "user": "John-zhan",
+      "created_at": "2025-05-21T13:04:20Z",
+      "updated_at": "2025-06-15T14:40:53Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32578",
+      "labels": [
+        "Windows",
+        "Build system",
+        "Upstream"
+      ],
+      "comment_list": [
+        {
+          "user": "hebasto",
+          "body": "@John-zhan \n\nYou could use the same workaround as we use in the CI. See https://github.com/bitcoin/bitcoin/pull/32184.",
+          "created_at": "2025-05-21T13:32:26Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "@John-zhan does that work for you?",
+          "created_at": "2025-05-27T11:18:12Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "An alternative would be to just not use cmake 4.x and stick with cmake 3.x for now?",
+          "created_at": "2025-05-27T11:49:29Z"
+        },
+        {
+          "user": "John-zhan",
+          "body": "> [@John-zhan](https://github.com/John-zhan)\n> \n> You could use the same workaround as we use in the CI. See [#32184](https://github.com/bitcoin/bitcoin/pull/32184).\n\n\n\n> [@John-zhan](https://github.com/John-zhan) does that work for you?\n\nOh, no. I'm so sorry. I modify my ci.yml as this:\n\n\n>     - name: Using vcpkg with MSBuild\n        run: |\n          Set-Location \"$env:VCPKG_INSTALLATION_ROOT\"\n          Add-Content -Path \"triplets\\x64-windows.cmake\" -Value \"set(VCPKG_BUILD_TYPE release)\"\n          Add-Content -Path \"triplets\\x64-windows-static.cmake\" -Value \"set(VCPKG_BUILD_TYPE release)\"\n          # Workaround for libevent, which requires CMake 3.1 but is incompatible with CMake >= 4.0.\n          sed -i '1s/^/set(ENV{CMAKE_POLICY_VERSION_MINIMUM} 3.5)\\n/' \"${V...ROOT}/.../ports.cmake\"\n\nand then just execute `rd /s /q build && del /f /q CMakeCache.txt && rd /s /q CMakeFiles`。\nThen `cmake -B build --preset vs2022-static` and now the same error log in the output.\n\nbuild\\vcpkg_installed\\vcpkg\\blds\\libevent\\config-x64-windows-static-out.log file say:\n\n\n> `[1/2] \"D:/Program Files/CMake/bin/cmake.exe\" -E chdir \"..\" \"D:/Program Files/CMake/bin/cmake.exe\" \"F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/libevent/src/.12-stable-1d4b950f74.clean\" \"-G\" \"Ninja\" \"-DCMAKE_BUILD_TYPE=Release\" \"-DCMAKE_INSTALL_PREFIX=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/pkgs/libevent_x64-windows-static\" \"-DFETCHCONTENT_FULLY_DISCONNECTED=ON\" \"-DEVENT__DISABLE_OPENSSL=ON\" \"-DEVENT__DISABLE_THREAD_SUPPORT=OFF\" \"-DEVENT__LIBRARY_TYPE=STATIC\" \"-DEVENT__MSVC_STATIC_RUNTIME=ON\" \"-DEVENT__DISABLE_BENCHMARK=ON\" \"-DEVENT__DISABLE_TESTS=ON\" \"-DEVENT__DISABLE_REGRESS=ON\" \"-DEVENT__DISABLE_SAMPLES=ON\" \"-DCMAKE_MAKE_PROGRAM=D:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\" \"-DBUILD_SHARED_LIBS=OFF\" \"-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/toolchains/windows.cmake\" \"-DVCPKG_TARGET_TRIPLET=x64-windows-static\" \"-DVCPKG_SET_CHARSET_FLAG=ON\" \"-DVCPKG_PLATFORM_TOOLSET=v143\" \"-DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY=ON\" \"-DCMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP=TRUE\" \"-DCMAKE_VERBOSE_MAKEFILE=ON\" \"-DVCPKG_APPLOCAL_DEPS=OFF\" \"-DCMAKE_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake\" \"-DCMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION=ON\" \"-DVCPKG_CXX_FLAGS=\" \"-DVCPKG_CXX_FLAGS_RELEASE=\" \"-DVCPKG_CXX_FLAGS_DEBUG=\" \"-DVCPKG_C_FLAGS=\" \"-DVCPKG_C_FLAGS_RELEASE=\" \"-DVCPKG_C_FLAGS_DEBUG=\" \"-DVCPKG_CRT_LINKAGE=static\" \"-DVCPKG_LINKER_FLAGS=\" \"-DVCPKG_LINKER_FLAGS_RELEASE=\" \"-DVCPKG_LINKER_FLAGS_DEBUG=\" \"-DVCPKG_TARGET_ARCHITECTURE=x64\" \"-DCMAKE_INSTALL_LIBDIR:STRING=lib\" \"-DCMAKE_INSTALL_BINDIR:STRING=bin\" \"-D_VCPKG_ROOT_DIR=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg\" \"-D_VCPKG_INSTALLED_DIR=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed\" \"-DVCPKG_MANIFEST_INSTALL=OFF\"\nFAILED: ../CMakeCache.txt \n\"D:/Program Files/CMake/bin/cmake.exe\" -E chdir \"..\" \"D:/Program Files/CMake/bin/cmake.exe\" \"F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/libevent/src/.12-stable-1d4b950f74.clean\" \"-G\" \"Ninja\" \"-DCMAKE_BUILD_TYPE=Release\" \"-DCMAKE_INSTALL_PREFIX=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/pkgs/libevent_x64-windows-static\" \"-DFETCHCONTENT_FULLY_DISCONNECTED=ON\" \"-DEVENT__DISABLE_OPENSSL=ON\" \"-DEVENT__DISABLE_THREAD_SUPPORT=OFF\" \"-DEVENT__LIBRARY_TYPE=STATIC\" \"-DEVENT__MSVC_STATIC_RUNTIME=ON\" \"-DEVENT__DISABLE_BENCHMARK=ON\" \"-DEVENT__DISABLE_TESTS=ON\" \"-DEVENT__DISABLE_REGRESS=ON\" \"-DEVENT__DISABLE_SAMPLES=ON\" \"-DCMAKE_MAKE_PROGRAM=D:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\" \"-DBUILD_SHARED_LIBS=OFF\" \"-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/toolchains/windows.cmake\" \"-DVCPKG_TARGET_TRIPLET=x64-windows-static\" \"-DVCPKG_SET_CHARSET_FLAG=ON\" \"-DVCPKG_PLATFORM_TOOLSET=v143\" \"-DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON\" \"-DCMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY=ON\" \"-DCMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP=TRUE\" \"-DCMAKE_VERBOSE_MAKEFILE=ON\" \"-DVCPKG_APPLOCAL_DEPS=OFF\" \"-DCMAKE_TOOLCHAIN_FILE=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake\" \"-DCMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION=ON\" \"-DVCPKG_CXX_FLAGS=\" \"-DVCPKG_CXX_FLAGS_RELEASE=\" \"-DVCPKG_CXX_FLAGS_DEBUG=\" \"-DVCPKG_C_FLAGS=\" \"-DVCPKG_C_FLAGS_RELEASE=\" \"-DVCPKG_C_FLAGS_DEBUG=\" \"-DVCPKG_CRT_LINKAGE=static\" \"-DVCPKG_LINKER_FLAGS=\" \"-DVCPKG_LINKER_FLAGS_RELEASE=\" \"-DVCPKG_LINKER_FLAGS_DEBUG=\" \"-DVCPKG_TARGET_ARCHITECTURE=x64\" \"-DCMAKE_INSTALL_LIBDIR:STRING=lib\" \"-DCMAKE_INSTALL_BINDIR:STRING=bin\" \"-D_VCPKG_ROOT_DIR=D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg\" \"-D_VCPKG_INSTALLED_DIR=F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed\" \"-DVCPKG_MANIFEST_INSTALL=OFF\"\nCMake Error at CMakeLists.txt:22 (cmake_minimum_required):\n  Compatibility with CMake < 3.5 has been removed from CMake.\n\n> Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax\n  to tell CMake that the project requires at least <min> but has been updated\n  to work with policies introduced by <max> or earlier.\n\n>  Or, add -DCMAKE_POLICY_VERSION_MINIMUM=3.5 to try configuring anyway.\n\n> -- Configuring incomplete, errors occurred!\nninja: build stopped: subcommand failed.`\n",
+          "created_at": "2025-06-02T00:47:34Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Oh, no. I'm so sorry. I modify my ci.yml as this:\n\nWhat CI are you using? Is the `VCPKG_INSTALLATION_ROOT` environment variable defined there?",
+          "created_at": "2025-06-02T10:44:23Z"
+        },
+        {
+          "user": "John-zhan",
+          "body": "> > Oh, no. I'm so sorry. I modify my ci.yml as this:\n> \n> What CI are you using? Is the `VCPKG_INSTALLATION_ROOT` environment variable defined there?\n\n\nYes. It's\n`sed -i '1s/^/set(ENV{CMAKE_POLICY_VERSION_MINIMUM} 3.5)\\n/' \"${VCPKG_INSTALLATION_ROOT}/scripts/ports.cmake\"`",
+          "created_at": "2025-06-02T13:05:44Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Can you downgrade your cmake from 4.x to 3.x as a temporary workaround?",
+          "created_at": "2025-06-02T13:08:09Z"
+        },
+        {
+          "user": "John-zhan",
+          "body": "Ok, now downgrade my windows cmake version from 4 to 3.31.7。And now when execute 'cmake -B build --preset vs2022-static' it say this:\n\n> 正在安装 55/93 个 openssl:x64-windows@3.3.2#1...\n正在生成 openssl:x64-windows@3.3.2#1...\nC:\\Users\\win11\\AppData\\Local\\vcpkg\\registries\\git-trees\\2c0920b57254210866a89aa705291b452a31df48: info: installing from git registry git+https://github.com/microsoft/vcpkg@2c0920b57254210866a89aa705291b452a31df48\n-- Using cached openssl-openssl-210dc9a50dfd99caa1cf7c3d2fa42850124b1bbc.patch\n-- Using cached openssl-openssl-openssl-3.3.2.tar.gz\n-- Extracting source C:/Users/win11/AppData/Local/vcpkg/downloads/openssl-openssl-openssl-3.3.2.tar.gz\n-- Applying patch cmake-config.patch\n-- Applying patch command-line-length.patch\n-- Applying patch script-prefix.patch\n-- Applying patch asm-armcap.patch\n-- Applying patch windows/install-layout.patch\n-- Applying patch windows/install-pdbs.patch\n-- Applying patch unix/android-cc.patch\n-- Applying patch unix/move-openssldir.patch\n-- Applying patch unix/no-empty-dirs.patch\n-- Applying patch unix/no-static-libs-for-shared.patch\n-- Applying patch C:/Users/win11/AppData/Local/vcpkg/downloads/openssl-openssl-210dc9a50dfd99caa1cf7c3d2fa42850124b1bbc.patch\n-- Using source at F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/openssl/src/nssl-3.3.2-515f0a0017.clean\nDownloading https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54001_64bit_UCRT/strawberry-perl-5.40.0.1-64bit-portable.zip -> strawberry-perl-5.40.0.1-64bit-portable.zip\nstrawberry-perl-5.40.0.1-64bit-portable.zip.2468.part: error: download from https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54001_64bit_UCRT/strawberry-perl-5.40.0.1-64bit-portable.zip had an unexpected hash\nnote: Expected: 374a675917a3d5c03d64633e9f80e333fd0043ec0481473027045b33dc74c43cc80836b5a369b063b8b1feee5228ffc46a6508594314d19f64b9e32e8311fbb5\nnote: Actual  : 353fd49162bf803ce008d90f151c291ac21760857159388ecefcc7d6337e459ce6f6874d9e40dc699568be21d71c21d9efe572c359205633782211610bb3666b\nCMake Error at scripts/cmake/vcpkg_download_distfile.cmake:136 (message):\n  Download failed, halting portfile.\nCall Stack (most recent call first):\n  scripts/cmake/vcpkg_find_acquire_program.cmake:170 (vcpkg_download_distfile)\n  C:/Users/win11/AppData/Local/vcpkg/registries/git-trees/2c0920b57254210866a89aa705291b452a31df48/windows/portfile.cmake:6 (vcpkg_find_acquire_program)\n  C:/Users/win11/AppData/Local/vcpkg/registries/git-trees/2c0920b57254210866a89aa705291b452a31df48/portfile.cmake:76 (include)\n  scripts/ports.cmake:203 (include)\n\n\n> error: 生成 openssl:x64-windows 失败，结果为: BUILD_FAILED\n有关详细信息，请参阅 https://learn.microsoft.com/vcpkg/troubleshoot/build-failures?WT.mc_id=vcpkg_inproduct_cli。\n处理 openssl:x64-windows 所用时间: 7.5 s\n请确保使用具有“git pull” 和 “vcpkg update”的最新端口文件。\n然后，在以下位置查看已知问题:\n  https://github.com/microsoft/vcpkg/issues?q=is%3Aissue+is%3Aopen+in%3Atitle+openssl\n可在以下位置提交新问题:\n  https://github.com/microsoft/vcpkg/issues/new?title=[openssl]+Build+error+on+x64-windows&body=Copy%20issue%20body%20from%20F%3A%2Fworkspace%2Fcode%2Fgithub%2Fbitcoin-29.0%2Fbuild%2Fvcpkg_installed%2Fvcpkg%2Fissue_body.md\n\n> -- Running vcpkg install - failed\nCMake Error at D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake:938 (message):\n  vcpkg install failed.  See logs for more information:\n  F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg-manifest-install.log\nCall Stack (most recent call first):\n  C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeDetermineSystem.cmake:146 (include)\n  CMakeLists.txt:49 (project)\n\n\n> -- Configuring incomplete, errors occurred!",
+          "created_at": "2025-06-02T14:27:29Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Download failed, halting portfile.\n\ncould mean some network or upstream issues.\n\nIf it is not intermittent, please report the issue [upstream](https://github.com/microsoft/vcpkg).",
+          "created_at": "2025-06-02T14:31:00Z"
+        },
+        {
+          "user": "John-zhan",
+          "body": "Now the network problem over, and when continue execute `cmake -B build --preset vs2022-static` have this output:\n\n> -- Building x64-windows-dbg\nCMake Error at scripts/cmake/vcpkg_execute_build_process.cmake:134 (message):\n    Command failed: C:/Users/win11/AppData/Local/vcpkg/downloads/tools/jom/jom-1_1_4/jom.exe /J 17\n    Working Directory: F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/qt5-base/x64-windows-dbg\n    See logs for more information:\n      F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\build-x64-windows-dbg-out.log\n      F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\build-x64-windows-dbg-err.log\n\n> Call Stack (most recent call first):\n  C:/Users/win11/AppData/Local/vcpkg/registries/git-trees/99dfc2c88d6a863afc5eef00463166c50e5e12d2/cmake/install_qt.cmake:86 (vcpkg_execute_build_process)\n  C:/Users/win11/AppData/Local/vcpkg/registries/git-trees/99dfc2c88d6a863afc5eef00463166c50e5e12d2/portfile.cmake:408 (install_qt)\n  scripts/ports.cmake:203 (include)\n\n\n> error: 生成 qt5-base:x64-windows 失败，结果为: BUILD_FAILED\n有关详细信息，请参阅 https://learn.microsoft.com/vcpkg/troubleshoot/build-failures?WT.mc_id=vcpkg_inproduct_cli。\n处理 qt5-base:x64-windows 所用时间: 5.7 min\n请确保使用具有“git pull” 和 “vcpkg update”的最新端口文件。\n然后，在以下位置查看已知问题:\n  https://github.com/microsoft/vcpkg/issues?q=is%3Aissue+is%3Aopen+in%3Atitle+qt5-base\n可在以下位置提交新问题:\n  https://github.com/microsoft/vcpkg/issues/new?title=[qt5-base]+Build+error+on+x64-windows&body=Copy%20issue%20body%20from%20F%3A%2Fworkspace%2Fcode%2Fgithub%2Fbitcoin-29.0%2Fbuild%2Fvcpkg_installed%2Fvcpkg%2Fissue_body.md\n\n> -- Running vcpkg install - failed\nCMake Error at D:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake:938 (message):\n  vcpkg install failed.  See logs for more information:\n  F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg-manifest-install.log\nCall Stack (most recent call first):\n  C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeDetermineSystem.cmake:146 (include)\n  CMakeLists.txt:49 (project)\n\n\n> -- Configuring incomplete, errors occurred!\n\nAnd F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\build-x64-windows-dbg-err.log file say errors:\n\n> cl: 命令行 warning D9025 :正在重写“/Zi”(用“/Z7”)\njom: F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\x64-windows-dbg\\src\\platformsupport\\fontdatabases\\Makefile.Debug [.obj\\debug\\qwindowsfontdatabase.obj] Error 2\njom: F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\x64-windows-dbg\\src\\platformsupport\\fontdatabases\\Makefile.Debug [.obj\\debug\\qwindowsfontdatabase_ft.obj] Error 2\njom: F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\x64-windows-dbg\\src\\platformsupport\\fontdatabases\\Makefile [debug] Error 2\njom: F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\x64-windows-dbg\\src\\platformsupport\\Makefile [sub-fontdatabases-make_first] Error 2\njom: F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\x64-windows-dbg\\src\\Makefile [sub-platformsupport-make_first] Error 2\nWARNING: Failure to find: F:/workspace/code/github/bitcoin-29.0/build/vcpkg_installed/vcpkg/blds/qt5-base/x64-windows-dbg/src/widgets/qt5widgets_metatypes.json\ncl: 命令行 warning D9025 :正在重写“/Zi”(用“/Z7”)\n.\n.\n.\ncl: 命令行 warning D9025 :正在重写“/Zi”(用“/Z7”)\njom: F:\\workspace\\code\\github\\bitcoin-29.0\\build\\vcpkg_installed\\vcpkg\\blds\\qt5-base\\x64-windows-dbg\\Makefile [sub-src-make_first] Error 2\n",
+          "created_at": "2025-06-03T11:10:02Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "You could:\n1. Check the free disk space on your machine.\n\n2. Check whether the issue is resolved as described in https://github.com/bitcoin/bitcoin/blob/master/doc/build-windows-msvc.md#4-building-with-static-linking-with-gui\n\nAs a last resort, please report the issue [upstream](https://github.com/microsoft/vcpkg).",
+          "created_at": "2025-06-03T11:18:47Z"
+        },
+        {
+          "user": "John-zhan",
+          "body": "I have do as https://github.com/microsoft/vcpkg/issues/45814 and now cmake successfully config, and build bitcoin success.",
+          "created_at": "2025-06-05T13:53:25Z"
+        }
+      ]
+    },
+    {
+      "number": 32576,
+      "title": "test: `tool_wallet.py` references no-longer used CI",
+      "body": "We no longer use Appveyor, so any code that existed to support it, should be dropped:\n\nhttps://github.com/bitcoin/bitcoin/blob/54e406a3055ad0454a576f14b51def34ab8e9209/test/functional/tool_wallet.py#L160\n\nhttps://github.com/bitcoin/bitcoin/blob/54e406a3055ad0454a576f14b51def34ab8e9209/test/functional/tool_wallet.py#L171",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2025-05-21T10:05:58Z",
+      "updated_at": "2025-06-08T15:55:04Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32576",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "jonatack",
+          "body": "https://github.com/bitcoin/bitcoin/pull/28116 addresses it. Can update it.",
+          "created_at": "2025-05-21T13:49:59Z"
+        },
+        {
+          "user": "m3dwards",
+          "body": "Removing '666' fails tests on windows: https://github.com/m3dwards/bitcoin/actions/runs/15213032706/job/42791654918\n\nSuggest just changing comment to:\n\n`666 on Windows`",
+          "created_at": "2025-05-23T15:42:52Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "@m3dwards those comments can be dropped completely; see #28116, which I will update and open.",
+          "created_at": "2025-05-23T18:28:34Z"
+        },
+        {
+          "user": "Mercy435",
+          "body": "Hi @jonatack, I noticed this issue (#32576) is still open and that your previous PR (#28116) was closed a while back. Are you still planning to work on it?\n\nIf not, I’d be happy to take it over and submit a small PR to remove the outdated Appveyor-related comments. Let me know — I can have a patch ready in a few days.  ",
+          "created_at": "2025-06-08T12:53:35Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Hi @Mercy435 -- yes, am updating #28116.",
+          "created_at": "2025-06-08T15:45:56Z"
+        },
+        {
+          "user": "Mercy435",
+          "body": "Thanks for the quick update, @jonatack! Glad to hear you're on it and updating #28116. Please feel free to reach out if there’s any way I can help.\n\n",
+          "created_at": "2025-06-08T15:55:02Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 4,
+    "issues": 2
+  }
+}

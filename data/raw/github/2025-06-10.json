@@ -1,0 +1,393 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:49:26.043324+00:00",
+  "date": "2025-06-10",
+  "pull_requests": [
+    {
+      "number": 32723,
+      "title": "Refactor: Redefine CTransaction equality to include witness data",
+      "body": "I stumbled upon the `CTransaction` comparison operators while refactoring some nearby code. I found it surprising and not at all obvious that two transactions would test equal even if their witness data differed. It seems like an unnecessary potential footgun. Fix that by comparing against wtxid rather than txid.\r\n\r\nOutside of tests, there were only 3 users of these functions in the code-base:\r\n- Its use in the mempool has been replaced with an explicit txid comparison, as that's a tighter constraint and matches the old behavior. glozow suggested also upgrading this to an `Assume()`.\r\n- Its use in the wallet was accidentally doing the correct thing by ignoring witness data. I've changed that to an explicit witness removal so that `IsEquivalentTo` continues to work as-intended.\r\n- Its use in `getrawtransaction` is indifferent to the change.",
+      "state": "closed",
+      "user": "theuni",
+      "created_at": "2025-06-10T22:16:14Z",
+      "updated_at": "2025-07-02T14:32:23Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32723",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32723.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [glozow](https://github.com/bitcoin/bitcoin/pull/32723#pullrequestreview-2917921278), [maflcko](https://github.com/bitcoin/bitcoin/pull/32723#issuecomment-3004059285), [achow101](https://github.com/bitcoin/bitcoin/pull/32723#issuecomment-3025611532) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-10T22:16:17Z"
+        },
+        {
+          "user": "theuni",
+          "body": "Ping @achow101 and @glozow to check my assumptions about the wallet/mempool uses.",
+          "created_at": "2025-06-10T22:17:12Z"
+        },
+        {
+          "user": "achow101",
+          "body": "`CWalletTx::IsEquivalentTo` needs to consider malleated txs as equivalent, so the original behavior of ignoring the scriptSigs and scriptWitness is intended.",
+          "created_at": "2025-06-10T23:21:26Z"
+        },
+        {
+          "user": "theuni",
+          "body": "> `CWalletTx::IsEquivalentTo` needs to consider malleated txs as equivalent, so the original behavior of ignoring the scriptSigs and scriptWitness is intended.\r\n\r\n@achow101 Thanks for confirming. Indeed there should be no functional change here from the original behavior. It currently works by virtue of the equality operator comparing txids, but that's not _at all_ obvious just from looking at `IsEquivalentTo`. I figured it just kinda accidentally kept working correctly post-segwit, but I guess you were aware of that quirk :)\r\n\r\nManually stripping the witness scripts as well is much more straightforward imo.",
+          "created_at": "2025-06-11T13:31:38Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "Seems like it might be best to forbid operator== entirely and require comparisons to be explicit about whether witness data is compared or not.",
+          "created_at": "2025-06-24T23:22:08Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm. Also, seems fine to remove it and add a `Equals(const CTransaction& other, const EqualsOptions = {})`, where\r\n\r\n```cpp\r\nstruct EqualsOptions{\r\n bool include_script_sig{true};\r\n bool include_witness_data{true};\r\n};\r\n```\r\n\r\nreview ACK 6efbd1e1dcdfbe9eae2d5c22abab3ee616a75ff2 🦋\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK 6efbd1e1dcdfbe9eae2d5c22abab3ee616a75ff2 🦋\r\nN0uT90G8PsnnIuFw4bOkG8Wa6pwZI9a2+iJm9OgP0xXhBPuVjz+8o9x6kcelzHO6Qk+Dn1fShRbsXI88RS4NAA==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-06-25T09:24:06Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 6efbd1e1dcdfbe9eae2d5c22abab3ee616a75ff2",
+          "created_at": "2025-07-01T21:35:43Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Just for reference and fun, not as a pull request, the `EqualsOptions` patch would look something like:\r\n\r\n```diff\r\ndiff --git a/src/primitives/transaction.h b/src/primitives/transaction.h\r\nindex ad81727094..7eb8ded479 100644\r\n--- a/src/primitives/transaction.h\r\n+++ b/src/primitives/transaction.h\r\n@@ -289,6 +289,10 @@ inline CAmount CalculateOutputValue(const TxType& tx)\r\n }\r\n \r\n \r\n+struct EqualsOptions {\r\n+    bool include_script_sig{true};\r\n+    bool include_witness_data{true};\r\n+};\r\n /** The basic transaction that is broadcasted on the network and contained in\r\n  * blocks.  A transaction can contain multiple inputs and outputs.\r\n  */\r\n@@ -358,14 +362,14 @@ public:\r\n         return (vin.size() == 1 && vin[0].prevout.IsNull());\r\n     }\r\n \r\n-    friend bool operator==(const CTransaction& a, const CTransaction& b)\r\n-    {\r\n-        return a.GetWitnessHash() == b.GetWitnessHash();\r\n-    }\r\n-\r\n-    friend bool operator!=(const CTransaction& a, const CTransaction& b)\r\n+    bool Equals(const CTransaction& other, const EqualsOptions opts = {}) const\r\n     {\r\n-        return !operator==(a, b);\r\n+        return nLockTime == other.nLockTime && version == other.version && vout == other.vout &&\r\n+               std::ranges::equal(vin, other.vin, [&opts](const CTxIn self, const CTxIn other) {\r\n+                   return self.prevout == other.prevout && (opts.include_script_sig ? self.scriptSig == other.scriptSig : true) &&\r\n+                          self.nSequence == other.nSequence &&\r\n+                          (opts.include_witness_data ? self.scriptWitness.stack == other.scriptWitness.stack : true);\r\n+               });\r\n     }\r\n \r\n     std::string ToString() const;\r\ndiff --git a/src/rpc/rawtransaction.cpp b/src/rpc/rawtransaction.cpp\r\nindex 9c26e5c733..c6662220ba 100644\r\n--- a/src/rpc/rawtransaction.cpp\r\n+++ b/src/rpc/rawtransaction.cpp\r\n@@ -401,7 +401,7 @@ static RPCHelpMan getrawtransaction()\r\n     }\r\n \r\n     CTxUndo* undoTX {nullptr};\r\n-    auto it = std::find_if(block.vtx.begin(), block.vtx.end(), [tx](CTransactionRef t){ return *t == *tx; });\r\n+    auto it = std::find_if(block.vtx.begin(), block.vtx.end(), [tx](CTransactionRef t){ return t->Equals(*tx); });\r\n     if (it != block.vtx.end()) {\r\n         // -1 as blockundo does not have coinbase tx\r\n         undoTX = &blockUndo.vtxundo.at(it - block.vtx.begin() - 1);\r\ndiff --git a/src/test/fuzz/primitives_transaction.cpp b/src/test/fuzz/primitives_transaction.cpp\r\nindex 64f1c8cf8d..7bc774b5e1 100644\r\n--- a/src/test/fuzz/primitives_transaction.cpp\r\n+++ b/src/test/fuzz/primitives_transaction.cpp\r\n@@ -29,6 +29,6 @@ FUZZ_TARGET(primitives_transaction)\r\n     if (mutable_tx_1 && mutable_tx_2) {\r\n         const CTransaction tx_1{*mutable_tx_1};\r\n         const CTransaction tx_2{*mutable_tx_2};\r\n-        assert((tx_1 == tx_2) != (tx_1 != tx_2));\r\n+        (void)tx_1.Equals(tx_2);\r\n     }\r\n }\r\ndiff --git a/src/test/serialize_tests.cpp b/src/test/serialize_tests.cpp\r\nindex 33a9133d2e..e56a0be73b 100644\r\n--- a/src/test/serialize_tests.cpp\r\n+++ b/src/test/serialize_tests.cpp\r\n@@ -57,7 +57,7 @@ public:\r\n                boolval == rhs.boolval &&\r\n                stringval == rhs.stringval &&\r\n                strcmp(charstrval, rhs.charstrval) == 0 &&\r\n-               *txval == *rhs.txval;\r\n+               txval->Equals(*rhs.txval);\r\n     }\r\n };\r\n \r\ndiff --git a/src/test/transaction_tests.cpp b/src/test/transaction_tests.cpp\r\nindex 54b3216a4c..e745b08d39 100644\r\n--- a/src/test/transaction_tests.cpp\r\n+++ b/src/test/transaction_tests.cpp\r\n@@ -738,7 +738,7 @@ BOOST_AUTO_TEST_CASE(test_witness)\r\n     CheckWithFlag(output1, input1, SCRIPT_VERIFY_NONE, false);\r\n     CreateCreditAndSpend(keystore2, scriptMulti, output2, input2, false);\r\n     CheckWithFlag(output2, input2, SCRIPT_VERIFY_NONE, false);\r\n-    BOOST_CHECK(*output1 == *output2);\r\n+    BOOST_CHECK(output1->Equals(*output2));\r\n     UpdateInput(input1.vin[0], CombineSignatures(input1, input2, output1));\r\n     CheckWithFlag(output1, input1, STANDARD_SCRIPT_VERIFY_FLAGS, true);\r\n \r\n@@ -749,7 +749,7 @@ BOOST_AUTO_TEST_CASE(test_witness)\r\n     CreateCreditAndSpend(keystore2, GetScriptForDestination(ScriptHash(scriptMulti)), output2, input2, false);\r\n     CheckWithFlag(output2, input2, SCRIPT_VERIFY_NONE, true);\r\n     CheckWithFlag(output2, input2, SCRIPT_VERIFY_P2SH, false);\r\n-    BOOST_CHECK(*output1 == *output2);\r\n+    BOOST_CHECK(output1->Equals(*output2));\r\n     UpdateInput(input1.vin[0], CombineSignatures(input1, input2, output1));\r\n     CheckWithFlag(output1, input1, SCRIPT_VERIFY_P2SH, true);\r\n     CheckWithFlag(output1, input1, STANDARD_SCRIPT_VERIFY_FLAGS, true);\r\n@@ -761,7 +761,7 @@ BOOST_AUTO_TEST_CASE(test_witness)\r\n     CreateCreditAndSpend(keystore2, destination_script_multi, output2, input2, false);\r\n     CheckWithFlag(output2, input2, SCRIPT_VERIFY_NONE, true);\r\n     CheckWithFlag(output2, input2, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS, false);\r\n-    BOOST_CHECK(*output1 == *output2);\r\n+    BOOST_CHECK(output1->Equals(*output2));\r\n     UpdateInput(input1.vin[0], CombineSignatures(input1, input2, output1));\r\n     CheckWithFlag(output1, input1, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS, true);\r\n     CheckWithFlag(output1, input1, STANDARD_SCRIPT_VERIFY_FLAGS, true);\r\n@@ -773,7 +773,7 @@ BOOST_AUTO_TEST_CASE(test_witness)\r\n     CreateCreditAndSpend(keystore2, GetScriptForDestination(ScriptHash(destination_script_multi)), output2, input2, false);\r\n     CheckWithFlag(output2, input2, SCRIPT_VERIFY_P2SH, true);\r\n     CheckWithFlag(output2, input2, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS, false);\r\n-    BOOST_CHECK(*output1 == *output2);\r\n+    BOOST_CHECK(output1->Equals(*output2));\r\n     UpdateInput(input1.vin[0], CombineSignatures(input1, input2, output1));\r\n     CheckWithFlag(output1, input1, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS, true);\r\n     CheckWithFlag(output1, input1, STANDARD_SCRIPT_VERIFY_FLAGS, true);\r\ndiff --git a/src/wallet/transaction.cpp b/src/wallet/transaction.cpp\r\nindex a611a034d9..13ef690403 100644\r\n--- a/src/wallet/transaction.cpp\r\n+++ b/src/wallet/transaction.cpp\r\n@@ -11,17 +11,7 @@ using interfaces::FoundBlock;\r\n namespace wallet {\r\n bool CWalletTx::IsEquivalentTo(const CWalletTx& _tx) const\r\n {\r\n-        CMutableTransaction tx1 {*this->tx};\r\n-        CMutableTransaction tx2 {*_tx.tx};\r\n-        for (auto& txin : tx1.vin) {\r\n-            txin.scriptSig = CScript();\r\n-            txin.scriptWitness.SetNull();\r\n-        }\r\n-        for (auto& txin : tx2.vin) {\r\n-            txin.scriptSig = CScript();\r\n-            txin.scriptWitness.SetNull();\r\n-        }\r\n-        return CTransaction(tx1) == CTransaction(tx2);\r\n+    return tx->Equals(*_tx.tx, {.include_script_sig = false, .include_witness_data = false});\r\n }\r\n \r\n bool CWalletTx::InMempool() const",
+          "created_at": "2025-07-02T14:32:23Z"
+        }
+      ]
+    },
+    {
+      "number": 32721,
+      "title": "wallet, rpc: Remove deprecated balances from getwalletinfo and getunconfirmedbalance",
+      "body": "`getwalletinfo` result fields `balance`, `immature_balance`, and `unconfirmed_balance`, and the `getunconfirmedbalance` RPC have all been deprecated since 0.19.0. It's been long enough that they should either be removed or undeprecated. The functionality provided by these RPCs is provided by `getbalances`.",
+      "state": "closed",
+      "user": "achow101",
+      "created_at": "2025-06-10T19:15:56Z",
+      "updated_at": "2025-06-25T20:45:49Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32721",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32721.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [rkrux](https://github.com/bitcoin/bitcoin/pull/32721#pullrequestreview-2921691287), [BrandonOdiwuor](https://github.com/bitcoin/bitcoin/pull/32721#pullrequestreview-2921936952), [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32721#issuecomment-2967814570), [w0xlt](https://github.com/bitcoin/bitcoin/pull/32721#pullrequestreview-2922252169) |\n| Concept ACK | [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/32721#pullrequestreview-2915057715) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-10T19:15:59Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "ACK https://github.com/bitcoin/bitcoin/commit/c3fe85e2d6dd4f251a62a99fd891b0fa370f9712\r\n\r\nGood enough as-is, but I would personally prefer un-deprecating the balance fields in `getwalletinfo` to removing them, as the only good reason for removing them seems to be that another RPC does that, but that hasn't stopped overlapping functionality in RPC's elsewhere, and showing balances seems pretty reasonably in-scope for `getwalletinfo`.",
+          "created_at": "2025-06-12T18:33:23Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Not required, but I think it would be nice to write a release note mentioning \"`getunconfirmedbalance` and these fields from `getwalletinfo` which were deprecated in 0.19 are now unavailable. Here are the equivalent fields from `getbalances`: etc etc etc\"",
+          "created_at": "2025-06-25T20:37:10Z"
+        }
+      ]
+    },
+    {
+      "number": 32720,
+      "title": "docs: add guidance on initialism capitalisation in PascalCase identifiers.",
+      "body": "Fixes #32698\r\n\r\n**Problem**\r\nInconsistent initialization of class,function, method identifiers and structs. Spread throughout the codebase is [screaming / acronym caps](https://gist.github.com/adashrod/66564c690906c9b774e77ddacbd06e1b).\r\n\r\n**Solution**\r\n* Add a rule in the developer notes to use consistent camelcase naming convention.\r\n* A class names like `JSONRPCRequest` should be `JsonRpcRequest`.",
+      "state": "closed",
+      "user": "Muniru0",
+      "created_at": "2025-06-10T18:35:11Z",
+      "updated_at": "2025-10-22T15:20:43Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32720",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32720.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [janb84](https://github.com/bitcoin/bitcoin/pull/32720#pullrequestreview-2975291425), [maflcko](https://github.com/bitcoin/bitcoin/pull/32720#issuecomment-3023891382) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-10T18:35:14Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/43835056566</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by a lint check error related to trailing whitespace in a documentation file.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-06-10T18:51:19Z"
+        },
+        {
+          "user": "sipa",
+          "body": "-0, I don't see why this can't be left to the author, given how rare it is.",
+          "created_at": "2025-06-12T11:24:45Z"
+        },
+        {
+          "user": "Muniru0",
+          "body": "To balance attribution with long-term stability, I recommend that we:\r\n\r\n- Embed a succinct, self-contained summary of the policy’s reasoning directly in the developer notes, so that the purpose and benefits of the convention remain immediately accessible even if the external link breaks.\r\n\r\nAlso take into consideration the `nit` of @janb84.\r\n\r\nWith these clarifications or adjustments in place, I trust we can all concur on the final structure.",
+          "created_at": "2025-06-12T13:54:21Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Seems fine. No strong opinion, but at least the two lines of docs shouldn't add several typos, see https://github.com/bitcoin/bitcoin/pull/32720#issuecomment-2960249863",
+          "created_at": "2025-06-25T08:39:00Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Please squash your commits according to https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#squashing-commits",
+          "created_at": "2025-06-30T06:27:56Z"
+        },
+        {
+          "user": "Muniru0",
+          "body": "> Please squash your commits according to https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#squashing-commits\r\n\r\naaah, forgot. thanks",
+          "created_at": "2025-06-30T08:15:25Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK b6f3b335002a6fa5095bedb8ad22a71fce5d35fb",
+          "created_at": "2025-07-01T12:52:14Z"
+        },
+        {
+          "user": "achow101",
+          "body": "This PR does not seem to have attracted much attention from reviewers. As such, it does not seem important enough right now to keep it sitting idle in the list of open PRs.\r\n\r\nClosing due to lack of interest.",
+          "created_at": "2025-10-22T15:20:42Z"
+        }
+      ]
+    },
+    {
+      "number": 32719,
+      "title": "doc, windows: CompanyName \"Bitcoin\" => \"Bitcoin Core project\"",
+      "body": "Brings Windows executables in line with */share/setup.nsi.in:14* used by the installer.\r\n\r\nDiscovered while reviewing tangential PR: https://github.com/bitcoin/bitcoin/pull/32634#discussion_r2112641918",
+      "state": "closed",
+      "user": "hodlinator",
+      "created_at": "2025-06-10T18:27:39Z",
+      "updated_at": "2025-06-12T19:55:34Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32719",
+      "labels": [
+        "Windows"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32719.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32719#issuecomment-2961538055), [Sjors](https://github.com/bitcoin/bitcoin/pull/32719#issuecomment-2961600141), [janb84](https://github.com/bitcoin/bitcoin/pull/32719#pullrequestreview-2916143213), [hebasto](https://github.com/bitcoin/bitcoin/pull/32719#pullrequestreview-2916267444) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-10T18:27:41Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Tooltip shown when hovering mouse cursor above bitcoin-qt.exe:\r\n\r\nBefore:\r\n![Before](https://github.com/user-attachments/assets/67605894-8814-473c-8e0c-c818d7f18ebd)\r\n\r\nAfter:\r\n![After](https://github.com/user-attachments/assets/13fe6567-d765-402b-a9ee-69c55d5701dd)",
+          "created_at": "2025-06-10T18:30:08Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Makes sense to have the same metadata for the installer and the executables.\r\n\r\nlgtm ACK 239fc4d62e73511b3ef5117706d4c5131a921955",
+          "created_at": "2025-06-11T07:24:45Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "utACK 239fc4d62e73511b3ef5117706d4c5131a921955",
+          "created_at": "2025-06-11T07:48:47Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "My Guix build:\r\n```\r\naarch64\r\n458b3244f108716a6439c79c99f50da02eeec8e980e995455727fc134630e471  guix-build-239fc4d62e73/output/dist-archive/bitcoin-239fc4d62e73.tar.gz\r\n19e34684107ea85baf7949d341dda007849860ff4341bc5139c1dd61a37a9c48  guix-build-239fc4d62e73/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n4515f2169e10825fa02a34aebd7c928ff366ee2481b4332180cd410fe5e56031  guix-build-239fc4d62e73/output/x86_64-w64-mingw32/bitcoin-239fc4d62e73-win64-codesigning.tar.gz\r\n20a47574d6875275812c08cbbe108696f8761e62ba04f19b011c892a78d4a61c  guix-build-239fc4d62e73/output/x86_64-w64-mingw32/bitcoin-239fc4d62e73-win64-debug.zip\r\n4fd6f3b1e79d3aad6e4ac6feb4169aa84924bb02de8ec754f7fa7c689ab09b98  guix-build-239fc4d62e73/output/x86_64-w64-mingw32/bitcoin-239fc4d62e73-win64-setup-unsigned.exe\r\n781edc16d9974df92ff25ea23b6cf78abd6b0a2f1f7d11fa12f3ad96810d042a  guix-build-239fc4d62e73/output/x86_64-w64-mingw32/bitcoin-239fc4d62e73-win64-unsigned.zip\r\n```",
+          "created_at": "2025-06-11T09:21:37Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #32589.",
+          "created_at": "2025-06-11T16:26:53Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--9cd9c72976c961c55c7acef8f6ba82cd-->\n### Guix builds (on x86_64) [untrusted test-only build, possibly unsafe, not for production use]\n\n| File | commit 4b8ac9eacd1b20686b84895560982eb742be894e<br>(master) | commit b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5<br>(pull/32719/merge) |\n|--|--|--|\n| *-aarch64-linux-gnu-debug.tar.gz | [`95843d791689a0d6...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-aarch64-linux-gnu-debug.tar.gz) | [`6640674e73a619bb...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-aarch64-linux-gnu-debug.tar.gz) |\n| *-aarch64-linux-gnu.tar.gz | [`5902b6b4f6e8acb5...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-aarch64-linux-gnu.tar.gz) | [`bf7ace6eb4aeb23d...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-aarch64-linux-gnu.tar.gz) |\n| *-arm-linux-gnueabihf-debug.tar.gz | [`ae866e8a69a6a131...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-arm-linux-gnueabihf-debug.tar.gz) | [`2a8b58a16e39f46b...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-arm-linux-gnueabihf-debug.tar.gz) |\n| *-arm-linux-gnueabihf.tar.gz | [`d0ad05f39e0f3961...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-arm-linux-gnueabihf.tar.gz) | [`d3b469d10bcac3a9...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-arm-linux-gnueabihf.tar.gz) |\n| *-arm64-apple-darwin-codesigning.tar.gz | [`bff03356722dedf7...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-arm64-apple-darwin-codesigning.tar.gz) | [`0e0f416c4968f747...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-arm64-apple-darwin-codesigning.tar.gz) |\n| *-arm64-apple-darwin-unsigned.tar.gz | [`35903897cc214374...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-arm64-apple-darwin-unsigned.tar.gz) | [`9dcd40bf5f43abfb...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-arm64-apple-darwin-unsigned.tar.gz) |\n| *-arm64-apple-darwin-unsigned.zip | [`184d537bbed13561...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-arm64-apple-darwin-unsigned.zip) | [`6b69ac29cfdcd478...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-arm64-apple-darwin-unsigned.zip) |\n| *-powerpc64-linux-gnu-debug.tar.gz | [`7a8eaa57cfa61411...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-powerpc64-linux-gnu-debug.tar.gz) | [`80a4e9c6b2a28550...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-powerpc64-linux-gnu-debug.tar.gz) |\n| *-powerpc64-linux-gnu.tar.gz | [`4d82633d664ec7e5...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-powerpc64-linux-gnu.tar.gz) | [`1274f3a59229c887...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-powerpc64-linux-gnu.tar.gz) |\n| *-riscv64-linux-gnu-debug.tar.gz | [`d60a68e9bbdca8e1...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-riscv64-linux-gnu-debug.tar.gz) | [`454dfe3adb75fd4c...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-riscv64-linux-gnu-debug.tar.gz) |\n| *-riscv64-linux-gnu.tar.gz | [`428d2aabf5bb0127...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-riscv64-linux-gnu.tar.gz) | [`4111d9715884d984...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-riscv64-linux-gnu.tar.gz) |\n| *-x86_64-apple-darwin-codesigning.tar.gz | [`12bdcf4eab32ebab...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-x86_64-apple-darwin-codesigning.tar.gz) | [`49998fac5a57b532...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-x86_64-apple-darwin-codesigning.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.tar.gz | [`c3c1757df2637822...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-x86_64-apple-darwin-unsigned.tar.gz) | [`04efb1fa9fed635e...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-x86_64-apple-darwin-unsigned.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.zip | [`b9babe4d47e333a9...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-x86_64-apple-darwin-unsigned.zip) | [`5e9b9fd36264be32...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-x86_64-apple-darwin-unsigned.zip) |\n| *-x86_64-linux-gnu-debug.tar.gz | [`16ee30da81277705...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-x86_64-linux-gnu-debug.tar.gz) | [`29f926a9cdc68aec...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-x86_64-linux-gnu-debug.tar.gz) |\n| *-x86_64-linux-gnu.tar.gz | [`65cd1bf1fc356db2...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b-x86_64-linux-gnu.tar.gz) | [`f7ad3e7a8a5febb4...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e-x86_64-linux-gnu.tar.gz) |\n| *.tar.gz | [`2ae252bdf1632a85...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/bitcoin-4b8ac9eacd1b.tar.gz) | [`57bdb8549739b81f...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/bitcoin-b7689e07a35e.tar.gz) |\n| SHA256SUMS.part | [`028db81f12d961c7...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/SHA256SUMS.part) | [`7cd6dcc2c53e1a11...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/SHA256SUMS.part) |\n| guix_build.log | [`bec9fa8833ef378d...`](https://drahtbot.space/guix/monotree/4b8ac9eacd1b20686b84895560982eb742be894e/guix_build.log) | [`57f0866619e770ef...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/guix_build.log) |\n| guix_build.log.diff |  | [`fb02fb170dd049f6...`](https://drahtbot.space/guix/monotree/b7689e07a35ef8ff6ebb9f8bf90339f45b9e2fc5/guix_build.log.diff) |\n\n",
+          "created_at": "2025-06-11T18:38:18Z"
+        }
+      ]
+    },
+    {
+      "number": 32718,
+      "title": "docs: add guidance on initialism capitalisation in PascalCase identifiers.",
+      "body": "Fixes #32698\r\n\r\n**Problem**\r\nInconsistent initialization of class,function, method identifiers and structs. Spread throughout the codebase is [screaming / acronym caps](https://gist.github.com/adashrod/66564c690906c9b774e77ddacbd06e1b).\r\n\r\n**Solution**\r\n* Add a rule in the developer notes to use consistent camelcase naming convention.\r\n* A class names like `JSONRPCRequest` should be `JsonRpcRequest`.\r\n\r\n all existing tests pass.",
+      "state": "closed",
+      "user": "Muniru0",
+      "created_at": "2025-06-10T17:57:23Z",
+      "updated_at": "2025-07-15T16:38:34Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32718",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32718.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- do not to use -> do not use [extra “to”]\n- acronymn -> acronym [misspelling]\n\n<sup>drahtbot_id_4_m</sup>\n",
+          "created_at": "2025-06-10T17:57:26Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> all existing tests pass.\r\n\r\nno they do not\r\n\r\n(There is no point in trying to claim the tests pass. Most tests are run in the CI, so anyone can see for themselves or run them themselves. If there is a test that isn't run in CI, it would be good to mention it. However, this is just a doc change.)",
+          "created_at": "2025-06-10T18:00:25Z"
+        },
+        {
+          "user": "Muniru0",
+          "body": "> > all existing tests pass.\r\n> \r\n> no they do not\r\n> \r\n> (There is no point in trying to claim the tests pass. Most tests are run in the CI, so anyone can see for themselves or run them themselves. If there is a test that isn't run in CI, it would be good to mention it. However, this is just a doc change.)\r\n\r\nI first push it to my branch and had no conflicts. So that is why I said the test passed before I push them here. And anyway I am currently resolving the error.",
+          "created_at": "2025-06-10T18:18:14Z"
+        }
+      ]
+    },
+    {
+      "number": 32717,
+      "title": "doc: Update Qt 6 packages on FreeBSD",
+      "body": "See:\r\n- https://cgit.freebsd.org/ports/tree/devel/qt6-base\r\n- https://cgit.freebsd.org/ports/tree/devel/qt6-translations",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-06-10T16:50:12Z",
+      "updated_at": "2025-06-13T10:32:28Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32717",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32717.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [vasild](https://github.com/bitcoin/bitcoin/pull/32717#pullrequestreview-2923404797) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-10T16:50:15Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "cc @vasild ",
+          "created_at": "2025-06-10T16:50:26Z"
+        }
+      ]
+    },
+    {
+      "number": 32716,
+      "title": "depends: Override host compilers for FreeBSD and OpenBSD",
+      "body": "When building depends on FreeBSD/OpenBSD `aarch64`, the host compilers default to `default_host_{CC,CXX}`, which resolves to `gcc`/`g++`. This is incorrect on these systems, where Clang is the default system compiler.\r\n\r\nTo ensure proper compiler selection, this PR adopts the same approach used for `darwin`:https://github.com/bitcoin/bitcoin/blob/c1d4253d316ea627f46b26e395d7b48842258381/depends/builders/darwin.mk#L12-L14\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/32691.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-06-10T14:02:52Z",
+      "updated_at": "2025-07-03T11:16:47Z",
+      "comments": 24,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32716",
+      "labels": [
+        "Build system"
+      ]
+    },
+    {
+      "number": 32714,
+      "title": "init, doc: Replace datacarrier(size) deprecation with non-recommendation text",
+      "body": "Instead of marking `-datacarrier` and `-datacarriersize` options as deprecated, only say that these options are not recommended for use.\r\n\r\nWhile deprecation obviously means that the options are not recommended for use, many users seem to believe that it also means that the options will be imminently removed. My understanding is that there is currently no plan to remove these options in the near future, and I don't think it would be wise to open a PR to remove the options for a few more years. While deprecation certainly does not give a timeline for removal, and the current text is still technically correct, I think that it would be clearer to users to remove the word \"deprecated\" from the documentation of this option while preserving the non-recommendation.\r\n\r\nOne thing that could be bikeshed is whether to warn on init if these options are set. IMO we should not have removal warnings if there is no current plan to actually remove them.",
+      "state": "closed",
+      "user": "achow101",
+      "created_at": "2025-06-10T04:41:08Z",
+      "updated_at": "2025-09-25T09:44:52Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32714",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32714.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32714#issuecomment-2957850915), [maflcko](https://github.com/bitcoin/bitcoin/pull/32714#issuecomment-2957749613) |\n| Concept NACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/32714#issuecomment-2957986589), [waketraindev](https://github.com/bitcoin/bitcoin/pull/32714#issuecomment-2958341821), [hodlinator](https://github.com/bitcoin/bitcoin/pull/32714#issuecomment-2958563890), [fjahr](https://github.com/bitcoin/bitcoin/pull/32714#issuecomment-2959250396), [instagibbs](https://github.com/bitcoin/bitcoin/pull/32714#issuecomment-2960239724) |\n| Concept ACK | [jonatack](https://github.com/bitcoin/bitcoin/pull/32714#pullrequestreview-2914319980) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-10T04:41:11Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 4f06bf3451c7800ccc54853b354285fb159ef382\r\n\r\nMakes sense to go through a normal and proper deprecate-remove cycle over two releases, once, and if there is need to. Otherwise, this may be a situation similar to https://github.com/bitcoin/bitcoin/issues/29240, where the deprecation warning is meaningless and confusing (because removal is permanently postponed).\r\n\r\n[Edit: I assigned the milestone, because this needs to be closed/merged before the milestone.]",
+          "created_at": "2025-06-10T05:42:59Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK 4f06bf3451c7800ccc54853b354285fb159ef382\r\n\r\nDeprecating seemed premature to me, let's do it in smaller steps to be more aligned with the users.",
+          "created_at": "2025-06-10T06:36:46Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Concept NACK.\r\n\r\nIt's fine to _add_ a non-recommendation text, but we should keep the deprecation warning. If by the time we would normally drop a depreceated feature (v31 or v32) there's still a strong risk of brigading, then that's perhaps a _political_ argument for delaying it further, but it's still deprecated.\r\n\r\nI don't think the comparison with #29240 is correct here. There the deprecation itself was a mistake, because there were good technical reasons for users to keep using username and password. That's simply not the case here, as evidenced by the need to add non-recommendation text.\r\n\r\nRemoving the deprecation warning now also means having to repeat the drama when bringing the deprecation back.",
+          "created_at": "2025-06-10T07:33:06Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "Concept NACK\r\n\r\nUsing datacarrier for mempool/relay filtering appears to be driven more by ideological or social coercion motivations than technical merit. It's better to just remove it.\r\n\r\nAs long as there's enough fee attached, these transactions will likely be mined anyway. That means nodes that previously saw and rejected them will end up redownloading them. Also note that vExtraTxnForCompact has a default size of 100 entries, so this kind of filtering is not well-suited for real-world conditions.\r\n",
+          "created_at": "2025-06-10T09:20:16Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Concept NACK *for v30*\r\n\r\nNoting that this PR is opened on the day after 32406 is merged.\r\n\r\nKeeping the settings as deprecated for now means the delta to full removal is smaller, while removing the deprecation increases that delta. I think enough boats have been burned already, let's not re-build them only to burn them again. People implying maliciousness behind the first PR will not suddenly have their confidence restored by this one.\r\n\r\nWhat would change my mind:\r\n* New/better arguments for using them with non-default values.\r\n* Enough releases having passed without a push for complete removal.",
+          "created_at": "2025-06-10T10:25:32Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "Concept NACK\r\n\r\nI personally prefer to keep the deprecation warning as I think all the rationale given (among many other places) [here](https://bitcoincore.org/en/2025/06/06/relay-statement/) and [here](https://github.com/bitcoin/bitcoin/pull/32406#issuecomment-2955614286) points to the fact that it should be removed some time in the future. The fact that outsiders don't understand deprecation and how it is handled in Bitcoin Core is not a strong argument. I am also surprised by this because the [original PR](https://github.com/bitcoin/bitcoin/pull/32359) that just removed the option outright seemed to have broad support among contributors. I was one of the few reviewers to ask for a deprecation period as far as I can remember.\r\n\r\nI have also seen contributors express aversion to revisit this discussion again in the future. This was given as a rationale to not increase the limit in steps as needed by layer 2 protocols but to remove the limit completely, for example. This PR adds another step in the future when we actually want to remove the option. We'll have drama for the deprecation PR and the removal, rather than just the removal as it stand currently.\r\n\r\nAs others have noted before the deprecation can be walked back any time in the future if there are better reasons for keeping the option in place long term.",
+          "created_at": "2025-06-10T13:22:30Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> While deprecation obviously means that the options are not recommended for use, many users seem to believe that it also means that the options will be imminently removed.\r\n\r\nGiven \"deprecation obviously means that the options are not recommended for use\" I think that trying to differentiate \"not recommended for use\" and \"deprecated\" will only lead to more confusion, so I think we should either (a) recommend the option not be used and mark it deprecated; or (b) not mark it deprecated, and leave it up to the user to decide whether to use the option, without making any particular recommendation; and not try (c) some other option to split the non-existent difference. If it were just up to me, I'd choose (b) over (a), but it's not a terribly strong opinion.\r\n\r\n> My understanding is that there is currently no plan to remove these options in the near future, and I don't think it would be wise to open a PR to remove the options for a few more years.\r\n\r\n> Both `-datacarrier` and `-datacarriersize` options have been marked as deprecated and are expected to be removed in a future release. (#32406)`\r\n\r\n> `        InitWarning(_(\"Options '-datacarrier' or '-datacarriersize' are set but are marked as deprecated. They will be removed in a future version.\"));`\r\n\r\nI think various contributors would like to remove the options in the near future, and both marking the option as deprecated and having explicit warnings about the feature being removed on startup and in the release notes lends support to those opinions. I also think it's hard to justify keeping around an option that we recommend nobody use for a long period of time.\r\n\r\nPersonally, I think it would make more sense to take the following approach:\r\n\r\n * decide what we think the default behaviour should be (ie, relay/mine txs with an arbitrary number of OP_RETURN outputs, of arbitrary length)\r\n * determine if enough users seem interested in alternative behaviours to justify providing/maintaining a runtime configuration option (sure seems like there are)\r\n * observe if that configuration option is useful in practice on the network (ie, some level of hashpower actually changes from the default behaviour -- not observable at the moment because the new default behaviour isn't even available in released software)\r\n   * if 99.9% of hashpower (or some other number) seems satisfied with the default behaviour, remove the option, possibly with a deprecation period\r\n   * on the other hand, if a majority of hashpower (or plurality?) is using some different behaviour to our default, even after a release with the new default has been out for some time, seriously consider changing our defaults to match that behaviour\r\n\r\nTaking that approach would mean not deprecating the option until after a release with the new default has been out for some time.",
+          "created_at": "2025-06-10T14:39:48Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "concept NACK, seems needless churn to me to backtrack on something a number of original reviewers(and author himself) disagree with\r\n\r\nAs per @ajtowns if miners end up over-riding the value a lot, we can rethink deprecation. I don't think removing deprecation now makes anything clearer.",
+          "created_at": "2025-06-10T18:30:48Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32722,
+      "title": "`signrawtransactionwithkey` doesn't work with non segwit p2sh scripts",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nI'm attempting to reproduce the transaction specified by AJ Towns that pointed out BitVM bridges with CTV+CSFS for p2sh outputs are vulnerable to theft. You can read more about the topic [here](https://delvingbitcoin.org/t/how-ctv-csfs-improves-bitvm-bridges/1591/8).\n\nThe TLDR is i'm attempting to sign a `p2sh(p2pk)` script.\n\nI've attempted to create this transaction via the `signrawtransactionwithkey` RPC. I kept receiving an error saying \n\n```{ 'error': 'Unable to sign input, invalid stack size (possibly missing key)'}]}```\n\ndespite explicitly passing in the public key and redeem script in the `prevTxs` and `keys` rpc argument. You can view this here: \n\nhttps://github.com/Christewart/bitcoin/blob/ae6d4476b730d0909f88405f9a9c08383611a49f/test/functional/feature_bitvmctvcsfs_bridge.py#L48\n\nAfter wandering through the source code, it seems that there is a disconnect between the `Solver` and creation of the `KeyStore` inside of `ParsePrevOuts`. \n\n[The `KeyStore` attempts to search for the KeyId of the _p2sh output script_. ](https://github.com/bitcoin/bitcoin/blob/157bbd0a07c06503bc9fa1ccc1087c794d0e5c44/src/script/solver.cpp#L149)\n\n[The `ParsePrevOuts` function only adds the `KeyId` of the redeemScript for p2sh outputs. ](https://github.com/bitcoin/bitcoin/blob/157bbd0a07c06503bc9fa1ccc1087c794d0e5c44/src/rpc/rawtransaction_util.cpp#L250)\n\nI've modified the code on my feature branch to add _both_ the keyid of the p2sh redeem script and the keyid of the output script to the keystore, and now I at least get a digital signature produced (rather than `Unable to sign input, invalid stack size (possibly missing key)`).\n\nhttps://github.com/Christewart/bitcoin/blob/ae6d4476b730d0909f88405f9a9c08383611a49f/src/rpc/rawtransaction_util.cpp#L251\n\nFrom a quick glance through [`rpc_signrawtransactionwithkey.py`](https://github.com/Christewart/bitcoin/blob/2025-06-07-ctvcsfs-bitvm/test/functional/rpc_signrawtransactionwithkey.py) it seems that `p2sh(p2wsh())` is tested, but AFAICT legacy p2sh is not tested.\n\n### Expected behaviour\n\n`rpc_signrawtransactionwithkey` should be able to sign p2pk redeem scripts\n\n### Steps to reproduce\n\nRun `./build/test/functional/feature_bitvmctvcsfs_bridge.py` on this commit: https://github.com/Christewart/bitcoin/commit/ae6d4476b730d0909f88405f9a9c08383611a49f\n\nand remove this line of code to see the failure: \n\nhttps://github.com/Christewart/bitcoin/blob/2025-06-07-ctvcsfs-bitvm/src/rpc/rawtransaction_util.cpp#L251\n\n### Relevant log output\n\n_No response_\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nhttps://github.com/Christewart/bitcoin/commit/ae6d4476b730d0909f88405f9a9c08383611a49f\n\n### Operating system and version\n\nMac\n\n### Machine specifications\n\n_No response_",
+      "state": "closed",
+      "user": "Christewart",
+      "created_at": "2025-06-10T20:09:45Z",
+      "updated_at": "2025-06-11T18:43:11Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32722",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "achow101",
+          "body": "Your test has a bug:\n\n```\n        script_b = script_to_p2sh_script(redeem_script)\n        address = script_to_p2sh(script_b)\n```\n\n`address` is computed incorrectly. `script_to-p2sh` is like `script_to_p2sh_script` in that it takes the redeem script. When you pass it `script_b`, what you're really creating is a `p2sh(p2sh())` which is invalid. I believe if you modify your test to try to broadcast the transaction, it would fail to validate.",
+          "created_at": "2025-06-10T22:00:46Z"
+        },
+        {
+          "user": "Christewart",
+          "body": "> Your test has a bug:\n> \n> ```\n>         script_b = script_to_p2sh_script(redeem_script)\n>         address = script_to_p2sh(script_b)\n> ```\n> \n> `address` is computed incorrectly. `script_to-p2sh` is like `script_to_p2sh_script` in that it takes the redeem script. When you pass it `script_b`, what you're really creating is a `p2sh(p2sh())` which is invalid. I believe if you modify your test to try to broadcast the transaction, it would fail to validate.\n\nThis is correct. Thank you for pointing that out @achow101 . Much appreciated! ",
+          "created_at": "2025-06-11T18:43:11Z"
+        }
+      ]
+    },
+    {
+      "number": 32715,
+      "title": "depends: Cross-compiling using `-m64`/`-m32` fails on FreeBSD / OpenBSD",
+      "body": "On FreeBSD 14.3:\n```\n$ gmake -C depends HOST=i686-unknown-freebsd libevent\ngmake: Entering directory '/home/hebasto/dev/bitcoin/depends'\nConfiguring libevent...\nCMake Deprecation Warning at CMakeLists.txt:22 (cmake_minimum_required):\n  Compatibility with CMake < 3.10 will be removed from a future version of\n  CMake.\n\n  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax\n  to tell CMake that the project requires at least <min> but has been updated\n  to work with policies introduced by <max> or earlier.\n\n\n-- The C compiler identification is Clang 19.1.7\n-- Detecting C compiler ABI info\n-- Detecting C compiler ABI info - failed\n-- Check for working C compiler: /usr/bin/clang\n-- Check for working C compiler: /usr/bin/clang - broken\nCMake Error at /usr/local/share/cmake/Modules/CMakeTestCCompiler.cmake:67 (message):\n  The C compiler\n\n    \"/usr/bin/clang\"\n\n  is not able to compile a simple test program.\n\n  It fails with the following output:\n\n    Change Dir: '/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab/build/CMakeFiles/CMakeScratch/TryCompile-LurZhX'\n    \n    Run Build Command(s): /usr/local/bin/cmake -E env VERBOSE=1 /usr/local/bin/gmake -f Makefile cmTC_a9d3d/fast\n    gmake[1]: Entering directory '/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab/build/CMakeFiles/CMakeScratch/TryCompile-LurZhX'\n    /usr/local/bin/gmake  -f CMakeFiles/cmTC_a9d3d.dir/build.make CMakeFiles/cmTC_a9d3d.dir/build\n    gmake[2]: Entering directory '/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab/build/CMakeFiles/CMakeScratch/TryCompile-LurZhX'\n    Building C object CMakeFiles/cmTC_a9d3d.dir/testCCompiler.c.o\n    /usr/bin/clang  -m32 --target=i686-unknown-freebsd   -I/home/hebasto/dev/bitcoin/depends/i686-unknown-freebsd/include -D_GNU_SOURCE -D_FORTIFY_SOURCE=3 -pipe -std=c11 -O2 -fdebug-prefix-map=/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab=/usr -fmacro-prefix-map=/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab=/usr  -fPIE -MD -MT CMakeFiles/cmTC_a9d3d.dir/testCCompiler.c.o -MF CMakeFiles/cmTC_a9d3d.dir/testCCompiler.c.o.d -o CMakeFiles/cmTC_a9d3d.dir/testCCompiler.c.o -c /home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab/build/CMakeFiles/CMakeScratch/TryCompile-LurZhX/testCCompiler.c\n    Linking C executable cmTC_a9d3d\n    /usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_a9d3d.dir/link.txt --verbose=1\n    ld: error: /usr/lib/crt1.o is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/crti.o is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/crtbegin.o is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(x86.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(fp_mode.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(absvdi2.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(absvsi2.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(absvti2.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(addvdi3.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(addvsi3.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(addvti3.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(apple_versioning.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(ashldi3.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(ashlti3.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(ashrdi3.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(ashrti3.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(bswapdi2.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(bswapsi2.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(clear_cache.o) is incompatible with elf_i386_fbsd\n    ld: error: /usr/lib/libgcc.a(clzdi2.o) is incompatible with elf_i386_fbsd\n    ld: error: too many errors emitted, stopping now (use --error-limit=0 to see all errors)\n    clang: error: linker command failed with exit code 1 (use -v to see invocation)\n    /usr/bin/clang  -m32 --target=i686-unknown-freebsd -I/home/hebasto/dev/bitcoin/depends/i686-unknown-freebsd/include -D_GNU_SOURCE -D_FORTIFY_SOURCE=3 -pipe -std=c11 -O2 -fdebug-prefix-map=/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab=/usr -fmacro-prefix-map=/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab=/usr  -L/home/hebasto/dev/bitcoin/depends/i686-unknown-freebsd/lib  CMakeFiles/cmTC_a9d3d.dir/testCCompiler.c.o -o cmTC_a9d3d\n    gmake[2]: *** [CMakeFiles/cmTC_a9d3d.dir/build.make:103: cmTC_a9d3d] Error 1\n    gmake[2]: Leaving directory '/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab/build/CMakeFiles/CMakeScratch/TryCompile-LurZhX'\n    gmake[1]: *** [Makefile:134: cmTC_a9d3d/fast] Error 2\n    gmake[1]: Leaving directory '/home/hebasto/dev/bitcoin/depends/work/build/i686-unknown-freebsd/libevent/2.1.12-stable-baac65d95ab/build/CMakeFiles/CMakeScratch/TryCompile-LurZhX'\n    \n    \n\n  \n\n  CMake will not be able to correctly generate this project.\nCall Stack (most recent call first):\n  CMakeLists.txt:47 (project)\n\n\n-- Configuring incomplete, errors occurred!\ngmake: *** [funcs.mk:343: /home/hebasto/dev/bitcoin/depends/i686-unknown-freebsd/.libevent_stamp_configured] Error 1\ngmake: Leaving directory '/home/hebasto/dev/bitcoin/depends'\n```\n\nAdditionally, for example, https://github.com/bitcoin/bitcoin/pull/23948 contains no evidence that this scenario has ever been tested.\n\nAs the `i686-unknown-freebsd` target was never documented in [`depends/README.md`](https://github.com/bitcoin/bitcoin/blob/master/depends/README.md), we might consider removing the broken code from [`depends/hosts/freebsd.mk`](https://github.com/bitcoin/bitcoin/blob/master/depends/hosts/freebsd.mk).\n\nThe same reasoning applies to OpenBSD as well. However, I have not tested this on NetBSD.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-06-10T11:18:40Z",
+      "updated_at": "2025-06-10T12:09:02Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32715",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "hebasto",
+          "body": "> However, I have not tested this on NetBSD.\n\nWell, this seems to be working on NetBSD 10.0:\n```\n$ gmake -C depends HOST=i686-unknown-netbsd NO_QT=1\n```",
+          "created_at": "2025-06-10T12:04:05Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "It seems my FreeBSD installation was broken.",
+          "created_at": "2025-06-10T12:09:02Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 8,
+    "issues": 2
+  }
+}

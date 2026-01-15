@@ -1,0 +1,334 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:37:06.606172+00:00",
+  "date": "2025-12-04",
+  "pull_requests": [
+    {
+      "number": 34008,
+      "title": "log: don't rate-limit \"new peer\" with -debug=net",
+      "body": "Previously, when `debug=net` is enabled, we log \"New [..] peer connected\" for new inbound peers with `LogInfo`. However, `LogInfo` will get rate-limited since https://github.com/bitcoin/bitcoin/pull/32604. When we specifically turn on `debug=net`, we don't want these log messages to be rate-limited.\r\n\r\nTo fix this, use `LogDebug(BCLog::NET, ...)` for potentially high-rate inbound connections. Otherwise use `LogInfo`. This means we don't rate-limit the messages for inbound peers when `debug=net` is turned on but will rate-limit if we created outbound at a high rate as these are logged via `LogInfo`.\r\n\r\nThe new log messages look similar to:\r\n```\r\n2025-12-08T00:00:00Z [net] New inbound peer connected: transport=v2 version=70016 blocks=0 peer=1\r\n2025-12-08T00:00:00Z New outbound-full-relay peer connected: transport=v2 version=70016 blocks=281738 peer=5\r\n```\r\n\r\n--\r\n\r\nI ran into this message getting rate-limited on one of my monitoring nodes with `-logsourcelocations=1`: With logsourcelocations, one of these lines is about 338 chars (or 338 bytes) long. We rate-limit after more than 1048576 bytes per hour, which results in about 3100 in- and outbound connections per hour. With evicted and instantly reconnecting connections from an entity like LinkingLion, this can be reached fairly quickly.",
+      "state": "closed",
+      "user": "0xB10C",
+      "created_at": "2025-12-04T17:51:16Z",
+      "updated_at": "2025-12-10T08:25:20Z",
+      "comments": 13,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34008",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34008.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [stickies-v](https://github.com/bitcoin/bitcoin/pull/34008#issuecomment-3631952446), [Crypt-iQ](https://github.com/bitcoin/bitcoin/pull/34008#issuecomment-3633111151), [maflcko](https://github.com/bitcoin/bitcoin/pull/34008#issuecomment-3633236731), [rkrux](https://github.com/bitcoin/bitcoin/pull/34008#pullrequestreview-3558724906), [glozow](https://github.com/bitcoin/bitcoin/pull/34008#pullrequestreview-3559269856) |\n| Stale ACK | [dergoegge](https://github.com/bitcoin/bitcoin/pull/34008#pullrequestreview-3556858170) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-04T17:51:23Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @dergoegge ",
+          "created_at": "2025-12-04T19:12:06Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "> Another approach could be to exempt all (not just debug) logs from a debug-enabled category? I think conceptually that makes sense, and I suspect there will be more places where this is helpful so we can minimize the workarounds needed?\r\n\r\nThat would work too, and is a way cleaner approach than duplicating stuff here. I probably won't get to picking that up anytime soon though, so if you want to open an alternative to this PR, feel free to do so!\r\n\r\n---\r\n\r\nI'll mark this as draft until I figure out a good approach. Review time is probably best spent on https://github.com/bitcoin/bitcoin/pull/29641 right now.",
+          "created_at": "2025-12-05T13:23:49Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "> I probably won't get to picking that up anytime soon though, so if you want to open an alternative to this PR, feel free to do so!\r\n\r\nI've opened #34018 as an alternative!",
+          "created_at": "2025-12-05T15:54:16Z"
+        },
+        {
+          "user": "Ataraxia009",
+          "body": "Personally I prefer this approach over https://github.com/bitcoin/bitcoin/pull/34018 @0xB10C @stickies-v \r\n\r\nThe only problem I see with this approach is the code duplication. Which I think you solved right? Using: \r\n\r\n\r\n```\r\nconst std::string details = std::format(\r\n    \"transport={} version={} blocks={} peer={}{}{}\",\r\n    TransportTypeAsString(pfrom.m_transport->GetInfo().transport_type),\r\n    pfrom.nVersion.load(),\r\n    int{peer->m_starting_height},\r\n    pfrom.GetId(),\r\n    (fLogIPs ? std::format(\", addr={}\", pfrom.LogIP(fLogIPs)) : \"\"),\r\n    (mapped_as ? std::format(\", mapped_as={}\", mapped_as) : \"\")\r\n);\r\n```\r\n\r\nWhy doesnt this work?",
+          "created_at": "2025-12-07T04:25:30Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `macOS-cross to x86_64`: https://github.com/bitcoin/bitcoin/actions/runs/20027106754/job/57426926798</sub>\n<sub>LLM reason (✨ experimental): Build failed due to use of std::format not available in the current compiler/libc++ setup.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-12-08T12:04:56Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "- rebased to include https://github.com/bitcoin/bitcoin/pull/29641. Now using `LogInfo` instead of `LogPrintf`. Updated the commit message an PR description accordingly.\r\n- Switched to AJ's suggestion from https://github.com/bitcoin/bitcoin/pull/34008#discussion_r2596296831 to only have minimal code duplication. This logs all new outbound connections with `LogInfo()`, which can potentially get rate-limited, and logs inbound connections with `LogDebug(BCLog::NET, ...)` which is only active with `-debug=net` and won't get rate-limited. Also, a high rate of inbound connections won't affect logging of outbound connections anymore.\r\n\r\nThe new log messages look similar to:\r\n```\r\n2025-12-08T00:00:00Z [net] New inbound peer connected: transport=v2 version=70016 blocks=281738 peer=1\r\n2025-12-08T00:00:00Z New outbound-full-relay peer connected: transport=v2 version=70016 blocks=281738 peer=5\r\n```\r\n\r\n\r\n> 🚧 At least one of the CI tasks failed. Task `macOS-cross to x86_64`: https://github.com/bitcoin/bitcoin/actions/runs/20027106754/job/57426926798 LLM reason (✨ experimental): Build failed due to use of std::format not available in the current compiler/libc++ setup.\r\n\r\nNot using `std::format` as that's not yet supported in our macOS CI. If `std::format` is wanted as a replacement for `strprintf`, then that's probably a project for someone else and out of scope here. Keeping `strprintf` for now.\r\n\r\n--\r\n\r\nThis is ready for review again. Also consider the alternative proposed in https://github.com/bitcoin/bitcoin/pull/34018. ",
+          "created_at": "2025-12-08T12:49:58Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I think this would benefit from a brief release note. People might be confused why they're no longer seeing inbound connections in their logs?\r\n\r\nI don't think there is a behavior change here. Previously, inbound would only be logged in when net-debug logging, now, it is the same. The only behavior change is the added `[net]` in `[net] New inbound peer ...`, no?",
+          "created_at": "2025-12-09T08:44:58Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "> I don't think there is a behavior change here.\r\n\r\nYes you're right, thanks for pointing it out, updated my comment.",
+          "created_at": "2025-12-09T11:17:51Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": ">  The only behavior change is the added [net] in `[net] New inbound peer `..., no?\r\n\r\nCorrect\r\n \r\n---\r\n\r\npushed to fixup:\r\n- https://github.com/bitcoin/bitcoin/pull/34008#discussion_r2601641954: switched the if else around to not have the inversion in there\r\n- https://github.com/bitcoin/bitcoin/pull/34008#discussion_r2600414530: constructing the complete `new_peer_msg` in the lambda now\r\n- https://github.com/bitcoin/bitcoin/pull/34008#discussion_r2600308329: corrected indentation of the `strprintf`\r\n\r\n\r\n",
+          "created_at": "2025-12-09T12:11:07Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "utACK d4d184eda9c0f73bc31ece07d5001d887b5c6914",
+          "created_at": "2025-12-09T12:15:03Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "tACK d4d184eda9c0f73bc31ece07d5001d887b5c6914",
+          "created_at": "2025-12-09T16:19:18Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review ACK d4d184eda9c0f73bc31ece07d5001d887b5c6914 🚲\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK d4d184eda9c0f73bc31ece07d5001d887b5c6914 🚲\r\n/rBRlFzoUkxVkscFJZo0QXt3tdf/St0bfnaE+6JyTkhqE2aiIgKSvCAKlFUbk4ESJn5Fi3c6vXJV9OTm3gYCBQ==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-12-09T16:47:52Z"
+        }
+      ]
+    },
+    {
+      "number": 34007,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "wnqqnw19",
+      "created_at": "2025-12-04T17:11:29Z",
+      "updated_at": "2025-12-04T17:12:47Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34007",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34007.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-04T17:11:37Z"
+        }
+      ]
+    },
+    {
+      "number": 34006,
+      "title": "Add util::Expected (std::expected)",
+      "body": "Some low-level code could benefit from being able to use `std::expected` from C++23:\r\n\r\n* Currently, some code is using `std::optional<E>` to denote an optional error. This is fine, but a bit confusing, because `std::optional` is normally used for values, not errors. Using `std::expected<void, E>` is clearer.\r\n* Currently, some code is using `std::variant<V, E>` to denote either a value or an error. This is fine, but a bit verbose, because `std::variant` requires a visitor or get_if/holds_alternative instead of a simple call of the `operator bool` for `std::expected`.\r\n\r\nIn theory, `util::Result` could be taught to behave similar to `std::expected` (see https://github.com/bitcoin/bitcoin/pull/34005). However, it is unclear if this is the right approach:\r\n\r\n* `util::Result` is mostly meant for higher level code, where errors come with translated error messages.\r\n* `std::expected` is mostly meant for lower level code, where errors could be an enum, or any other type.\r\n* https://github.com/bitcoin/bitcoin/pull/25665 aims to minimize the memory footprint of the error by wrapping it in a unique_ptr internally. `std::expected` requires the value and error to be \"nested within it\" (https://cplusplus.github.io/LWG/issue4141). So from a memory-layout perspective, the two are not compatible.\r\n* `std::expected` also comes with `std::unexpected`, which also does not map cleanly to `util::Result`.\r\n\r\nSo just add a minimal drop-in port of `std::expected`.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-12-04T14:36:17Z",
+      "updated_at": "2025-12-09T08:29:33Z",
+      "comments": 14,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34006",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34006.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [romanz](https://github.com/bitcoin/bitcoin/pull/34006#pullrequestreview-3547700709), [sedited](https://github.com/bitcoin/bitcoin/pull/34006#pullrequestreview-3549497745), [hodlinator](https://github.com/bitcoin/bitcoin/pull/34006#pullrequestreview-3550883332), [rkrux](https://github.com/bitcoin/bitcoin/pull/34006#pullrequestreview-3551060765), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/34006#pullrequestreview-3552578391), [stickies-v](https://github.com/bitcoin/bitcoin/pull/34006#pullrequestreview-3552257782) |\n| Concept ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/34006#issuecomment-3612759553), [arejula27](https://github.com/bitcoin/bitcoin/pull/34006#pullrequestreview-3546080852) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33160](https://github.com/bitcoin/bitcoin/pull/33160) (bench: Add more realistic Coin Selection Bench by murchandamus)\n* [#28690](https://github.com/bitcoin/bitcoin/pull/28690) (build: Introduce internal kernel library by sedited)\n* [#26022](https://github.com/bitcoin/bitcoin/pull/26022) (Add util::ResultPtr class by ryanofsky)\n* [#25722](https://github.com/bitcoin/bitcoin/pull/25722) (refactor: Use util::Result class for wallet loading by ryanofsky)\n* [#25665](https://github.com/bitcoin/bitcoin/pull/25665) (refactor: Add util::Result failure types and ability to merge result values by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-04T14:36:27Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK",
+          "created_at": "2025-12-04T15:16:21Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Concept ACK\r\n\r\n`FetchBlock()` is a good usage example.",
+          "created_at": "2025-12-04T15:19:41Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "> Some low-level code could benefit from being able to use `std::expected` from C++23.\r\n\r\nCan you elaborate? How would it benefit? Over what alternative?",
+          "created_at": "2025-12-04T17:12:22Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > Some low-level code could benefit from being able to use `std::expected` from C++23.\r\n> \r\n> Can you elaborate? How would it benefit? Over what alternative?\r\n\r\nSure. The alternatives were listed in doc diff in the commit, but I've pulled it out and put in the pull description as well.",
+          "created_at": "2025-12-04T17:29:09Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "> > > Some low-level code could benefit from being able to use `std::expected` from C++23.\r\n> > \r\n> > Can you elaborate? How would it benefit? Over what alternative?\r\n> \r\n> Sure. The alternatives were listed in doc diff in the commit, but I've pulled it out and put in the pull description as well.\r\n\r\nWhat is wrong with the most obvious approach to error handling?",
+          "created_at": "2025-12-04T18:07:45Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Concept ACK. We have a lot of low-level code where `std::expected` would be useful, and this PR enables that without having to wait for C++23. (#34005 is another PR that does the same thing and seems like a good approach as well.)\r\n\r\nI do think `util::Result` can provide a lot of useful functionality for higher-level code that `std::expected` doesn't, and I've been testing that idea in various PRs (#25665, #25722, #29700, #26022). But I think the fate of the `util::Result` class is a separate question, and that the classes can be compatible and each used where they make sense.",
+          "created_at": "2025-12-04T18:54:19Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Re https://github.com/bitcoin/bitcoin/pull/34006#issuecomment-3613640791\r\n\r\n> What is wrong with the most obvious approach to error handling?\r\n\r\nI am guessing you are asking why not just use exceptions? If so, I think they could be an alternative for these situations too. I'd be curious how a similar function contract could be enforced with an exception. ",
+          "created_at": "2025-12-05T07:26:27Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> just use exceptions?\r\n\r\nI don't think exceptions are a suitable alternative for low-level code in this repo, where `std::expected` is appropriate. In places where exceptions are used today, it is tedious to review the code and its behavior. For example, the same exception from an IO error in a database will sometimes terminate the program unclean, and sometimes cleanly shut down the program (https://github.com/bitcoin/bitcoin/pull/33042#issuecomment-3116540946), depending on which thread or with module called the function that threw.\r\n\r\nIf you are referring to P3166, then I don't think it made it into C++26 (https://github.com/cplusplus/papers/issues/1829#issuecomment-2983235299), so I don't think it is a practical alternative in places where `std::expected` is appropriate.\r\n\r\nI am not saying there is no use-case for exceptions today, but I don't think the presence of exceptions is a valid reason to rule out the use of `std::expected`.",
+          "created_at": "2025-12-05T08:24:01Z"
+        },
+        {
+          "user": "arejula27",
+          "body": "@maflcko Do you think it will be interesting to follow the `std::expected` class methods and add:\r\n- [value_or](https://en.cppreference.com/w/cpp/utility/expected/value_or.html)\r\n- [error_or](https://en.cppreference.com/w/cpp/utility/expected/error_or.html)\r\n\r\nI think it will be valuable and will give more flexibility in error handling cases",
+          "created_at": "2025-12-06T10:41:01Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> @maflcko Do you think it will be interesting to follow the `std::expected` class methods and add:\r\n> \r\n>     * [value_or](https://en.cppreference.com/w/cpp/utility/expected/value_or.html)\r\n> \r\n>     * [error_or](https://en.cppreference.com/w/cpp/utility/expected/error_or.html)\r\n> \r\n> \r\n> I think it will be valuable and will give more flexibility in error handling cases\r\n\r\nI don't see a valid use-case for `error_or`, but i guess value_or may come in handy possibly in the future. Other than that, please refer to the docs:\r\n\r\n```\r\n/// The util::Expected class provides a standard way for low-level functions to\r\n/// return either error values or result values.\r\n///\r\n/// It provides a smaller version of std::expected from C++23. Missing features\r\n/// can be added, if needed.",
+          "created_at": "2025-12-06T11:49:59Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `tidy`: https://github.com/bitcoin/bitcoin/actions/runs/19988056440/job/57324791049</sub>\n<sub>LLM reason (✨ experimental): clang-tidy failure: use-after-move detected in util_expected_tests.cpp, causing CI to fail.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-12-06T12:07:25Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I merged this since it seems like a clear improvement that other changes can build on. Also took \"whichever happens earlier\" (https://github.com/bitcoin/bitcoin/pull/34006#discussion_r2599410546) as a hint to mean the author is happy to see this merged as is. Followup suggestion are listed in: https://github.com/bitcoin/bitcoin/pull/34006#pullrequestreview-3552578391\r\n",
+          "created_at": "2025-12-09T01:13:40Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I pushed https://github.com/bitcoin/bitcoin/pull/34032 to add all of the unused member functions requested by reviewers, and resolved the threads here. let me know if I have forgotten anything.",
+          "created_at": "2025-12-09T08:29:33Z"
+        }
+      ]
+    },
+    {
+      "number": 34005,
+      "title": "util: generalize `util::Result` to support custom errors",
+      "body": "### Context\r\n\r\nWhile reviewing https://github.com/bitcoin/bitcoin/pull/33657 it became clear we don’t have a good value-or-error wrapper, similar in spirit to `std::expected<T, E>` in C++23.\r\n\r\n### Problem\r\n\r\nThe `util::Result` helper currently stores a `std::variant<bilingual_str, T>` and is effectively only usable for high-level code that needs to propagate user-facing error strings.\r\nLow-level code that wants typed error codes instead of strings still has to expose raw `std::variant` (or roll custom structs).\r\n\r\n### Fix\r\n\r\nGeneralize `util::Result` to take a second template parameter `E` for the error type, and store `std::variant<E, T>` internally. \r\nThe default `E` remains `bilingual_str`, so existing uses of `Result<T>` and `util::Error{...}` behave exactly as before and `ErrorString(Result<T>)` continues to work.\r\n\r\n\r\n[New code](https://github.com/l0rinc/bitcoin/pull/61/commits/536f93df79975f50781072301947cafa4640b606#diff-b1e19192258d83199d8adaa5ac31f067af98f63554bfdd679bd8e8073815e69dR1762-R1766) can now use typed errors and avoid the awkward `std::variant` getter, e.g.:\r\n```C++\r\nif (auto ret{chainman->m_blockman.ReadRawBlock(WITH_LOCK(cs_main, return index.GetBlockPos()))}) {\r\n    block = std::move(*ret);\r\n    return true;\r\n}\r\nreturn false;\r\n```",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-12-04T14:06:20Z",
+      "updated_at": "2025-12-05T12:12:49Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34005",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34005.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34006](https://github.com/bitcoin/bitcoin/pull/34006) (Add util::Expected (std::expected) by maflcko)\n* [#26022](https://github.com/bitcoin/bitcoin/pull/26022) (Add util::ResultPtr class by ryanofsky)\n* [#25722](https://github.com/bitcoin/bitcoin/pull/25722) (refactor: Use util::Result class for wallet loading by ryanofsky)\n* [#25665](https://github.com/bitcoin/bitcoin/pull/25665) (refactor: Add util::Result failure values, multiple error and warning messages by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible typos and grammar issues:\n\n- uses continue -> continues / will continue [grammatical error: \"uses continue\" is incorrect; use \"continues\" or \"will continue\" for proper verb form]\n\n\n\n<sup>2025-12-04</sup>\n",
+          "created_at": "2025-12-04T14:06:28Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Have you looked at #25665?",
+          "created_at": "2025-12-04T14:09:05Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> Have you looked at #25665?\r\n\r\nLooking at bb61eca55a563d7486df3c356d163c4af10a36c8, I think this is compatible with #25665. This PR is a minimal tweak to `util::Result` that can let it work as a substitute for `std::expected` before `std::expected` is available to use. #25665 could be easily rebased on top of this. In the long run, though, I think code that doesn't need `util::Result` error reporting functionality should just use `std::expected` directly.\r\n\r\nIt might be good if this added an alias like:\r\n\r\n```c++\r\ntemplate<typename T, typename F>\r\nusing Expected = Result<T, F>;\r\n```\r\n\r\nSo it could be clearer which code should eventually use `std::expected` when it's available, and replacement could potentially be a scripted-diff. We did something similar with `Span`/`std::span`\r\n\r\n\r\n",
+          "created_at": "2025-12-04T14:28:17Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I wonder if this is the right approach. `util::Result` is mostly meant for high level code (dealing with translations), such as init, the wallet, or the gui. For low-level stuff, it could make sense to use `std::expected` directly?\r\n\r\nI am not sure how fast we'll be getting C++23. C++20 was enabled two years ago in https://github.com/bitcoin/bitcoin/pull/28349, but there are still questions around which C++20 features are supported. (e.g. jthread is only in libc++ 20, std::format is only in g++13, ...)\r\n\r\nSo I think just porting a minimal `std::expected` seems easier?\r\n\r\nSo I did that in https://github.com/bitcoin/bitcoin/pull/34006",
+          "created_at": "2025-12-04T14:36:32Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> It might be good if this added an alias like\r\n\r\nGood idea, added and used it in the new test cases.\r\n\r\n> Have you looked at https://github.com/bitcoin/bitcoin/pull/25665?\r\n\r\nI agree with @ryanofsky that this is likely compatible with the PR and as far as I understand it addresses a small chunk of what it's also trying to achieve.\r\n\r\n> So I think just porting a minimal std::expected seems easier?\r\nSo I did that in https://github.com/bitcoin/bitcoin/pull/34006\r\n\r\nI'm fine with both, let me know if I should close this to favor the other one. Not sure why we'd need two, but it's not a big deal either way.",
+          "created_at": "2025-12-04T14:38:27Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Looking at [bb61eca](https://github.com/bitcoin/bitcoin/commit/bb61eca55a563d7486df3c356d163c4af10a36c8), I think this is compatible with #25665. This PR is a minimal tweak to `util::Result` that can let it work as a substitute for `std::expected` before `std::expected` is available to use. #25665 could be easily rebased on top of this. In the long run, though, I think code that doesn't need `util::Result` error reporting functionality should just use `std::expected` directly.\r\n\r\nNot sure they are conceptually compatible. 25665 aims to reduce the error footprint by wrapping it in a unique_ptr, whereas `std::expected` is basically a variant wrapper (keeps the memory in the struct itself).\r\n\r\nSo a scripted-diff going from an `Expected` (via `Result`), to `std::expected`, may have performance impact, if the error is large enough.\r\n\r\nI think it is better to use std::unique_ptr explicitly in Expected/std::expected, when needed.",
+          "created_at": "2025-12-04T14:43:04Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> So I think just porting a minimal `std::expected` seems easier?\r\n> \r\n> So I did that in #34006\r\n\r\nNice, that's more complicated than this PR, but not too bad. I don't have any particular preference between these two PR's. Either seem fine.\r\n",
+          "created_at": "2025-12-04T14:46:08Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > So I think just porting a minimal `std::expected` seems easier?\r\n> > So I did that in #34006\r\n> \r\n> Nice, that's more complicated than this PR, but not too bad. I don't have any particular preference between these two PR's. Either seem fine.\r\n\r\nYeah, it is a bit more code, but, the inner guts of `util::Expected` are mostly copy-pasted from the current `util::Result` in master, so it shouldn't be conceptually complicated.",
+          "created_at": "2025-12-04T15:02:37Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "re: https://github.com/bitcoin/bitcoin/pull/34005#issuecomment-3612589376\r\n\r\n> Not sure they are conceptually compatible. 25665 aims to reduce the error footprint by wrapping it in a unique_ptr, whereas `std::expected` is basically a variant wrapper (keeps the memory in the struct itself).\r\n\r\nYes, it's true that hypothetically if this PR got merged and then #25665 got merged, performance of code using `util::Expected` could be affected because of `unique_ptr` use. And then, if there was a scripted-diff replacing `util::Expected` with `std::expected` it would switch back again.\r\n\r\nI don't see that as a concern for this PR, since the current `Result` class could just be renamed to `Expected` in #25665 to avoid that if desired. So #34005 and #34006 both seem like good solutions to me, and I'd be happy with either.",
+          "created_at": "2025-12-04T19:13:47Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I don't see that as a concern for this PR, since the current `Result` class could just be renamed to `Expected` in #25665 to avoid that if desired. So #34005 and #34006 both seem like good solutions to me, and I'd be happy with either.\r\n\r\nEither is fine by me as well. It just seems more churn to (1) introduce the Expected alias based on Result, (2) move it a different file, (3) likely rework it to remove the implicit bilingual_string error stuff (because it is not needed and confusing). It seems easier to just add Expected in its intended form in one go. But no strong opinion, anything seems fine here.\r\n\r\n",
+          "created_at": "2025-12-05T10:26:05Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> It seems easier to just add Expected in its intended form in one go\r\n\r\nGlad you have that alternative ready, closing in favor of https://github.com/bitcoin/bitcoin/pull/34006",
+          "created_at": "2025-12-05T12:12:49Z"
+        }
+      ]
+    },
+    {
+      "number": 34004,
+      "title": "Implementation of SwiftSync",
+      "body": "Link to the original protocol writeup found [here](https://gist.github.com/RubenSomsen/a61a37d14182ccd78760e477c78133cd). See the [Delving Bitcoin post](https://delvingbitcoin.org/t/swiftsync-speeding-up-ibd-with-pre-generated-hints-poc/1562) for initial works and discussion.\r\n\r\n# Motivation\r\n\r\nWhile many coins are available in cache when spent, every cache miss requires a trip to the disk. Memory can be scarce for single board machines, so cache misses are expected to be far more frequent. A trip to disk is all-the-more severe on low end hardware, so any minimization of disk interactions can speed up initial block download for limited resource devices. One such example may be a block template provider serving a home miner.\r\n\r\n# Intuition\r\n\r\nThe vast majority of coins created are later spent. The cost of this observation is many coins will be written to disk, only to be removed later. The SwiftSync protocol alleviates the problem by recording what coins have been added and removed with a small, in-memory aggregate. This allows for the removal of intermediate coin states until SwiftSync has completed. The state of the aggregate is verified at a predetermined chain height, and IBD continues as usual thereafter.\r\n\r\nFor any chain height, we know `all outputs - all inputs = UTXO set`, which is equivalently `all outputs - UTXO set = all inputs`. The goal is to verify the set `all outputs - UTXO set` is equal to `all inputs`. Addition and subtraction modulo a field offers a way to do so. For any set, if we add all elements of the set and subtract them, regardless of ordering, we will arrive at zero. In the current implementation, the set elements being compared are hashed outpoints.\r\n\r\nThe SwiftSync protocol is comprised of two structures. First, the aggregate that will record the state of what outpoints have been added (created) or subtracted (spent). Next, notice that the UTXO set must be reported in order to verify `all outputs - UTXO set = all inputs`. SwiftSync introduces a hints file, which may be provided to the client at startup. This hints file is nothing more than a pointer to each unspent output by recording the block height and the indexes that will remain unspent. By using this file, a client may omit outpoints that will be in the UTXO set when updating the aggregate. Note this file is not trusted. If a malicious actor provides a faulty UTXO set, the set comparison above will fail, and the client may begin a reindex.\r\n# Implementation\r\n\r\n## Aggregate\r\n\r\nThe hash aggregate takes outpoints, hashes them with a salted hasher, and updates 4, 64-bit limbs with wrapping modulo arithmetic. The choice of 4, 64-bit limbs with no carries between limbs was made to: 1. minimize code complexity within the aggregate 2. conform to existing APIs, namely `uint256`. After adding and subtracting some arbitrary list of outpoints, we may poll if the sets were equivalent with `IsZero`.\r\n## Hintsfile\r\n\r\nThe hints file is a map of block height to the indexes of the outputs in that block that _will_ be in the UTXO set. To construct this file for a particular UTXO set state, each block must be read and queried to find the outputs in that block that remain unspent. Because this is a read-only operation, this may be done on parallel threads in the future. To allow for parallelization, the hints file contains a \"contents\" section, which denotes the height and corresponding file position to find the hints for that block.\r\n\r\nTo save space when representing the indexes that remain unspent in a block, an easy choice is to take the difference between the last coin that was unspent and the next one in the block. AFICT this is a version of run-length-encoding. These indexes are encoded using `compactSize` to further save space, the run-lengths should normally fit into at least 16 bits, often 8 bits.\r\n## Parameter Interaction\r\n\r\nA side effect of omitting intermediate UTXO states while performing IBD is the \"undo data\" cannot be derived. There are already configurations that do not have full undo data history, namely pruned nodes. To avoid additional complexity in this PR, this version of accelerated IBD is only made available to pruned nodes, as the undo data would have been removed regardless of the this setting.\r\n\r\nOther parameter interactions, not yet implemented:\r\n- `assumeutxo`: Startup should fail if both are configured. A hints file will have no effect, as the UTXO set is already present.\r\n- `assumevalid`: A natural choice is to only allow SwiftSync when using `assumevalid`, and to only allow a hints file that commits to the `assumevalid` block. Similar to `assumeutxo`, a hash of the hints file may be committed to in the binary, which would be resistant to griefing attacks.\r\n# Testing [Linux example]\r\n\r\nIn your `bitcoin` directory, download the hints from the test server:\r\n\r\n```bash\r\ncurl -o signet.hints http://utxohints.store/hints/signet\r\n```\r\n\r\nVerify the hash of the file:\r\n\r\n```bash\r\necho \"2b625392ecb2adba2b5f9d7b00c8f3a8adca0d3c  signet.hints\" | sha1sum --check -\r\n```\r\n\r\nBuild the branch:\r\n\r\n```bash\r\ncmake -B build && cmake --build build -j $(nproc)\r\n```\r\n\r\nRemove existing chain state:\r\n\r\n```bash\r\nrm -rf ~/.bitcoin/signet/\r\n```\r\n\r\nProvide the file at startup:\r\n\r\n```bash\r\n./build/bin/bitcoind --chain=signet --utxohints=./signet.hints --prune=550\r\n```\r\n\r\n#### Other networks:\r\n- ~Testnet4: endpoint `http://utxohints.store/hints/testnet4`, expected checksum `7acbb25b651ffc5ebc59c46fd065a510c149f00e  testnet4.hints`~\r\n\r\n# Open Questions\r\n\r\n- Given the outcome of SwiftSync is pass/fail, and there is no use of intermediate states, should blocks be persisted to disk at all during the protocol?\r\n- To what degree should a hints file be committed to in the binary. No commitment allows for a server to provide hints for an arbitrary height, providing a convenience for the client, but opens up the possibility of a grief attack. Of course the server risks losing reputation for serving faulty files.\r\n\r\n# Future Iteration\r\n\r\nThis is the first iteration of the SwiftSync proposal, however more optimizations may be made. Namely, because set elements may be added or subtracted from the aggregate in any order, blocks may be downloaded in parallel from multiple peers. If you are interested in benchmarking the performance of a fully-parallel version, see the [Rust implementation](https://github.com/2140-dev/swiftsync).\r\n",
+      "state": "open",
+      "user": "rustaceanrob",
+      "created_at": "2025-12-04T09:50:39Z",
+      "updated_at": "2026-01-14T11:16:19Z",
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34004",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34004.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32741](https://github.com/bitcoin/bitcoin/pull/32741) (rpc: Add optional peer_ids param to filter getpeerinfo by waketraindev)\n* [#32317](https://github.com/bitcoin/bitcoin/pull/32317) (kernel: Separate UTXO set access from validation functions by sedited)\n* [#31974](https://github.com/bitcoin/bitcoin/pull/31974) (Drop testnet3 by Sjors)\n* [#31774](https://github.com/bitcoin/bitcoin/pull/31774) (crypto: Use secure_allocator for `AES256_ctx` by davidgumberg)\n* [#28690](https://github.com/bitcoin/bitcoin/pull/28690) (build: Introduce internal kernel library by sedited)\n* [#25665](https://github.com/bitcoin/bitcoin/pull/25665) (refactor: Add util::Result failure types and ability to merge result values by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible typos and grammar issues:\n\n- \"...hint file may take a few hours to build.\" \"Make sure to use no RPC timeout (bitcoin-cli -rpcclienttimeout=0)\" -> \"...hint file may take a few hours to build. Make sure to use no RPC timeout (bitcoin-cli -rpcclienttimeout=0)\" [The two adjacent string literals are concatenated without an intervening space, producing \"build.Make\" which is hard to read; add a space between sentences.]\n\n\n\n<sup>2025-12-17</sup>\n",
+          "created_at": "2025-12-04T09:50:46Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `ASan + LSan + UBSan + integer`: https://github.com/bitcoin/bitcoin/actions/runs/19924702497/job/57121471145</sub>\n<sub>LLM reason (✨ experimental): swiftsync_tests failed due to an unsigned integer overflow (runtime error) in swiftsync.cpp.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-12-04T11:05:23Z"
+        },
+        {
+          "user": "rustaceanrob",
+          "body": "Thanks a lot for the thorough review. I will respond both high level and to review comments over the coming days.",
+          "created_at": "2025-12-10T14:18:41Z"
+        },
+        {
+          "user": "rustaceanrob",
+          "body": "> It also bothers me greatly that this can only seed pruned nodes - it limits its use a lot, it's hard to argue what this provides over current AssumeUTXO.\r\nIs it possible to carve out features from this change and progressively introduce chunks into the codebase - e.g. introduce hints file but use it to optimize the current storage to warm the cache based on whether we expect those to end up on disk or not\r\n\r\nI entertained this idea for a while. In the current format, the only thing we get is a guarantee some outputs should go straight to disk and minimize time in the cache. While this might not make things slower, I don't think it will offer a significant improvement. One iteration on this idea is to use time-to-live values similar to the [UTXO draft BIP](https://github.com/bitcoin/bips/pull/1923). So, something like `10` represents this output will be spent soon and `110` means this output will be spent a bit later, etc. This would have no benefit to the SwiftSync protocol itself, but could potentially offer an improvement in cache efficiency.\r\n\r\nRegarding the pruned-only feature. This would not be the case if there was a P2P message for undo-data. It would allow undo-data to be written in an un-trusted state and later confirmed as valid with a check of `IsBalanced`. Not to mention it would allow for full validation. Perhaps downloading undo-data should be required regardless of script checks, as 1. the changes to `validation.cpp` should be minimal in terms of omitted amount checks (especially with #32317) 2. it would support pruned, assume-valid, and fully validating nodes with no discrepancies between the code-paths for each of these options. I think it would be worthwhile for me to demonstrate this approach on a separate PR.\r\n\r\nRegarding the current format of the hintsfile, AFICT the linked delving bitcoin post explored the difference in encodings, and ~found essentially no difference in the bitset encoding and using the run-lengths~. Given that `std::vector<bool>` is an optimized data structure, it makes sense to opt for the `0/1` format. I have no strong opinion here.",
+          "created_at": "2025-12-15T13:09:31Z"
+        },
+        {
+          "user": "rustaceanrob",
+          "body": "> found essentially no difference in the bitset encoding and using the run-length\r\n\r\nThis turned out to not be true. Using bit-packing as shown in the current state of the PR, the encoding was far worse. `0/1` encoding up to 928000 resulted in a hintsfile of 438Mb, whereas the run-lengths for height came in at 173Mb. I think 438Mb is not acceptable, so a hybrid approach is likely required. The construction of both files was around the same duration. I will do a more thorough analysis of chain history to see when each encoding style is appropriate.",
+          "created_at": "2025-12-17T10:03:49Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> Regarding the pruned-only feature. This would not be the case if there was a P2P message for undo-data. It would allow undo-data to be written in an un-trusted state and later confirmed as valid with a check of IsBalanced. Not to mention it would allow for full validation.\r\n\r\nAre you intending to work on this P2P message? Is this part of any specification?",
+          "created_at": "2025-12-17T23:58:02Z"
+        },
+        {
+          "user": "rustaceanrob",
+          "body": "> Are you intending to work on this P2P message? Is this part of any specification?\r\n\r\nYeah I plan on creating a patch to add this, either here or separately. Notably, the [UTREEXO BIPs](https://github.com/bitcoin/bips/pull/1923) specify serving undo data, however it is also grouped with proofs that SwiftSync would not require. I will suggest as a comment that these messages may be appropriate to split into undo-data and proofs, as there are a number of use cases for a network message for this data. The easiest approach would be to use the current compressed serialization format and send that directly over the wire.",
+          "created_at": "2025-12-18T20:06:22Z"
+        },
+        {
+          "user": "exd02",
+          "body": "@rustaceanrob \r\n### Possible issue with `generatetxohints` when passing rollback parameter\r\n\r\nI am testing the `generatetxohints` RPC in my full node (performing IDB, currently in block 912483) and observed a possible unexpected behavior when the optional rollback parameter is provided:\r\n\r\n### Setup / Command\r\n```\r\n./build/bin/bitcoin-cli \\\r\n  -datadir=/run/media/exd/hd1/Bitcoin \\\r\n  --rpcclienttimeout=0 \\\r\n  generatetxohints ~/teste/test.hints 10000\r\n```\r\n\r\n### Behaviour\r\n- When no block height is provided:\r\n  - The hint file is generated successfully.\r\n- When a block height is provided:\r\n  - The output file is `test.hints.incomplete` (and it's empty)\r\n\r\n### Debugging details\r\nI attached gdb to `bitcoind` and set a breakpoint at `rpc/blockchain.cpp:3457` (I believe that if there is an error it should be here, because the problem only occurs when `params[1]` is defined):\r\n\r\n```cpp\r\nif (!request.params[1].isNull()) { // <----- Breakpoint here\r\n    const CBlockIndex* invalidate_index = ParseHashOrHeight(request.params[1], *node.chainman);\r\n    invalidate_index = WITH_LOCK(::cs_main, return node.chainman->ActiveChain().Next(invalidate_index));\r\n    rollback.emplace(*node.chainman, *invalidate_index);\r\n}\r\n```\r\n\r\n```sh\r\n# attached the debugger\r\ngdb build/bin/bitcoind\r\n(gdb) set args -datadir=/run/media/exd/hd1/Bitcoin -debug=rpc\r\n(gdb) start\r\n(gdb) break rpc/blockchain.cpp:3457\r\n(gdb) continue\r\n\r\n# called generatetxohints from cli\r\n./build/bin/bitcoin-cli -datadir=/run/media/exd/hd1/Bitcoin --rpcclienttimeout=0 generatetxohints ~/teste/test.hints 10000\r\n\r\n# gdb output\r\nThread 4 \"b-httpworker.0\" hit Breakpoint 2, generatetxohints()::$_0::operator()(RPCHelpMan const&, JSONRPCRequest const&) const (request=..., this=<optimized out>, self=...) at ./rpc/blockchain.cpp:3457\r\n3457\t    if (!request.params[1].isNull()) {\r\n(gdb) n\r\n3458\t        const CBlockIndex* invalidate_index = ParseHashOrHeight(request.params[1], *node.chainman);\r\n(gdb) n\r\n3459\t        invalidate_index = WITH_LOCK(::cs_main, return node.chainman->ActiveChain().Next(invalidate_index));\r\n(gdb) n\r\n3460\t        rollback.emplace(*node.chainman, *invalidate_index);\r\n(gdb) n\r\n\r\n# after this point, the RPC execution does not continue its expected flow. Instead, the node resumes normal tip validation (UpdateTip logs continue), while the generatetxohints RPC appears to stall. The output file remains as `test.hints.incomplete`, stays empty, and is never finalized. No explicit error is returned.\r\n2026-01-06T23:05:37Z UpdateTip: new best=00000000000000000001c4803c902cfab517056bd8191e1d5870b2c58c36d3c2 height=912483 version=0x2001e000 log2_work=95.797984 tx=1234594715 date='2025-08-30T23:36:43Z' progress=0.953049 cache=15.6MiB(115671txo)\r\n...\r\n```\r\n\r\n### Question\r\nAm I using `generatetxohints` incorrectly, or is this an unintended behavior when the rollback parameter is provided?",
+          "created_at": "2026-01-06T23:25:16Z"
+        },
+        {
+          "user": "rustaceanrob",
+          "body": "> 10000\r\n\r\nThat block value is quite low and would take a long time to roll back to. I suggest trying with a number more like `920_000`. Running `bitcoind` with `debug=rpc` would help further debug the issue.",
+          "created_at": "2026-01-13T16:41:21Z"
+        },
+        {
+          "user": "rustaceanrob",
+          "body": "Given the current impact of this approach, which is somewhat limited in scope, I am going to take some time to prototype the fully-validating and parallel design. I'm hoping to gather some benchmarks and plan for necessary refactors by doing so.",
+          "created_at": "2026-01-13T16:44:27Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 0
+  }
+}

@@ -1,0 +1,407 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:40:04.589932+00:00",
+  "date": "2025-05-09",
+  "pull_requests": [
+    {
+      "number": 32463,
+      "title": "test: fix an incorrect `feature_fee_estimation.py` subtest",
+      "body": "Attempt to fix #32461\r\n\r\nIn the `estimatesmartfee` RPC, we return the maximum of the following: the feerate estimate for the target, `minrelaytxfee`, and `mempoolminfee`.\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/9a05b45da60d214cb1e5a50c3d2293b1defc9bb0/src/rpc/fees.cpp#L85\r\n\r\nThe test `test_feerate_mempoolminfee`, originally introduced in https://github.com/bitcoin/bitcoin/commit/ea31caf6b4c182c6f10f136548f84e603800511c, is incorrect. \r\n\r\nIt should calculate the fee rate ceiling by taking the maximum of the custom `minrelaytxfee`, `mempoolminfee`, and the highest fee rate observed during the test (`check_smart_estimates`). This is necessary because:\r\n\r\n* There is no guarantee that the generated fee rates will exceed both `minrelaytxfee` and `mempoolminfee`.\r\n* Users can start a node with custom fee settings.\r\n\r\nDue to the non-deterministic nature of the `feature_fee_estimation.py` test, it often passes by chance. The randomly generated fees typically include a value higher than the custom `minrelaytxfee`, inadvertently hiding the issue.\r\n\r\nIssue #32461 identified a random seeds that consistently fails the test because the generated fees never exceed the custom `minrelaytxfee`:\r\n\r\ne.g\r\n```\r\nbuild/test/functional/feature_fee_estimation.py --random=3450808900320758527\r\n```\r\n\r\nThis PR has two commits which :\r\n\r\n* Correctly fixes the test by calculating the fee rate ceiling as the maximum of the node `minrelaytxfee`, `mempoolminfee`, and the highest seen fee rate, when verifying smart fee estimates.\r\n* Improves the subtest name and comment for clarity.\r\n* Restores the original test behavior by appending 4000 WU to the custom `blockmaxweight`.\r\n",
+      "state": "closed",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-05-09T18:20:41Z",
+      "updated_at": "2025-07-04T08:38:48Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32463",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32463.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [glozow](https://github.com/bitcoin/bitcoin/pull/32463#pullrequestreview-2963581215), [theStack](https://github.com/bitcoin/bitcoin/pull/32463#pullrequestreview-2979460112), [achow101](https://github.com/bitcoin/bitcoin/pull/32463#issuecomment-3033949761) |\n| Stale ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32463#issuecomment-2867652250), [willcl-ark](https://github.com/bitcoin/bitcoin/pull/32463#pullrequestreview-2888344985) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#30157](https://github.com/bitcoin/bitcoin/pull/30157) (Fee Estimation via Fee rate Forecasters by ismaelsadeeq)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-09T18:20:45Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks for fixing it so quickly, I can confirm that this fixes the test for the failing `--random=3450808900320758527`.\r\nSomeone more knowledgeable in this area of the code should also look at at, but from my part it's a lightweight ACK.\r\n\r\nACK 2c5f26bc6ac47e3a6a8555e9a6c60832322a36e8\r\n",
+          "created_at": "2025-05-09T19:09:48Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "> If you re-touch for any reason it would seem a little more logical to me to slightly restructure so we test without new minrelaytxfee first (check_estimates() on L260), then add the high minrelaytxfee before doing the rest of the tests with it added. But zero practical difference and not a blocker for me.\r\n\r\nMakes sense, I will add it in the follow-up to this which is retaining the original `feature_fee_estimations.py` tests behaviour by incrementing the  custom`blockmaxweight` by 4000. see https://github.com/bitcoin/bitcoin/issues/32461#issuecomment-2925282272\r\n",
+          "created_at": "2025-06-02T13:24:09Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "cc @glozow Is this rfm? I'd like to make a quick follow-up on this, as mentioned in \r\n https://github.com/bitcoin/bitcoin/pull/32463#issuecomment-2930709631\r\n\r\nAlso, this can be backported to 29.1 cc @fanquake.\r\n\r\n",
+          "created_at": "2025-06-25T06:44:19Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Thanks for your review @glozow \r\n\r\n> Did you consider baking this logic into check_smart_estimates instead? It feels a bit hacky to just append it to the fees seen, given that it isn't actually a seen fee.\r\n\r\nI hadn’t considered that before, your suggestion is definitely more elegant and cleaner.\r\n\r\nI’ve updated the PR to implement your approach, and I also added a follow-up improvement I had in mind as a separate commit.\r\n\r\n[22a36e8..9b75cfd](https://github.com/bitcoin/bitcoin/compare/2c5f26bc6ac47e3a6a8555e9a6c60832322a36e8..9b75cfda4d62a0a3bde402503244dd57e1621a12)",
+          "created_at": "2025-06-26T06:28:51Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 9b75cfda4d62a0a3bde402503244dd57e1621a12",
+          "created_at": "2025-07-03T23:39:56Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> Same here, fwiw, running with --random=3450808900320758527 didn't fail for me on master (at commit https://github.com/bitcoin/bitcoin/commit/bf75c9964fb28a5e9b8a07097248ffa960738478).\r\n\r\nThis is the one that fails for me on 29.x. Backported to 29.x in #32863.",
+          "created_at": "2025-07-04T08:37:10Z"
+        }
+      ]
+    },
+    {
+      "number": 32460,
+      "title": "fs: remove `_POSIX_C_SOURCE` defining",
+      "body": "On Linux systems, `_POSIX_C_SOURCE` will default to `200809L` (since glibc 2.10). There's currently no reason for us to undefine it, and then set it to an earlier value. Also tested with musl libc.\r\n \r\nI think if anything, the project should be settings macros like `_POSIX_C_SOURCE`, globally.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-05-09T15:01:58Z",
+      "updated_at": "2025-05-30T09:32:20Z",
+      "comments": 23,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32460",
+      "labels": [
+        "Utils/log/libs"
+      ]
+    },
+    {
+      "number": 32459,
+      "title": "qt: drop unused watch-only functionality",
+      "body": "The watch-only functionality in the GUI was only used for legacy wallets. Watch-only descriptor wallets do not use this.\r\n\r\nThe only visible changes of this PR should be:\r\n- dropped \"Spendable:\" label from the overview tab\r\n- column width cache is reset\r\n\r\nThis PR also removes some unused variables from the interface.",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-05-09T14:36:33Z",
+      "updated_at": "2025-05-21T09:13:05Z",
+      "comments": 13,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32459",
+      "labels": [
+        "GUI"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32459.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/32459#pullrequestreview-2854442158), [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32459#issuecomment-2895951950) |\n| Stale ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/32459#issuecomment-2887600076) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32523](https://github.com/bitcoin/bitcoin/pull/32523) (wallet: Remove watchonly behavior and isminetypes by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-09T14:36:36Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Can be rebased now.",
+          "created_at": "2025-05-10T15:05:49Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Somehow the Date column disappeared.",
+          "created_at": "2025-05-12T10:11:13Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> Are these lines still necessary:\r\n\r\nI got rid of them.\r\n\r\nFor some reason QT is hiding column 1, which happens to be the date, but it also happens if I e.g. swap the date and type column.\r\n\r\n---\r\n\r\nAha, QT caches column layout between sessions, so it remembers how this column behaved on an earlier run.",
+          "created_at": "2025-05-12T11:11:13Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> > Are these lines still necessary:\r\n> \r\n> I got rid of them.\r\n> \r\n> For some reason QT is hiding column 1, which happens to be the date, but it also happens if I e.g. swap the date and type column.\r\n> \r\n> Aha, QT caches column layout between sessions, so it remembers how this column behaved on an earlier run.\r\n\r\n^ Indeed.\r\n\r\nSee: https://github.com/bitcoin/bitcoin/blob/59e09e0fb7b4cf8f8db97c2f81a8f6f69fe6cacf/src/qt/transactionview.cpp#L204",
+          "created_at": "2025-05-12T11:19:29Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "I renamed `TransactionViewHeaderState` so that it's reset. This prevents hiding the date column.",
+          "created_at": "2025-05-12T11:34:10Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> I renamed `TransactionViewHeaderState` so that it's reset. This prevents hiding the date column.\r\n\r\nA more general approach would involve versioning, though.",
+          "created_at": "2025-05-12T11:36:11Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Added a release note.\r\n\r\n> A more general approach would involve versioning\r\n\r\nI'm open to suggestions. Though this screen is unlikely to change again between now and when we switch to QML.",
+          "created_at": "2025-05-12T11:39:58Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "Shouldn't this be on the GUI repo?",
+          "created_at": "2025-05-14T11:50:37Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Doesn't seem worth moving, and this PR also touches the interface, but I opened a tracking issue on the GUI repo that points here. There's probably more than what I found here.",
+          "created_at": "2025-05-14T12:34:57Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 0fc9bf05c36169ff746df10c5c8310f5adf2e202\r\n\r\nThere does not appear to be any visual differences, nor any remaining references to watch-only/watchonly in the GUI.",
+          "created_at": "2025-05-16T20:15:40Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Rebased just in case. Renumbered columns in `overviewpage.ui`.\r\n\r\n",
+          "created_at": "2025-05-19T08:11:36Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "Review ACK https://github.com/bitcoin/bitcoin/commit/e8661aac752eb08fee318eb8f56e599578d78f9f. \r\n\r\nQuickly tested with GUI built on master and GUI built on this branch. Confirmed the watch-only behavior removed here has nothing to do with no-private-keys descriptor wallets, this is dead code AFAICT. ",
+          "created_at": "2025-05-20T22:13:08Z"
+        }
+      ]
+    },
+    {
+      "number": 32458,
+      "title": "guix: move `*-check.py` scripts under contrib/guix/",
+      "body": "These scripts are not meant for general developer usage. They are for use on the release binaries, which have been compiled in an environment that makes various assumptions in regards to c library, compiler options, hardening options, dependency patching etc.\r\n\r\nAnyone is free to run these scripts against self-compiled binaries, but this isn't something we want to modify/generalize the scripts to support.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-05-09T12:54:01Z",
+      "updated_at": "2025-05-12T18:54:07Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32458",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32458.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [laanwj](https://github.com/bitcoin/bitcoin/pull/32458#pullrequestreview-2828547209), [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/32458#pullrequestreview-2832760013) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31233](https://github.com/bitcoin/bitcoin/pull/31233) (cmake: Improve robustness and usability by hebasto)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-09T12:54:04Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK",
+          "created_at": "2025-05-09T13:20:15Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Guix Build:\r\n```bash\r\nf15ff81485789fe4fa22c3ecf887cfbfa0b3ae8620fd8c8926deb257ef19cff9  guix-build-415650cea94f/output/aarch64-linux-gnu/SHA256SUMS.part\r\n7320f11f0ff5005d841dc2d854f46c5d317df077dae41b4631493f090b34875c  guix-build-415650cea94f/output/aarch64-linux-gnu/bitcoin-415650cea94f-aarch64-linux-gnu-debug.tar.gz\r\naf696399978c60a9517006c8435d8053b541b3dcfec49dacaa46932404d22b7b  guix-build-415650cea94f/output/aarch64-linux-gnu/bitcoin-415650cea94f-aarch64-linux-gnu.tar.gz\r\n6da90889d6dcb60093136249bafa31db179f436a22977308c7c74690183beecf  guix-build-415650cea94f/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n9e5cb55d04c38db37a6780cf13ade4af2629b3a90ccd37bfc55e8f22a5f6802b  guix-build-415650cea94f/output/arm-linux-gnueabihf/bitcoin-415650cea94f-arm-linux-gnueabihf-debug.tar.gz\r\n643b6f6cca33b2173564bacb60d825fd1a48b83c8c395bf72b604f2c07411d7e  guix-build-415650cea94f/output/arm-linux-gnueabihf/bitcoin-415650cea94f-arm-linux-gnueabihf.tar.gz\r\nbfb765b4a37eae8eca2f49f355bc44f86091c779c70b771ff952826790b07acc  guix-build-415650cea94f/output/arm64-apple-darwin/SHA256SUMS.part\r\n327b6acf4865dda2a1fe92f78d8225d6613573e9c0d54ccad9f0baf6e091eb9b  guix-build-415650cea94f/output/arm64-apple-darwin/bitcoin-415650cea94f-arm64-apple-darwin-codesigning.tar.gz\r\n3bff66b7c3a7fe8b585ab0b0786b47a327f4e5c043d8ad26cce5bc85b1cdbb7b  guix-build-415650cea94f/output/arm64-apple-darwin/bitcoin-415650cea94f-arm64-apple-darwin-unsigned.tar.gz\r\n1f5f2650505f7dbc56353c91b2cc1c12e39ce0f4bcaee3dd678f0e129cb66d20  guix-build-415650cea94f/output/arm64-apple-darwin/bitcoin-415650cea94f-arm64-apple-darwin-unsigned.zip\r\nd9385788fd4e19caa4ef85959c285184026396abdbb0faf8f908c441e869e0ba  guix-build-415650cea94f/output/dist-archive/bitcoin-415650cea94f.tar.gz\r\n97a0f6a9e625d0884a6290198ee6129aa44bf6667e466acccd8129950fc737a5  guix-build-415650cea94f/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n61ae3700a6c6e5c3b21fba74df84267242487719e7ab2459d0de79b71b3c9ea3  guix-build-415650cea94f/output/powerpc64-linux-gnu/bitcoin-415650cea94f-powerpc64-linux-gnu-debug.tar.gz\r\ne2312020c04a222d3a598d5460bee957aed5c515e9a39405061047d7c07a3cf3  guix-build-415650cea94f/output/powerpc64-linux-gnu/bitcoin-415650cea94f-powerpc64-linux-gnu.tar.gz\r\nb8b90445ed29bc100c2f9a2a3851a8a6663f220005e6dfef68c8261e0c8d91e3  guix-build-415650cea94f/output/riscv64-linux-gnu/SHA256SUMS.part\r\n69f07f00be84424c307d2459afba324ff25f8c47d8aa314631de2f37ec224e52  guix-build-415650cea94f/output/riscv64-linux-gnu/bitcoin-415650cea94f-riscv64-linux-gnu-debug.tar.gz\r\nc1f72cb7bf768e0ad66743693076d520b6975556dad51cd36c5620acc539f25c  guix-build-415650cea94f/output/riscv64-linux-gnu/bitcoin-415650cea94f-riscv64-linux-gnu.tar.gz\r\nfa98a6cce7377a325686ce53770dc999e9ff2a4d723b34c8f3786810ee95fa34  guix-build-415650cea94f/output/x86_64-apple-darwin/SHA256SUMS.part\r\n1a0a1359141bf6ecfe8e9f67988ac6b2fbbdaa48fca325afe04afc0da458796e  guix-build-415650cea94f/output/x86_64-apple-darwin/bitcoin-415650cea94f-x86_64-apple-darwin-codesigning.tar.gz\r\n6fbeaabe44ab5538941e5baeba5dbf2e3d00312d0d79c4ce9ac68350d9e47a48  guix-build-415650cea94f/output/x86_64-apple-darwin/bitcoin-415650cea94f-x86_64-apple-darwin-unsigned.tar.gz\r\n632981933fe1c2997dceb5e4aba00ebf06276f84957bb0a95796e304fc7269ba  guix-build-415650cea94f/output/x86_64-apple-darwin/bitcoin-415650cea94f-x86_64-apple-darwin-unsigned.zip\r\nfcb73f8d11ed2f3bbf6a1a9c4f50edeb50a476881f2ea5f7118952c0108aeeb6  guix-build-415650cea94f/output/x86_64-linux-gnu/SHA256SUMS.part\r\nd1cde650cc54d213b79a20e4e9d23af4177580d5df3bd1019dd7371fb49c1e92  guix-build-415650cea94f/output/x86_64-linux-gnu/bitcoin-415650cea94f-x86_64-linux-gnu-debug.tar.gz\r\n094fe3ef124278a55baf70a8f70de82114fa9b7ce91d008864e38eb620a3ef24  guix-build-415650cea94f/output/x86_64-linux-gnu/bitcoin-415650cea94f-x86_64-linux-gnu.tar.gz\r\n7e7dfe43ba9393d6b3575df9950b6feeedc5e44e923d77d0abe37dc15b9cba49  guix-build-415650cea94f/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n1175fd40f98f2ca05cb59ab1da2592bc94b25de2f0142971cd1c5b88ddd109cc  guix-build-415650cea94f/output/x86_64-w64-mingw32/bitcoin-415650cea94f-win64-codesigning.tar.gz\r\n5fb984917fa6a618274788bb79740a6d5f1c3ddc54c26e1399906fec118b2a27  guix-build-415650cea94f/output/x86_64-w64-mingw32/bitcoin-415650cea94f-win64-debug.zip\r\nfd44497af0d338406622c3b686575584bce681a8029e393e6a420d301b384901  guix-build-415650cea94f/output/x86_64-w64-mingw32/bitcoin-415650cea94f-win64-setup-unsigned.exe\r\nc908d92b9b5acfd9c5d5ac626ec7fc99e474190250726815b543a07544c802d1  guix-build-415650cea94f/output/x86_64-w64-mingw32/bitcoin-415650cea94f-win64-unsigned.zip\r\n```",
+          "created_at": "2025-05-09T13:46:17Z"
+        }
+      ]
+    },
+    {
+      "number": 32457,
+      "title": "bench: replace benchmark block with more representative one (413567 → 784588)",
+      "body": "Draft, until I investigate if we can generate a similar block instead of adding a real one to the repo\r\n\r\n----\r\n\r\n#### Summary\r\nThis PR replaces our benchmark's reference block with one that's more modern and representative of current usage patterns.\r\n\r\n### Context\r\nThe [current benchmark block](https://mempool.space/block/413567) was mined in 2016 and added in PR #9049. Since it predates many modern script types, our benchmarks don't accurately reflect current network conditions.\r\n\r\n### Suggestion\r\nWe're replacing it with [block 784588](https://mempool.space/block/784588) from 2023, which provides a better balance - it's recent enough to include modern script types while still containing legacy scripts typically encountered during IBD.\r\n\r\nThe PR consists of two commits:\r\n* first documenting the current block's script type distribution;\r\n* then replacing it with the new block and updating assertions accordingly.",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-05-09T09:30:08Z",
+      "updated_at": "2025-05-21T13:43:55Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32457",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32457.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32554](https://github.com/bitcoin/bitcoin/pull/32554) (RFC: bench: replace embedded raw block with configurable block generator by l0rinc)\n* [#32532](https://github.com/bitcoin/bitcoin/pull/32532) (script: short-circuit `GetLegacySigOpCount` for known scripts by l0rinc)\n* [#31682](https://github.com/bitcoin/bitcoin/pull/31682) ([IBD] specialize CheckBlock's input & coinbase checks by l0rinc)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-09T09:30:12Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "Agree with the rationale of this PR, but having 1MB+ binary files in the repo is really meh.",
+          "created_at": "2025-05-09T12:49:57Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Agree - do you have a better idea?",
+          "created_at": "2025-05-09T12:57:35Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "> Is there a benchmark that needs this? If yes, going for synthetic, but representative (and easily adjustable) data may be a better choice for that benchmark.\r\n\r\nYes, as there is a lot of random data in a block whose exact value isn't important to benchmarking (only that it's always the same), it seems possible to deterministically construct a similar block from code.",
+          "created_at": "2025-05-09T14:19:49Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Added a random block generator in https://github.com/bitcoin/bitcoin/pull/32554 - let me know if it makes sense so I can close this one.",
+          "created_at": "2025-05-18T21:40:31Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Closing in favor of https://github.com/bitcoin/bitcoin/pull/32554",
+          "created_at": "2025-05-21T13:43:55Z"
+        }
+      ]
+    },
+    {
+      "number": 32454,
+      "title": "tracing: fix invalid argument in mempool_monitor",
+      "body": "The mempool_monitor tracing tool is incorrectly reading the reason as the first argument. Fix this!\r\n\r\nNoticed this during the bitcoin++ mempool hackathon 😅\r\n\r\ncc 0xB10C",
+      "state": "closed",
+      "user": "jb55",
+      "created_at": "2025-05-09T05:05:21Z",
+      "updated_at": "2025-05-12T04:41:30Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32454",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32454.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [0xB10C](https://github.com/bitcoin/bitcoin/pull/32454#issuecomment-2865366915) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-09T05:05:25Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "Code Review ACK 31c5ebc4007884b655f2f90ca09e36e0b9ada4da\r\n\r\nSeems like I introduced that bug in https://github.com/bitcoin/bitcoin/pull/31848 (ec47ba349d0b3cb2d274593ca7b828ae70584e10).",
+          "created_at": "2025-05-09T06:57:51Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to `29.x` in #32292.",
+          "created_at": "2025-05-09T08:34:12Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "This came to my mind again: We might want to consider maintaining these tools outside of the Bitcoin Core repo as mentioned in #31274  6)\n",
+          "created_at": "2025-05-10T07:42:50Z"
+        },
+        {
+          "user": "jb55",
+          "body": "that makes sense to me",
+          "created_at": "2025-05-10T13:58:40Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32464,
+      "title": "WITH_DBUS shouldn't be limited to Linux",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nWith the move to CMake, WITH_DBUS becomes a Linux only feature:\n`cmake_dependent_option(WITH_DBUS \"Enable DBus support.\" ON \"CMAKE_SYSTEM_NAME STREQUAL \\\"Linux\\\" AND BUILD_GUI\" OFF)`\n\n### Expected behaviour\n\nThis should be enabled on any UNIX-like.  Or alternatively disabled on WIN32.\n\n### Steps to reproduce\n\ncmake -DWITH_GUI -DWITH_DBUS on FreeBSD or other UNIX\n\n### Relevant log output\n\n_No response_\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nv29.0\n\n### Operating system and version\n\nFreeBSD CURRENT\n\n### Machine specifications\n\n_No response_",
+      "state": "closed",
+      "user": "kev009",
+      "created_at": "2025-05-09T20:39:12Z",
+      "updated_at": "2025-05-12T13:22:59Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32464",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "hebasto",
+          "body": "@kev009 \n\nThanks for reporting!\n\nFixed in https://github.com/bitcoin/bitcoin/pull/32469.",
+          "created_at": "2025-05-11T16:11:32Z"
+        }
+      ]
+    },
+    {
+      "number": 32462,
+      "title": "RFC: Should node Wallet Startup Options Apply to Individual Wallets?",
+      "body": "PR #29278 is going to introduces a `maxfeerate` wallet startup option.\n\nThere was some discussion between  between @luke-jr , me, and @murchandamus in a thread https://github.com/bitcoin/bitcoin/pull/29278#discussion_r1468533274\n\n> This still isn't a wallet option...\n\n> I don't understand why you said it is not a wallet option.\n> The `OptionsCategory` of this startup option is `WALLET`, and it's only used in the wallet.\n> Can you please expand on your comment?\n> Thanks.\n\n> I’m also confused by this comment. @luke-jr, could you elaborate on what you are suggesting?\n\n> Something set on each wallet, potentially different for each.\n\nLuke suggested that the startup option should instead be set individually for each wallet, rather than globally. \nHowever, this is not how the current wallet options are implemented wallet options are currently applied globally to all wallets.\n\nI'm opening this up for general discussion because I find it may be redundant to require setting the same options individually for each wallet.\nHowever, I’m curious to hear others' opinions.\n\n\n",
+      "state": "closed",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-05-09T15:42:14Z",
+      "updated_at": "2025-05-13T17:18:42Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32462",
+      "labels": [
+        "Brainstorming",
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "ryanofsky",
+          "body": "Is idea with the \"set on each wallet, potentially different for each\" suggestion that the existing `-maxtxfee` option should remain global, but `-maxfeerate` should be per-wallet? \n\nIf so, that seems confusing and it would be good to know what rationale would be.\n\nIt seems like just making both global would let them be easier to understand and more convenient to set. Then if there is a use-case for wanting different wallets to have different values, support for that could be added in another PR. If different wallets need different values, it could also make sense (not sure) to store those values in the wallet databases rather than externally so individual wallet configurations are self-contained.",
+          "created_at": "2025-05-12T14:04:15Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "I share the same opinion. I also noticed @murchandamus gave a thumbs up, which I interpret as agreement. Therefore, I’ll resolve the comment in https://github.com/bitcoin/bitcoin/pull/29278#discussion_r1468533274 and close this issue.\n\nAs mentioned, if there’s a use case for wanting different wallets to have different values, support for that can be added in another PR, and the rationale can be documented in this issue for better tracking.",
+          "created_at": "2025-05-13T17:18:41Z"
+        }
+      ]
+    },
+    {
+      "number": 32461,
+      "title": "test: `feature_fee_estimation` failure after duplicate coinbase tx weight reservation fix [AssertionError: Estimated fee (0.00923427) out of range]",
+      "body": "### Summary\nFirst encountered in https://github.com/bitcoin/bitcoin/actions/runs/14929268797/job/41941137828?pr=31144\n\nDoing a git bisect reveals the likely culprit is [mining: bugfix: Fix duplicate coinbase tx weight reservation](https://github.com/bitcoin/bitcoin/pull/31384)\n\n---\n\n### Reproducer\n\n> git checkout 6b165f5906fc53bd10bedff85a6ef26e0aabdc5c\n\n```bash\nHEAD is now at 6b165f5906 Merge bitcoin/bitcoin#31384: mining: bugfix: Fix duplicate coinbase tx weight reservation\n```\n\n> cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc) && build/test/functional/feature_fee_estimation.py --random=3450808900320758527\n\n```bash\n2025-05-09T14:55:06.412000Z TestFramework (INFO): User supplied random seed 3450808900320758527\n2025-05-09T14:55:06.412000Z TestFramework (INFO): PRNG seed is: 3450808900320758527\n2025-05-09T14:55:06.413000Z TestFramework (INFO): Initializing test directory /var/folders/5t/04gq0pqj5yv4t8cxw51q0s2m0000gn/T/bitcoin_func_test_wg3p8s0v\n2025-05-09T14:55:06.426000Z TestFramework (INFO): This test is time consuming, please be patient\n2025-05-09T14:55:06.426000Z TestFramework (INFO): Splitting inputs so we can generate tx's\n2025-05-09T14:55:06.988000Z TestFramework (INFO): Finished splitting\n2025-05-09T14:55:07.791000Z TestFramework (INFO): Testing estimates with single transactions.\n2025-05-09T14:55:07.791000Z TestFramework (INFO): Will output estimates for 1/2/3/6/15/25 blocks\n2025-05-09T14:55:07.791000Z TestFramework (INFO): Creating transactions and mining them with a block size that can't keep up\n2025-05-09T14:55:09.501000Z TestFramework (INFO): Creating transactions and mining them at a block size that is just big enough\n2025-05-09T14:55:11.955000Z TestFramework (INFO): Creating transactions and mining them with a block size that can't keep up\n2025-05-09T14:55:14.407000Z TestFramework (INFO): Creating transactions and mining them at a block size that is just big enough\n2025-05-09T14:55:17.271000Z TestFramework (INFO): Final estimates after emptying mempools\n2025-05-09T14:55:17.287000Z TestFramework (INFO): Test fee_estimates.dat is flushed periodically\n2025-05-09T14:55:18.131000Z TestFramework (INFO): Test fee rate estimation after restarting node with high MempoolMinFee\n2025-05-09T14:55:18.523000Z TestFramework (ERROR): Assertion failed\nTraceback (most recent call last):\n  File \"/Users/lorinc/IdeaProjects/bitcoin/test/functional/test_framework/test_framework.py\", line 135, in main\n    self.run_test()\n    ~~~~~~~~~~~~~^^\n  File \"/Users/lorinc/IdeaProjects/bitcoin/build/test/functional/feature_fee_estimation.py\", line 458, in run_test\n    self.test_feerate_mempoolminfee()\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^\n  File \"/Users/lorinc/IdeaProjects/bitcoin/build/test/functional/feature_fee_estimation.py\", line 243, in test_feerate_mempoolminfee\n    check_estimates(self.nodes[1], self.fees_per_kb)\n    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/lorinc/IdeaProjects/bitcoin/build/test/functional/feature_fee_estimation.py\", line 121, in check_estimates\n    check_smart_estimates(node, fees_seen)\n    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/Users/lorinc/IdeaProjects/bitcoin/build/test/functional/feature_fee_estimation.py\", line 104, in check_smart_estimates\n    raise AssertionError(\n        f\"Estimated fee ({feerate}) out of range ({min(fees_seen)},{max(fees_seen)})\"\n    )\nAssertionError: Estimated fee (0.00923427) out of range (5.076142131979696e-05,0.008705986394557823)\n2025-05-09T14:55:18.578000Z TestFramework (INFO): Not stopping nodes as test failed. The dangling processes will be cleaned up later.\n2025-05-09T14:55:18.578000Z TestFramework (WARNING): Not cleaning up dir /var/folders/5t/04gq0pqj5yv4t8cxw51q0s2m0000gn/T/bitcoin_func_test_wg3p8s0v\n2025-05-09T14:55:18.578000Z TestFramework (ERROR): Test failed. Test logging available at /var/folders/5t/04gq0pqj5yv4t8cxw51q0s2m0000gn/T/bitcoin_func_test_wg3p8s0v/test_framework.log\n2025-05-09T14:55:18.579000Z TestFramework (ERROR):\n2025-05-09T14:55:18.579000Z TestFramework (ERROR): Hint: Call /Users/lorinc/IdeaProjects/bitcoin/test/functional/combine_logs.py '/var/folders/5t/04gq0pqj5yv4t8cxw51q0s2m0000gn/T/bitcoin_func_test_wg3p8s0v' to consolidate all logs\n2025-05-09T14:55:18.579000Z TestFramework (ERROR):\n2025-05-09T14:55:18.579000Z TestFramework (ERROR): If this failure happened unexpectedly or intermittently, please file a bug and provide a link or upload of the combined log.\n2025-05-09T14:55:18.579000Z TestFramework (ERROR): https://github.com/bitcoin/bitcoin/issues\n2025-05-09T14:55:18.579000Z TestFramework (ERROR):\n[node 2] Cleaning up leftover process\n[node 1] Cleaning up leftover process\n[node 0] Cleaning up leftover process\n```\n\n> git checkout HEAD^1\n\n```bash\nHEAD is now at 6a46be75c4 Merge bitcoin/bitcoin#31793: ci: Use clang-20 for sanitizer tasks\n```\n\n>  cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc) && build/test/functional/feature_fee_estimation.py --random=3450808900320758527\n\n```bash\n2025-05-09T14:53:52.973000Z TestFramework (INFO): User supplied random seed 3450808900320758527\n2025-05-09T14:53:52.973000Z TestFramework (INFO): PRNG seed is: 3450808900320758527\n2025-05-09T14:53:52.974000Z TestFramework (INFO): Initializing test directory /var/folders/5t/04gq0pqj5yv4t8cxw51q0s2m0000gn/T/bitcoin_func_test_1dgb1kvc\n2025-05-09T14:53:52.992000Z TestFramework (INFO): This test is time consuming, please be patient\n2025-05-09T14:53:52.992000Z TestFramework (INFO): Splitting inputs so we can generate tx's\n2025-05-09T14:53:53.560000Z TestFramework (INFO): Finished splitting\n2025-05-09T14:53:54.423000Z TestFramework (INFO): Testing estimates with single transactions.\n2025-05-09T14:53:54.423000Z TestFramework (INFO): Will output estimates for 1/2/3/6/15/25 blocks\n2025-05-09T14:53:54.423000Z TestFramework (INFO): Creating transactions and mining them with a block size that can't keep up\n2025-05-09T14:53:56.340000Z TestFramework (INFO): Creating transactions and mining them at a block size that is just big enough\n2025-05-09T14:53:58.810000Z TestFramework (INFO): Creating transactions and mining them with a block size that can't keep up\n2025-05-09T14:54:00.682000Z TestFramework (INFO): Creating transactions and mining them at a block size that is just big enough\n2025-05-09T14:54:02.972000Z TestFramework (INFO): Final estimates after emptying mempools\n2025-05-09T14:54:02.988000Z TestFramework (INFO): Test fee_estimates.dat is flushed periodically\n2025-05-09T14:54:03.839000Z TestFramework (INFO): Test fee rate estimation after restarting node with high MempoolMinFee\n2025-05-09T14:54:04.700000Z TestFramework (INFO): Test acceptstalefeeestimates option\n2025-05-09T14:54:05.129000Z TestFramework (INFO): Test reading old fee_estimates.dat\n2025-05-09T14:54:05.869000Z TestFramework (INFO): Restarting node with fresh estimation\n2025-05-09T14:54:06.413000Z TestFramework (INFO): Testing estimates with RBF.\n2025-05-09T14:54:08.411000Z TestFramework (INFO): Restarting node with fresh estimation\n2025-05-09T14:54:09.016000Z TestFramework (INFO): Test estimatesmartfee modes\n2025-05-09T14:54:27.128000Z TestFramework (INFO): Testing that fee estimation is disabled in blocksonly.\n2025-05-09T14:54:27.607000Z TestFramework (INFO): Stopping nodes\n2025-05-09T14:54:27.769000Z TestFramework (INFO): Cleaning up /var/folders/5t/04gq0pqj5yv4t8cxw51q0s2m0000gn/T/bitcoin_func_test_1dgb1kvc on exit\n2025-05-09T14:54:27.769000Z TestFramework (INFO): Tests successful\n```",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-05-09T15:04:48Z",
+      "updated_at": "2025-07-03T23:45:44Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32461",
+      "labels": [
+        "TX fees and policy",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "ismaelsadeeq",
+          "body": "@l0rinc Thanks for the thorough report.\n\nHowever, the failure is not in the `acceptstalefeeestimates` subtest, but in `test_feerate_mempoolminfee`.\n\nI believe the issue is that we are not appending `high_val` to `self.fees_per_kb` before checking the estimates.\n\nI attempted to fix this in #32463. \n\n\n\n---\nAlso, it's quite strange that the test started failing on this commit https://github.com/bitcoin/bitcoin/commit/6b165f5906fc53bd10bedff85a6ef26e0aabdc5c\n\nI haven't looked into that yet.\n",
+          "created_at": "2025-05-09T18:27:19Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "https://cirrus-ci.com/task/5716739608018944?logs=ci#L3079",
+          "created_at": "2025-05-24T10:53:30Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "> Also, it's quite strange that the test started failing on this commit: [https://github.com/bitcoin/bitcoin/commit/6b165f5906fc53bd10bedff85a6ef26e0aabdc5c](https://github.com/bitcoin/bitcoin/commit/6b165f5906fc53bd10bedff85a6ef26e0aabdc5c)\n> I haven't looked into that yet.\n\nI’ve debugged the issue and discovered why this seed only fails on commit 6b165f5906fc53bd10bedff85a6ef26e0aabdc5c\n\nThis is because, prior to that commit, we reserved only 8000 WU only when using the default `-blockmaxweight`. \nWhen a custom value less than the default was used, we reserved only 4000 WU.\n\nHowever, after commit 6b165f5906fc53bd10bedff85a6ef26e0aabdc5c, `blockmaxweight` was decoupled from the reservation logic, and we now always reserve 8000 WU regardless of the configured blockmaxweight.\n\nThis effectively reduces the number of transactions selected when building blocks in the fee estimation tests, because we use custom block weights.\nReference: https://github.com/bitcoin/bitcoin/blob/4b1d48a6866b24f0ed027334c6de642fc848d083/test/functional/feature_fee_estimation.py#L148-L149\n\nYou can reproduce the issue even on commit 6a46be75c4 by lowering the custom `-blockmaxweight` by using the diff below\n\n```diff\ndiff --git a/test/functional/feature_fee_estimation.py b/test/functional/feature_fee_estimation.py\nindex 974d8268a2a..fb5b8dbae62 100755\n--- a/test/functional/feature_fee_estimation.py\n+++ b/test/functional/feature_fee_estimation.py\n@@ -144,8 +144,8 @@ class EstimateFeeTest(BitcoinTestFramework):\n         self.noban_tx_relay = True\n         self.extra_args = [\n             [],\n-            [\"-blockmaxweight=68000\"],\n-            [\"-blockmaxweight=32000\"],\n+            [\"-blockmaxweight=64000\"],\n+            [\"-blockmaxweight=28000\"],\n         ]\n \n     def setup_network(self):\n```\n\nThis reveals the issue and also #32463 is the right fix.\n\n",
+          "created_at": "2025-05-31T14:46:01Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "https://github.com/bitcoin/bitcoin/runs/43526788535",
+          "created_at": "2025-06-05T09:20:21Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "https://github.com/bitcoin/bitcoin/runs/43526123006",
+          "created_at": "2025-06-05T09:20:46Z"
+        }
+      ]
+    },
+    {
+      "number": 32456,
+      "title": "qa: Failure in wallet_basic.py spendzeroconfchange test",
+      "body": "CI failure (job: \"macOS 14 native, arm64, no depends, sqlite only, gui\") upon merge of my PR (ad5cd129f3cc72f2d2b140e182781bf3bb5dbacc): https://github.com/bitcoin/bitcoin/actions/runs/14916001314/job/41901630172\n\nRelevant high-level log:\n```\n22/267 - wallet_basic.py failed, Duration: 23 s\n\nstdout:\n2025-05-08T21:04:47.763000Z TestFramework (INFO): PRNG seed is: 1820560705145373934\n2025-05-08T21:04:47.764000Z TestFramework (INFO): Initializing test directory /Users/runner/work/bitcoin/bitcoin/ci/scratch/test_runner/test_runner_₿_🏃_20250508_210317/wallet_basic_241\n2025-05-08T21:04:49.006000Z TestFramework (INFO): Mining blocks...\n2025-05-08T21:04:50.323000Z TestFramework (INFO): Test gettxout\n2025-05-08T21:04:50.342000Z TestFramework (INFO): Test gettxout (second part)\n2025-05-08T21:04:56.786000Z TestFramework (INFO): Test sendmany\n2025-05-08T21:04:56.833000Z TestFramework (INFO): Test sendmany with fee_rate param (explicit fee rate in sat/vB)\n2025-05-08T21:04:56.873000Z TestFramework (INFO): Test sendmany raises 'fee rate too low' if fee_rate of 0.99999999 is passed\n2025-05-08T21:04:56.876000Z TestFramework (INFO): Test sendmany raises if an invalid fee_rate is passed\n2025-05-08T21:04:56.894000Z TestFramework (INFO): Test sendmany raises if an invalid conf_target or estimate_mode is passed\n2025-05-08T21:04:59.702000Z TestFramework (INFO): Test -walletbroadcast\n2025-05-08T21:05:06.265000Z TestFramework (INFO): Test -reindex\n2025-05-08T21:05:08.464000Z TestFramework (INFO): Testing gettransaction response with different arguments...\n2025-05-08T21:05:08.468000Z TestFramework (INFO): Test send* RPCs with verbose=True\n2025-05-08T21:05:08.475000Z TestFramework (INFO): Test send* RPCs with verbose=False\n2025-05-08T21:05:08.480000Z TestFramework (INFO): Testing 'listunspent' outputs the parent descriptor(s) of coins\n2025-05-08T21:05:08.499000Z TestFramework (INFO): Test -spendzeroconfchange\n2025-05-08T21:05:09.800000Z TestFramework (ERROR): Assertion failed\nTraceback (most recent call last):\n  File \"/Users/runner/work/bitcoin/bitcoin/test/functional/test_framework/test_framework.py\", line 183, in main\n    self.run_test()\n    ~~~~~~~~~~~~~^^\n  File \"/Users/runner/work/bitcoin/bitcoin/ci/scratch/build-aarch64-apple-darwin23.6.0/test/functional/wallet_basic.py\", line 659, in run_test\n    assert_equal(len(utxos), 1)\n    ~~~~~~~~~~~~^^^^^^^^^^^^^^^\n  File \"/Users/runner/work/bitcoin/bitcoin/test/functional/test_framework/util.py\", line 77, in assert_equal\n    raise AssertionError(\"not(%s)\" % \" == \".join(str(arg) for arg in (thing1, thing2) + args))\nAssertionError: not(0 == 1)\n```\n\nSo far unable to reproduce on NixOS. Among other things tested:\n```\nbuild/test/functional/wallet_basic.py --random=1820560705145373934\nbuild/test/functional/test_runner.py --ci -j25 --tmpdirprefix /tmp/test_runner/ --ansi --combinedlogslen=99999999 --timeout-factor=40 --quiet --failfast\n```\n\nEdit: Next push to master succeeded as l0rinc noted, so this seems possibly timing dependent/racy.",
+      "state": "closed",
+      "user": "hodlinator",
+      "created_at": "2025-05-09T07:48:08Z",
+      "updated_at": "2025-05-14T13:42:06Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32456",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "l0rinc",
+          "body": "I can't reproduce it either on my Mac - but it does seem to be passing with latest push at least.\n\n<img width=\"549\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/30b441f9-a8d0-44ff-b23c-2529a7de424a\" />",
+          "created_at": "2025-05-09T08:50:12Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "See [#32483](https://github.com/bitcoin/bitcoin/pull/32483) for a fix / way to reproduce.",
+          "created_at": "2025-05-13T17:03:05Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "@mzumsande thanks for fixing this! Sorry I didn't have the time to fully understand how the wallet syncs before the fix was merged.",
+          "created_at": "2025-05-14T13:42:05Z"
+        }
+      ]
+    },
+    {
+      "number": 32455,
+      "title": "bitcoind 29.0 much slower than 28.0 on my system: cause found",
+      "body": "I always compile the bitcoin software myself (`Ubuntu 24.04.2 LTS`). For `bitcoin-29.0` I compiled it (of course) for the first time with `cmake` (with and without `berkeley-db`). \n\nFor both (with and without `berkeley-db`), `bitcoind-29.0` is much slower than `bitcoin-28.0` which gives me problems on my server.\n\nTo investigate I wrote a shell script that determines the time difference in seconds between \"Saw new header\" and \"UpdateTip\":\n\n```\n2025-05-09T05:24:11Z Saw new header hash=0000000000000000000213e630619be8945d471d06b0395fb6adca797877527d height=895920\n2025-05-09T05:24:11Z Saw new cmpctblock header hash=0000000000000000000213e630619be8945d471d06b0395fb6adca797877527d peer=5197\n2025-05-09T05:24:12Z UpdateTip: new best=0000000000000000000213e630619be8945d471d06b0395fb6adca797877527d height=895920 version=0x2a4aa000 log2_work=95.598602 tx=1188522869 date='2025-05-09T05:23:59Z' progress=1.000000 cache=216.6MiB(1587712txo)\n```\nwhich in this `bitcoind-28.0` example is only 1 second. This is typical for `bitcoind-28.0` on my system where it is between 0 and 1 seconds with only very occasionally a bit longer. Now for `bitcoind-29.0` it's much longer:\n\nBlock nr: delta t in seconds\n895579: 3\n895580: 3\n895581: 4\n895582: 2\n895583: 16\n895584: 65\n895585: 8\n895586: 280\n895587: 81\n895588: 133\n895589: 124\n895590: 3\n895591: 73\n895592: 153\n895593: 284\n895594: 528\n895595: 17\n895596: 8\n895597: 4\n895598: 2\n895599: 3\n895600: 4\n895601: 6\n895602: 3\n895603: 2\n895604: 5\n895605: 5\n895606: 34\n895607: 2\n895608: 6\n\nThis is true whether it's compiled with or without `berkeley-db`. So mometimes it takes several minutes!\n\nSo I did some investigations. The first thing I found was that my `bitcoind-29.0` and others are much bigger than the pre-compiled ones:\n\nPrecompiled `29.0` (`du` in MB):\n3\tbitcoin-cli\n16\tbitcoind\n42\tbitcoin-qt\n5\tbitcoin-tx\n3\tbitcoin-util\n10\tbitcoin-wallet\n28\ttest_bitcoin\n\nFor my self-compiled `29.0`:\n21\tbitcoin-cli\n273\tbitcoind\n47\tbitcoin-tx\n21\tbitcoin-util\n134\tbitcoin-wallet\n511\ttest_bitcoin\n\nAlthough normally I use some compiler options, here for comparison compiled according to the docs: (`cmake -B build;  cmake --build build; cmake --install build`)\n\nBoth (my and pre-compiled) `test_bitcoin` work fine. Note that also my (not too slow) `bitcoind-28.0` (etc) is about the same too big a size (269 MB) as my `bitcoind-29.0`. So I had this before but never noticed.\n\nSo my first question before I investigate any further is: how come my `bitcoind` is so big compared to the pre-compiled one?\n\n",
+      "state": "closed",
+      "user": "hMsats",
+      "created_at": "2025-05-09T06:08:19Z",
+      "updated_at": "2025-09-16T13:42:12Z",
+      "comments": 75,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32455",
+      "labels": [
+        "Resource usage"
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 6,
+    "issues": 5
+  }
+}

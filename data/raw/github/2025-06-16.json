@@ -1,0 +1,517 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T18:13:33.004761+00:00",
+  "date": "2025-06-16",
+  "pull_requests": [
+    {
+      "number": 32763,
+      "title": "wallet: Replace CWalletTx::mapValue and vOrderForm with explicit class members",
+      "body": "`mapValue` and `vOrderForm` are opaque data structures that contain transaction metadata. It is hard to determine what actual data each field contains, and they can ostensibly be misused where metadata is added in the future without developers realizing that such metadata exists.\r\n\r\nIt's much clearer to have all of that metadata live in their own explicit member variables within `CWalletTx`. This PR implements that change.\r\n\r\nSince the serialization format of `CWalletTx` depends on `mapValue` and `vOrderForm`, the serialization remains unchanged, so when serializing these new members, they need to be shoved/extracted from a temporary `mapValue` or `vOrderForm`.\r\n\r\nThis does end up breaking forwards compatibility as unknown fields in `mapValue` and `vOrderForm` are stripped out if the record is rewritten. However, I don't expect that we would continue to use these fields for future metadata, so I think that risk is low.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-06-16T22:37:34Z",
+      "updated_at": "2026-01-03T11:39:29Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32763",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32763.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [luke-jr](https://github.com/bitcoin/bitcoin/pull/32763#issuecomment-3009454105) |\n| Concept ACK | [laanwj](https://github.com/bitcoin/bitcoin/pull/32763#issuecomment-3436080038) |\n| Stale ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/32763#pullrequestreview-2976772441) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#27865](https://github.com/bitcoin/bitcoin/pull/27865) (wallet: Track no-longer-spendable TXOs separately by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-16T22:37:36Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `tidy`: https://github.com/bitcoin/bitcoin/runs/44213782669</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by errors in clang-tidy checks due to calls to 'emplace_back' inside loops in transaction.h, which are treated as errors.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-06-16T23:29:16Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Is forward compatibility a concern here? An potential advantage of serializing a list of fields instead of fixed set of fields is that it allows new fields to be added in the future and existing wallet software preserve the unknown fields instead of stripping them out.\r\n\r\nWould be good to update PR the description to say what happens to unknown fields if a transaction is deserialized and reserialized. Are they stripped out? Preserved? Do they trigger an error?",
+          "created_at": "2025-06-17T10:49:40Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> Is forward compatibility a concern here?\r\n\r\nI don't really think so. The last time these were modified was ages ago, I don't foresee any need to continue to use `mapValue` or `vOrderForm` for new fields. Additionally, once a transaction is confirmed, it's unlikely that the record would ever be modified again.\r\n\r\nIt would be straightforward to preserve `mapValue` and `vOrderForm` for any unknown values, but I think it's unnecessary.\r\n\r\nThe primary motivation for this change is actually that I am working on a completely new storage mechanism for `CWalletTx` that utilizes SQLite as a SQL database, and I think the best way for that is to have each relevant field be its own column in a new \"transactions\" table. \r\n\r\n> Would be good to update PR the description to say what happens to unknown fields if a transaction is deserialized and reserialized.\r\n\r\nCurrently they would be stripped out. Updated the description.",
+          "created_at": "2025-06-17T18:04:52Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I guess I'm wondering a little more about forward compatibility. In general, it seems like it could be a useful thing for future wallet software to be able to add metadata to transactions that older software will preserve and ignore. If the deserialization code is changed to now discard unrecognized mapvalue fields instead of preserving them, are there different places new transaction metadata could be stored safely in the future? Or is mapvalue's extensibiilty just less useful than it might seem, and if we added new transaction fields maybe we'd always want to forbid opening the new wallets with old software anyway? Alternately I'd wonder if `CWalletTx::Unserialize` should raise an error if an unrecognized field is present, so it does not appear to deserialize successfully when it might discard information. Preserving unknown fields does seems like the most conservative option here, but you know a lot more about this, so feel free to go with whatever approach make the most sense.",
+          "created_at": "2025-06-18T17:32:30Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> Or is mapvalue's extensibiilty just less useful than it might seem\r\n\r\nThis, generally. What we usually do for upgrading metadata is to put the new metadata at the end of the record. Deserialization always allows for there to be extra data, so it's always backwards compatible to stick things onto the end. The only compatibility issue is if the record is rewritten during a downgrade followed by a re-upgrade. But we also have the wallet flags that we use for downgrade protection if that is necessary.\r\n\r\nI don't think a new field has been added to `mapValue` or `vOrderForm` in about a decade too, and I don't think anyone is planning to add any new fields any time soon.",
+          "created_at": "2025-06-18T17:45:37Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "Concept NACK, agree with @ryanofsky's concerns. I don't think there's any benefit to refactoring this either?",
+          "created_at": "2025-06-26T18:27:33Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> I don't think there's any benefit to refactoring this either?\r\n\r\nThere is a concrete benefit to developers for knowing exactly what metadata fields are present in CWalletTx. Both `mapValue` and `vOrderForm` are opaque - it's not obvious what data they store just by looking at `CWalletTx`'s definition. Instead, you have to grep around the codebase for `mapValue`, which sometimes is also named `map_value` or `value_map`. Likewise for `vOrderForm`. Sure we can have that comment documenting what it contains, but comments can become outdated and I think it's much nicer if the code itself can be self-documenting.\r\n\r\nThe compatibility issues can be trivially resolved if that's desired, but I don't think there will be any compatibility issues as new fields are way easier to serialize at the end of the record than converting to a string and inserting into a map.",
+          "created_at": "2025-06-26T20:50:10Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "Concept ACK\r\n\r\n> I don't think a new field has been added to mapValue or vOrderForm in about a decade too, and I don't think anyone is planning to add any new fields any time soon.\r\n\r\ni agree here. And it's a real messy, non-type-safe way to handle metadata. \r\n\r\nWe have also never offered setting these directly on the RPC interface, so there's negligible chance of unknown ones existing anywhere. \r\n\r\nWhen we do need to add metadata, it's better to add and serialize it as actual fields of the transaction structure, not stash it into a map like this.",
+          "created_at": "2025-10-23T09:56:17Z"
+        }
+      ]
+    },
+    {
+      "number": 32761,
+      "title": "rpc, doc: clarify watch-only wallets balances in RPCHelp",
+      "body": "The watch-only behaviour is per-wallet level in the descriptor\r\nwallets (the only kind of wallets now). The docs of the balance\r\nrelated RPCs seemed to be outdated to me. This patch adds a\r\nrelated note in both the balance related RPCS.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "rkrux",
+      "created_at": "2025-06-16T11:58:08Z",
+      "updated_at": "2025-07-28T09:18:35Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32761",
+      "labels": [
+        "Docs",
+        "Wallet",
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32761.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Eunovo](https://github.com/bitcoin/bitcoin/pull/32761#issuecomment-3012975690), [BrandonOdiwuor](https://github.com/bitcoin/bitcoin/pull/32761#pullrequestreview-2974424721) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-16T11:58:11Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Essentially I want to convey the message that the watch-only wallets need not (read cannot) have corresponding private keys for the unspent outputs and thus they are not factored in the balance calculation.\r\n\r\nI'm open to changing the verbiage in the RPC docs if someone has a better suggestion.",
+          "created_at": "2025-06-16T12:03:27Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "> [MSan, depends](https://github.com/bitcoin/bitcoin/pull/32761/checks?check_run_id=44169448363)Failing after 11s — Task Summary\r\n\r\nThis failure seems unrelated to me as per the error messages from [the CI run](https://github.com/bitcoin/bitcoin/pull/32761/checks?check_run_id=44169448363).\r\n\r\n```\r\n[07:58:31.196] Error: creating container storage: the container name \"ci_native_msan\" is already in use by a8395f5207b2bee3eff8c9392096e3e535820dcc96f5ced45dfe4256a1f6488b. You have to remove that container to be able to reuse that name: that name is already in use by an external entity, or use --replace to instruct Podman to do so.\r\n[07:58:31.200] + CI_CONTAINER_ID=\r\n```",
+          "created_at": "2025-06-16T12:14:46Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "I don't get it. Watch-only wallets are treated the same as non-watch-only, aren't they?",
+          "created_at": "2025-06-26T18:20:39Z"
+        },
+        {
+          "user": "Eunovo",
+          "body": "@rkrux  I think the `include_watchonly` param is also outdated and should be removed. Watch-only descriptor wallet balances are marked as spendable, so `include_watchonly` no longer serves any purpose.",
+          "created_at": "2025-06-27T06:06:10Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> @rkrux I think the `include_watchonly` param is also outdated and should be removed. Watch-only descriptor wallet balances are marked as spendable, so `include_watchonly` no longer serves any purpose.\r\n\r\nSee https://github.com/bitcoin/bitcoin/pull/32618",
+          "created_at": "2025-06-27T06:28:00Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "> I don't get it. Watch-only wallets are treated the same as non-watch-only, aren't they?\r\n\r\nIn a way, they are.\r\n\r\n> The available balance is what the wallet considers currently spendable\r\n\r\nThe current language^ in the RPC help made me curious regarding the balance shown for watch-only wallets because the watch-only wallets can't technically spend them. I checked that the balance shown in the RPC response is correct for such wallets, and this prompted me to add a note specifically for these wallets.",
+          "created_at": "2025-06-27T11:42:11Z"
+        },
+        {
+          "user": "Eunovo",
+          "body": "ACK https://github.com/bitcoin/bitcoin/pull/32761/commits/cb44680db40c85ba338f2a054511cd68ba6e89ba",
+          "created_at": "2025-06-27T12:49:42Z"
+        },
+        {
+          "user": "achow101",
+          "body": "I don't really think this change is necessary, especially with the removal of watch-only within a wallet.",
+          "created_at": "2025-07-25T22:11:19Z"
+        }
+      ]
+    },
+    {
+      "number": 32760,
+      "title": "depends: capnp 1.2.0",
+      "body": "See https://github.com/capnproto/capnproto/compare/release-1.1.0...release-1.2.0. We can drop all the patches we are currently applying.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-06-16T10:03:30Z",
+      "updated_at": "2025-06-19T09:44:24Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32760",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32760.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [theStack](https://github.com/bitcoin/bitcoin/pull/32760#pullrequestreview-2931970391), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/32760#pullrequestreview-2932167504), [Sjors](https://github.com/bitcoin/bitcoin/pull/32760#issuecomment-2976952436) |\n| Concept ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/32760#issuecomment-2975964718) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-16T10:03:33Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Concept ACK.",
+          "created_at": "2025-06-16T10:17:31Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "[OpenBSD build](https://github.com/hebasto/bitcoin-core-nightly/actions/runs/15678254668/job/44163493828) looks fine.",
+          "created_at": "2025-06-16T10:36:11Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Started reviewing this and ran into something strange. For me the download URL https://capnproto.org/capnproto-c++-1.2.0.tar.gz returns a 404, but adding an extra slash works https://capnproto.org//capnproto-c++-1.2.0.tar.gz. It seems like depends build does add the extra slash so does not have a problem (testing with `make MULTIPROCESS=1 V=1 capnp_fetched`). Same problem does not affect https://capnproto.org/capnproto-c++-1.1.0.tar.gz\r\n\r\n\r\n",
+          "created_at": "2025-06-16T13:14:08Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK c7eaac326ac20a745d1bc6dbc6bc48c1b5eb46f8\r\n\r\nTested on top of https://github.com/bitcoin/bitcoin/pull/31802#issuecomment-2976184451 including with OpenBSD. Also tested a depends build on macOS 13.7.6 (M4) with https://github.com/Sjors/bitcoin/pull/48 by mining a (SRI signet) block.\r\n\r\nDropping our patches is nice. But otherwise I didn't review the upstream changes.",
+          "created_at": "2025-06-16T14:46:58Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #32589.",
+          "created_at": "2025-06-19T09:44:24Z"
+        }
+      ]
+    },
+    {
+      "number": 32758,
+      "title": "wallet: remove dead code in legacy wallet migration",
+      "body": "A discussion on a previous [PR 32481](https://github.com/bitcoin/bitcoin/pull/32481#discussion_r2145152084) related to legacy wallet dead\r\ncode removal made me realize that checking if the legacy\r\nwallet was loaded prior to the start of the migration is not\r\nrequired ever since legacy wallets can't be loaded in the first\r\nplace. I also verified that the `load_on_start` persistent\r\nsetting can also not cause the legacy wallets to be loaded, which\r\nfurther makes the case for removal of the above mentioned checks\r\nduring migration.\r\nThe current test coverage also shows these lines uncovered.",
+      "state": "closed",
+      "user": "rkrux",
+      "created_at": "2025-06-16T07:26:20Z",
+      "updated_at": "2025-07-10T21:42:05Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32758",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32758.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [furszy](https://github.com/bitcoin/bitcoin/pull/32758#pullrequestreview-2997688329), [achow101](https://github.com/bitcoin/bitcoin/pull/32758#issuecomment-3059157165) |\n| Stale ACK | [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/32758#pullrequestreview-2947775655) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32273](https://github.com/bitcoin/bitcoin/pull/32273) (wallet: Fix relative path backup during migration. by davidgumberg)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-16T07:26:23Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "> [previous releases, depends DEBUG](https://github.com/bitcoin/bitcoin/pull/32758/checks?check_run_id=44158542530)Failing after 4m — Task Summary\r\n\r\nThis seems unrelated as the error is `0curl: (6) Could not resolve host: github.com` in [the CI run](https://github.com/bitcoin/bitcoin/pull/32758/checks?check_run_id=44158542530).",
+          "created_at": "2025-06-16T09:17:28Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "> I think now the reload_wallet helper could be moved into the if (success) { condition:\r\n\r\nMakes sense, I have done this. Also, ended up doing few related changes in the subsequent commits. ",
+          "created_at": "2025-06-17T11:07:40Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Thanks for highlighting.\r\nI'll take a look at #31423 soon, it had fallen off my radar for some reason.",
+          "created_at": "2025-06-25T13:01:01Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 0635f107c4e1442ce6b953308723b58044c558df",
+          "created_at": "2025-06-25T23:03:24Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Rebased over master to incorporate changes from #31423.",
+          "created_at": "2025-07-03T09:16:06Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 150b5c99ca11885ef15d04139d919d734e2c211a",
+          "created_at": "2025-07-10T21:25:00Z"
+        }
+      ]
+    },
+    {
+      "number": 32757,
+      "title": "net: Fix Discover() not running when using -bind=0.0.0.0:port",
+      "body": "  This PR fixes two related issues with address discovery when using explicit bind addresses in Bitcoin Core:\r\n\r\n  -  #31293\r\n  -  #31336\r\n\r\nWhen using `-bind=0.0.0.0:port` (or `-bind=::`), the `Discover()` function was not being executed because the code only checked the `bind_on_any` flag. This led to two problems:\r\n- The node would not discover its own local addresses if an explicit \"any\" bind was used.\r\n- The functional test `feature_bind_port_discover.py` would fail, as it expects local addresses to be discovered in these cases.\r\n\r\nThis PR:\r\n1. Checks both `bind_on_any` and any bind addresses using `IsBindAny()`\r\n   Ensures `Discover()` runs when binding to 0.0.0.0 or ::, even if specified explicitly.\r\n2. Ensures correct address discovery\r\n   The node will now discover its own addresses when using explicit \"any\" binds, matching user expectations and fixing the test.\r\n3. Maintains backward compatibility\r\n   The semantic meaning of `bind_on_any` is preserved as defined in `net.h`:  \r\n   > \"True if the user did not specify -bind= or -whitebind= and thus we should bind on 0.0.0.0 (IPv4) and :: (IPv6)\"\r\n4. Updates the test to use dynamic ports\r\n   The functional test `feature_bind_port_discover.py` is updated to use dynamic ports instead of hardcoded ones, improving reliability.\r\n\r\nHow this PR Differs from #31492\r\n\r\n- Preserves the semantic meaning of `bind_on_any` (see `net.h`).\r\n- Uses a simpler approach: checks `IsBindAny()` on bind addresses, without modifying `GetListenPort()`.\r\n- Avoids code duplication with `DefaultOnionServiceTarget()`.\r\n\r\nReferences\r\n\r\n- Implementation follows the approach proposed in my [review comment on #31492](https://github.com/bitcoin/bitcoin/pull/31492#issuecomment-2941773645).\r\n\r\nCloses #31293\r\n\r\nThe #31336 has the overall test failure and requires both this PR and #33362 to be fully resolved.\r\n",
+      "state": "open",
+      "user": "b-l-u-e",
+      "created_at": "2025-06-16T04:28:44Z",
+      "updated_at": "2026-01-11T14:02:21Z",
+      "comments": 15,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32757",
+      "labels": [
+        "P2P",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32757.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Stale ACK | [PeterWrighten](https://github.com/bitcoin/bitcoin/pull/32757#pullrequestreview-2944469774), [yuvicc](https://github.com/bitcoin/bitcoin/pull/32757#pullrequestreview-2947360035), [pinheadmz](https://github.com/bitcoin/bitcoin/pull/32757#pullrequestreview-3047773382), [mzumsande](https://github.com/bitcoin/bitcoin/pull/32757#issuecomment-3114010941), [vasild](https://github.com/bitcoin/bitcoin/pull/32757#pullrequestreview-3557890163), [frankomosh](https://github.com/bitcoin/bitcoin/pull/32757#pullrequestreview-3615255584) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-16T04:28:47Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "Concept ACK\r\n\r\nRemoving duplicate code from `DefaultOnionServiceTarget()` is better IMO",
+          "created_at": "2025-06-16T15:40:07Z"
+        },
+        {
+          "user": "b-l-u-e",
+          "body": "vasild  thanks for the suggestions...about the `self.extra_args` configuration.\r\n\r\nIn your patch, node 2 only has `-whitebind=0.0.0.0` without any onion bind:\r\n```python\r\n['-discover', f'-whitebind=0.0.0.0:{self.bind_ports[2]}'], # Explicit -whitebind=0.0.0.0\r\n```\r\n\r\nHowever, when I tried this configuration, I encountered port conflicts because the test framework automatically adds an onion bind to node 2, which conflicts with the port already used by node 1.\r\n\r\nTest Results:\r\n\r\nWithout dummy onion bind (your suggested configuration):\r\n```\r\nError: Unable to bind to 127.0.0.1:12866 on this computer. Bitcoin Core is probably already running.\r\nError: Failed to listen on any port. Use -listen=0 if you want this.\r\n```\r\n\r\nWith dummy onion bind current implementation:\r\n```\r\nTestFramework (INFO): Tests successful\r\n```\r\n\r\nThe issue is that when using only `-whitebind=0.0.0.0`, the test framework automatically adds an onion bind to the same node, causing a port conflict with other nodes in the test.\r\n\r\nTo avoid this, I added a dummy onion bind:\r\n```python\r\n['-discover', f'-whitebind=0.0.0.0:{self.bind_ports[2]}', f'-bind=127.0.0.1:{self.bind_ports[2]+100}=onion']\r\n```\r\n\r\nThis ensures the test runs successfully while still testing the intended `-whitebind=0.0.0.0` functionality. ",
+          "created_at": "2025-07-04T06:50:04Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/45342616996</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by lint errors due to trailing whitespace and missing trailing newline in the code.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-04T06:56:41Z"
+        },
+        {
+          "user": "b-l-u-e",
+          "body": "My initial assessment that the test framework was automatically adding an onion bind was incorrect... it is `bitcoind` itself that handles the onion bind based on configuration.\r\n\r\nabout `nodes[1]` and `nodes[2]` conflicting, sorry for the confusion in my previous comment. The primary port conflict I was encountering was not between `nodes[1]` and `nodes[2]`, but rather within `nodes[2]` itself. \r\n\r\n the issue was raised because `bitcoind` attempted to bind to **`127.0.0.1` on `self.bind_ports[2]`** (due to the `whitebind=0.0.0.0` argument), while also potentially trying to establish an implicit bind or an onion bind on the same port for `127.0.0.1`. This caused the `FailedToStartError: Unable to bind to 127.0.0.1:[port] on this computer.`\r\n\r\nsuggestion to use `tor_port(3)` to allocate the onion bind port is implemented in the latest commit. the onion bind for `127.0.0.1` uses a distinct, framework-managed port, resolves the binding conflict within `nodes[2]` and aligning with the test framework's design for parallel execution.\r\n",
+          "created_at": "2025-07-22T11:09:05Z"
+        },
+        {
+          "user": "vasild",
+          "body": "Better squash the last two commits into one.",
+          "created_at": "2025-07-22T16:27:35Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "Test worked for me on mac and failed as expected without 1.1.1.1 and 2.2.2.2\r\n\r\nOn my system the command was \r\n`ifconfig en0 alias 1.1.1.1`",
+          "created_at": "2025-07-23T21:58:36Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> ifconfig en0 alias 1.1.1.1\r\n\r\nok, you don't add it to the loopback interface.\r\nBut the instructions for Linux\r\n`ifconfig lo:0 1.1.1.1/32 up && ifconfig lo:1 2.2.2.2/32 up  # to set up`\r\ndo that, while `IFF_LOOPBACK` addresses are being filtered out [here](https://github.com/bitcoin/bitcoin/blob/e17fb86382eafb7ccfddb56bca981f6a12201c85/src/common/netif.cpp#L340). So I don't think the problem from https://github.com/bitcoin/bitcoin/issues/31336 is fixed by this as the OP says.\r\n",
+          "created_at": "2025-07-24T15:58:06Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Also seeing @mzumsande's observation if I add the addresses to loopback, but not if I add them to a different interface.\r\n\r\nI think it's reasonable to filter out all loopback addresses, so the resolution is probably to just update the instructions to have the addresses bound to a non-loopback interface.",
+          "created_at": "2025-07-24T22:36:18Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "If @b-l-u-e is going to retouch to update the instructions in the test comment I'd also really like to see those instructions executed in a CI test as well. ",
+          "created_at": "2025-07-24T22:51:15Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "For me it would also be ok to leave the resolution of #31336 for a separate PR - but this PR shouldn't claim to solve the issue then.",
+          "created_at": "2025-07-24T22:59:27Z"
+        },
+        {
+          "user": "b-l-u-e",
+          "body": "found the issues raised and found the cause.\r\n\r\nThe test was failing because the instructions were wrong. The original instructions told users to use loopback interfaces (`lo:0`, `lo:1`), but the code filters out loopback addresses (line 340 in `netif.cpp`).\r\n\r\nThis is  what issue #31336 reported - users following the instructions got empty local addresses.\r\n\r\nmzumsande: identified that the test was failing with \"Address 1.1.1.1 not found in node0's local addresses: []\" and noticed that `ifconfig` is deprecated. he pointed out that the loopback filtering means this doesn't actually fix #31336.\r\n\r\npinheadmz: confirmed the test worked on macOS with non-loopback interfaces (`ifconfig en0 alias 1.1.1.1`) and failed as expected without the addresses.\r\n\r\nachow101: confirmed mzumsande observation that loopback addresses don't work, but non-loopback addresses do work and  suggested updating the instructions to use non-loopback interfaces.\r\n\r\nI tested both scenarios\r\n- Non-loopback interface (`wlo1`): Test passes successfully \r\n- Loopback interface (`lo`): Test fails as expected (validates your concerns)\r\n\r\nThis makes the loopback filtering working as intended.\r\n\r\nupdated the test instructions to be more educational and flexible\r\n\r\n-  Uses `ip` commands for Linux\r\n- Uses placeholder names instead of assuming specific interfaces\r\n-  Provides instructions for Linux, macOS, and FreeBSD\r\n-  Explains why loopback interfaces don't work\r\n\r\nregarding #31336\r\nThis doesn't fix the core loopback filtering issue in #31336. However, it does fix the immediate problem where users following the test instructions get confused. The test works perfectly when users follow the correct instructions.\r\n\r\nThe test logic itself is correct - the problem was jthe instructions were wrong.",
+          "created_at": "2025-07-25T05:23:34Z"
+        },
+        {
+          "user": "Zeegaths",
+          "body": "I ran these commands on Ubuntu 22.04:\r\n\r\nsudo ip addr add 1.1.1.1/32 dev wlo1\r\nsudo ip addr add 2.2.2.2/32 dev wlo1\r\n\r\n./build/bin/bitcoind -regtest -bind=0.0.0.0:18444 -discover -daemon\r\n./build/bin/bitcoin-cli -regtest getnetworkinfo | grep -A 10 \"localaddresses\"\r\n\r\n**Result on master:**\r\n\"localaddresses\": [\r\n  ],\r\n  \"warnings\": [\r\n    \"This is a pre-release test build - use at your own risk - do not use for mining or merchant applications\"\r\n  ]\r\n\r\n\r\n**Result on PR:**\r\n \"localaddresses\": [\r\n    {\r\n      \"address\": \"1.1.1.1\",\r\n      \"port\": 18444,\r\n      \"score\": 1\r\n    },\r\n    {\r\n      \"address\": \"2.2.2.2\",\r\n      \"port\": 18444,\r\n      \"score\": 1\r\n    }\r\n\r\nConclusion:\r\nPR successfully fixes the issue described in #31293. When using explicit -bind=0.0.0.0, the Discover() function now correctly runs and discovers local addresses, whereas on master it returns empty localaddresses.\r\n\r\n",
+          "created_at": "2025-07-27T22:14:41Z"
+        },
+        {
+          "user": "vasild",
+          "body": "> I would really like to know if its possible to run this test in CI ...\r\n\r\n> `IFF_LOOPBACK` addresses are being filtered out [here](https://github.com/bitcoin/bitcoin/blob/e17fb86382eafb7ccfddb56bca981f6a12201c85/src/common/netif.cpp#L340). So I don't think the problem from https://github.com/bitcoin/bitcoin/issues/31336 is fixed by this as the OP says.\r\n\r\nBoth resolved in https://github.com/bitcoin/bitcoin/pull/33362",
+          "created_at": "2025-09-11T07:58:56Z"
+        },
+        {
+          "user": "b-l-u-e",
+          "body": "> Are you still working on this?\r\n\r\nYes am still working on this \r\nCaught up on something else ",
+          "created_at": "2025-11-03T19:02:14Z"
+        }
+      ]
+    },
+    {
+      "number": 32756,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "geradelab",
+      "created_at": "2025-06-16T00:41:47Z",
+      "updated_at": "2025-06-16T00:58:35Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32756",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32756.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-16T00:41:50Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-06-16T00:41:57Z"
+        }
+      ]
+    },
+    {
+      "number": 32755,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "geradelab",
+      "created_at": "2025-06-16T00:32:07Z",
+      "updated_at": "2025-06-16T00:58:13Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32755",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32755.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- wuz -> was [colloquial spelling makes the sentence grammatically incorrect]\n\n<sup>drahtbot_id_4_m</sup>\n",
+          "created_at": "2025-06-16T00:32:10Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-06-16T00:32:16Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32762,
+      "title": "[signet v22.0.0] Unable to sync node from scratch",
+      "body": "Hi, I am trying to run bitcoin signet node with below configurations:-\n\n- Bitcore release:- `v22.0.0`\n\n- Parameters:-\n\n```\n            - '-chain=signet'\n            - '-rest'\n            - '-txindex'\n            - '-disablewallet'\n            - '-server'\n            - '-rpcbind=0.0.0.0'\n            - '-rpcport=38332'\n            - '-rpcallowip=0.0.0.0/0'\n            - '-rpcthreads=512'\n            - '-rpcworkqueue=4096'\n            - '-rpcuser=xxxxxxxxxx'\n            - '-rpcpassword=xxxxxxxxxx'\n            - '-dbcache=2048'\n            - '-zmqpubrawtx=tcp://*:38333'\n            - '-deprecatedrpc=addresses'\n            - '-printtoconsole'\n```\n\nMy node is stuck with below logs:-\n\n```\n2025-06-16T12:52:18Z init message: Loading P2P addresses…\n2025-06-16T12:52:18Z Imported mempool transactions from disk: 0 succeeded, 0 failed, 0 expired, 0 already there, 0 waiting for initial broadcast\n2025-06-16T12:52:18Z loadblk thread exit\n2025-06-16T12:52:18Z Loaded 0 addresses from peers.dat  1ms\n2025-06-16T12:52:18Z Loaded 0 addresses from \"anchors.dat\"\n2025-06-16T12:52:18Z 0 block-relay-only anchors will be tried for connections.\n2025-06-16T12:52:18Z init message: Starting network threads…\n2025-06-16T12:52:18Z net thread start\n2025-06-16T12:52:18Z dnsseed thread start\n2025-06-16T12:52:18Z addcon thread start\n2025-06-16T12:52:18Z init message: Done loading\n2025-06-16T12:52:18Z msghand thread start\n2025-06-16T12:52:18Z Loading addresses from DNS seed v7ajjeirttkbnt32wpy3c6w3emwnfr3fkla7hpxcfokr3ysd3kqtzmqd.onion:38333\n2025-06-16T12:52:18Z opencon thread start\n2025-06-16T12:52:18Z Loading addresses from DNS seed 178.128.221.177\n2025-06-16T12:52:18Z Loading addresses from DNS seed 2a01:7c8:d005:390::5\n2025-06-16T12:52:18Z 0 addresses found from DNS seeds\n2025-06-16T12:52:18Z dnsseed thread exit\n2025-06-16T12:52:19Z Cannot create socket for v7ajjeirttkbnt32wpy3c6w3emwnfr3fkla7hpxcfokr3ysd3kqtzmqd.onion:38333: unsupported network\n2025-06-16T12:53:19Z Adding fixed seeds as 60 seconds have passed and addrman is empty\n```\n\nAny idea how to resolve it?",
+      "state": "closed",
+      "user": "saravadeanil",
+      "created_at": "2025-06-16T13:02:32Z",
+      "updated_at": "2025-06-30T10:16:41Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32762",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "mzumsande",
+          "body": "looks like you have no initial peers - if you don't want to upgrade to a newer version, maybe `addnode` a current signet node to find an an initial peer that helps you bootstrap ( `dig seed.signet.achownodes.xyz` should return some).",
+          "created_at": "2025-06-16T18:49:58Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "> 2025-06-16T12:52:18Z Loading addresses from DNS seed 178.128.221.177 \n> 2025-06-16T12:52:18Z Loading addresses from DNS seed 2a01:7c8:d005:390::5\n> 2025-06-16T12:52:18Z 0 addresses found from DNS seeds\n\nthe signet DNS seeds don't seem to be returning addresses of peers for you to connect to and the hardcoded seeds in version v22 might be down too.\n\nTrying a more recent Bitcoin Core release might work, as it has more recent SigNet peers hardcoded.",
+          "created_at": "2025-06-16T18:51:55Z"
+        },
+        {
+          "user": "saravadeanil",
+          "body": "Thanks for the suggestions, I tried to run the node with v26.0 and it started syncing 🎉 ",
+          "created_at": "2025-06-17T05:27:18Z"
+        }
+      ]
+    },
+    {
+      "number": 32759,
+      "title": "Guix build fails on M4 macOS host with Ubuntu in UTM",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nSince #32431 my macOS (M4 using UTM) Guix builds no longer work: \n\n```\nHOSTS=\"x86_64-linux-gnu\" contrib/guix/guix-build\n...\nguix shell: error: while setting up the build environment: cannot set armhf-linux personality: Invalid argument\n```\n\nThis seems to be something else than what I encountered on my native AMD Ubuntu machine: https://github.com/bitcoin/bitcoin/pull/32431#issuecomment-2966089437\n\nBut perhaps a common factor is that this PR pulled in a lot of new guix packages.\n\n### Expected behaviour\n\nGuix build should work, it does on c8abd972818f83d90bf50b250131f338034460ef.\n\n### Steps to reproduce\n\nSee below\n\n### Relevant log output\n\n```\n$ HOSTS=\"x86_64-linux-gnu\" contrib/guix/guix-build\nChecking that we can connect to the guix-daemon...\n\nHint: If this hangs, you may want to try turning your guix-daemon off and on\n      again.\n\nmake: Entering directory '/home/sjors/bitcoin/depends'\nmake[1]: Entering directory '/home/sjors/bitcoin/depends'\nmake[1]: Leaving directory '/home/sjors/bitcoin/depends'\nmake: Leaving directory '/home/sjors/bitcoin/depends'\nINFO: Building fed41b75fbfa for platform triple x86_64-linux-gnu:\n      ...using reference timestamp: 1749642062\n      ...running at most 10 jobs\n      ...from worktree directory: '/home/sjors/bitcoin'\n          ...bind-mounted in container to: '/bitcoin'\n      ...in build directory: '/home/sjors/bitcoin/guix-build-fed41b75fbfa/distsrc-fed41b75fbfa-x86_64-linux-gnu'\n          ...bind-mounted in container to: '/distsrc-base/distsrc-fed41b75fbfa-x86_64-linux-gnu'\n      ...outputting in: '/home/sjors/bitcoin/guix-build-fed41b75fbfa/output/x86_64-linux-gnu'\n          ...bind-mounted in container to: '/outdir-base/x86_64-linux-gnu'\n      ADDITIONAL FLAGS (if set)\n          ADDITIONAL_GUIX_COMMON_FLAGS: --max-jobs=4 --no-substitutes\n          ADDITIONAL_GUIX_ENVIRONMENT_FLAGS:\n          ADDITIONAL_GUIX_TIMEMACHINE_FLAGS:\nThe following derivations will be built:\n  /gnu/store/5kpjfn7qg25c4w1q3cczl565x0yi8mpb-python-lief-0.16.6.drv\n  /gnu/store/04dcmhmlhgj2pgnyspb88lm5j9rwbd60-python-typing-extensions-4.9.0.drv\n  /gnu/store/nd7dcikf5dnq113cxmb1r4w0q8ijs1qq-typing_extensions-4.9.0.tar.gz.drv\n  /gnu/store/25adw1ck5fvbgvrx405c0l6kjag49j9z-python-importlib-metadata-5.2.0.drv\n...\n  /gnu/store/c985sj9mqmk3qvsd55b0g11hlv26krbk-msgpack-1.0.4.tar.gz.drv\n  /gnu/store/x8vm49yz0k8wm3w2hgishy5q1svkcfaw-python-pymongo-4.1.1.drv\n  /gnu/store/6dv3fazv5hnhwvgfnnykm0f2lwnajgsq-pymongo-4.1.1.tar.gz.drv\n\nbuilding /gnu/store/ck789yrq1xslycd986zdh5fq8dknl3r3-rust-actix-derive-0.5.0.tar.gz.drv...\nbuilding /gnu/store/2xasv0pcv8gw6lafag6bkjfqkmlbj02f-rust-actix-http-1.0.1.tar.gz.drv...\nbuilding /gnu/store/qifi4hb8hjm6bk6nv4664fyw7cb25fgp-rust-actix-http-2.2.0.tar.gz.drv...\nbuilding /gnu/store/gm8l3rn479p9hf3zs1vj9pzchvcj42f8-rust-actix-macros-0.1.3.tar.gz.drv...\nThe following builds are still in progress:\n  /gnu/store/qifi4hb8hjm6bk6nv4664fyw7cb25fgp-rust-actix-http-2.2.0.tar.gz.drv\n  /gnu/store/ck789yrq1xslycd986zdh5fq8dknl3r3-rust-actix-derive-0.5.0.tar.gz.drv\n\nbuilding /gnu/store/grpq0sq301rwsz6h4vbdx9sgvi64wai4-Python-2.7.18.tar.xz.drv...\nThe following builds are still in progress:\n  /gnu/store/grpq0sq301rwsz6h4vbdx9sgvi64wai4-Python-2.7.18.tar.xz.drv\n  /gnu/store/qifi4hb8hjm6bk6nv4664fyw7cb25fgp-rust-actix-http-2.2.0.tar.gz.drv\n\nThe following builds are still in progress:\n  /gnu/store/grpq0sq301rwsz6h4vbdx9sgvi64wai4-Python-2.7.18.tar.xz.drv\n  /gnu/store/qifi4hb8hjm6bk6nv4664fyw7cb25fgp-rust-actix-http-2.2.0.tar.gz.drv\n\nbuilding /gnu/store/sf5wwnpy8mr9l8iic2xz5bmg3bppjrj9-asynctest-0.13.0.tar.gz.drv...\nbuilding /gnu/store/hiqwnz4mhiad1zcqyf250b1ws0s36djc-attrs-21.2.0.tar.gz.drv...\nThe following builds are still in progress:\n  /gnu/store/hiqwnz4mhiad1zcqyf250b1ws0s36djc-attrs-21.2.0.tar.gz.drv\n  /gnu/store/sf5wwnpy8mr9l8iic2xz5bmg3bppjrj9-asynctest-0.13.0.tar.gz.drv\n  /gnu/store/grpq0sq301rwsz6h4vbdx9sgvi64wai4-Python-2.7.18.tar.xz.drv\n\nnote: keeping build directory `/tmp/guix-build-Python-2.7.18.tar.xz.drv-2'\nnote: keeping build directory `/tmp/guix-build-bash.drv-2'\nnote: keeping build directory `/tmp/guix-build-asynctest-0.13.0.tar.gz.drv-2'\nnote: keeping build directory `/tmp/guix-build-attrs-21.2.0.tar.gz.drv-2'\nguix shell: error: while setting up the build environment: cannot set armhf-linux personality: Invalid argument\n```\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nmaster@fed41b75fbfa6d14cce852863271b1fb0206eef0\n\n### Operating system and version\n\nMacOS 15.5 with UTM, guest (virtualized) Ubuntu 24.10 (aarch64\n\n### Machine specifications\n\nM4",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-06-16T09:25:48Z",
+      "updated_at": "2025-12-09T10:01:34Z",
+      "comments": 19,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32759",
+      "labels": [
+        "Build system",
+        "Upstream",
+        "Questions and Help"
+      ],
+      "comment_list": [
+        {
+          "user": "willcl-ark",
+          "body": "I tried to reproduce this (using docker and @fanquake's alpine guix image) and got errors building gcc:\n\n[g6wxpn4yq37pvw5q4jzbqxq5l9rqhr-gcc-cross-x86_64-linux-gnu-13.3.0.drv.gz](https://github.com/user-attachments/files/20778583/g6wxpn4yq37pvw5q4jzbqxq5l9rqhr-gcc-cross-x86_64-linux-gnu-13.3.0.drv.gz)\n\n(too big for most pastebins, read with `zcat `)\n\nIt is building gcc-cross and the tail is:\n\n<details><summary>Details</summary>\n<p>\n\n```sh\n/gnu/store/id0knspwhrd51wrg2nbx2pw3ajz36ngg-bash-minimal-5.1.16/bin/bash ../../gcc-13.3.0/gcc/../move-if-change tmp-fixinc_list fixinc_list\necho timestamp > s-fixinc_list\nrm -f g++-cross\ncp xg++ g++-cross\nrm -f gfortran-cross\ncp gfortran gfortran-cross\ng++  -fno-PIE -c   -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -I. -Ilto -I../../gcc-13.3.0/gcc -I../../gcc-13.3.0/gcc/lto -I../../gcc-13.3.0/gcc/../include  -I../../gcc-13.3.0/gcc/../libcpp/include -I../../gcc-13.3.0/gcc/../libcody  -I../../gcc-13.3.0/gcc/../libdecnumber -I../../gcc-13.3.0/gcc/../libdecnumber/bid -I../libdecnumber -I../../gcc-13.3.0/gcc/../libbacktrace   -o lto/lto-dump.o -MT lto/lto-dump.o -MMD -MP -MF lto/.deps/lto-dump.TPo ../../gcc-13.3.0/gcc/lto/lto-dump.cc\nrm -rf libbackend.a\nar rcT libbackend.a gimple-match.o generic-match.o insn-attrtab.o insn-automata.o insn-dfatab.o insn-emit.o insn-extract.o insn-latencytab.o insn-modes.o insn-opinit.o insn-output.o insn-peep.o insn-preds.o insn-recog.o insn-enums.o ggc-page.o adjust-alignment.o alias.o alloc-pool.o auto-inc-dec.o auto-profile.o bb-reorder.o bitmap.o builtins.o caller-save.o calls.o ccmp.o cfg.o cfganal.o cfgbuild.o cfgcleanup.o cfgexpand.o cfghooks.o cfgloop.o cfgloopanal.o cfgloopmanip.o cfgrtl.o ctfc.o ctfout.o btfout.o symtab.o symtab-thunks.o symtab-clones.o cgraph.o cgraphbuild.o cgraphunit.o cgraphclones.o combine.o combine-stack-adj.o compare-elim.o context.o convert.o coroutine-passes.o coverage.o cppbuiltin.o cppdefault.o cprop.o cse.o cselib.o data-streamer.o data-streamer-in.o data-streamer-out.o dbgcnt.o dce.o ddg.o debug.o df-core.o df-problems.o df-scan.o dfp.o digraph.o dojump.o dominance.o domwalk.o double-int.o dse.o dumpfile.o dwarf2asm.o dwarf2cfi.o dwarf2ctf.o dwarf2out.o early-remat.o emit-rtl.o et-forest.o except.o explow.o expmed.o expr.o fibonacci_heap.o file-prefix-map.o final.o fixed-value.o fold-const.o fold-const-call.o function.o function-abi.o function-tests.o fwprop.o gcc-rich-location.o gcse.o gcse-common.o ggc-common.o ggc-tests.o gimple.o gimple-array-bounds.o gimple-builder.o gimple-expr.o gimple-if-to-switch.o gimple-iterator.o gimple-fold.o gimple-harden-conditionals.o gimple-laddress.o gimple-loop-interchange.o gimple-loop-jam.o gimple-loop-versioning.o gimple-low.o gimple-predicate-analysis.o gimple-pretty-print.o gimple-range.o gimple-range-cache.o gimple-range-edge.o gimple-range-fold.o gimple-range-gori.o gimple-range-infer.o gimple-range-op.o gimple-range-trace.o gimple-ssa-backprop.o gimple-ssa-isolate-paths.o gimple-ssa-nonnull-compare.o gimple-ssa-split-paths.o gimple-ssa-store-merging.o gimple-ssa-strength-reduction.o gimple-ssa-sprintf.o gimple-ssa-warn-access.o gimple-ssa-warn-alloca.o gimple-ssa-warn-restrict.o gimple-streamer-in.o gimple-streamer-out.o gimple-walk.o gimple-warn-recursion.o gimplify.o gimplify-me.o godump.o graph.o graphds.o graphviz.o graphite.o graphite-isl-ast-to-gimple.o graphite-dependences.o graphite-optimize-isl.o graphite-poly.o graphite-scop-detection.o graphite-sese-to-poly.o gtype-desc.o haifa-sched.o hash-map-tests.o hash-set-tests.o hw-doloop.o hwint.o ifcvt.o ree.o inchash.o incpath.o init-regs.o internal-fn.o ipa-cp.o ipa-sra.o ipa-devirt.o ipa-fnsummary.o ipa-polymorphic-call.o ipa-split.o ipa-inline.o ipa-comdats.o ipa-free-lang-data.o ipa-visibility.o ipa-inline-analysis.o ipa-inline-transform.o ipa-modref.o ipa-modref-tree.o ipa-predicate.o ipa-profile.o ipa-prop.o ipa-param-manipulation.o ipa-pure-const.o ipa-icf.o ipa-icf-gimple.o ipa-reference.o ipa-ref.o ipa-utils.o ipa.o ira.o ira-build.o ira-costs.o ira-conflicts.o ira-color.o ira-emit.o ira-lives.o jump.o langhooks.o lcm.o lists.o loop-doloop.o loop-init.o loop-invariant.o loop-iv.o loop-unroll.o lower-subreg.o lra.o lra-assigns.o lra-coalesce.o lra-constraints.o lra-eliminations.o lra-lives.o lra-remat.o lra-spills.o lto-cgraph.o lto-streamer.o lto-streamer-in.o lto-streamer-out.o lto-section-in.o lto-section-out.o lto-opts.o lto-compress.o mcf.o mode-switching.o modulo-sched.o multiple_target.o omp-offload.o omp-expand.o omp-general.o omp-low.o omp-oacc-kernels-decompose.o omp-oacc-neuter-broadcast.o omp-simd-clone.o opt-problem.o optabs.o optabs-libfuncs.o optabs-query.o optabs-tree.o optinfo.o optinfo-emit-json.o options-save.o opts-global.o ordered-hash-map-tests.o passes.o plugin.o pointer-query.o postreload-gcse.o postreload.o predict.o print-rtl.o print-rtl-function.o print-tree.o profile.o profile-count.o range.o range-op.o range-op-float.o read-md.o read-rtl.o read-rtl-function.o real.o realmpfr.o recog.o reg-stack.o regcprop.o reginfo.o regrename.o regstat.o reload.o reload1.o reorg.o resource.o rtl-error.o rtl-ssa/accesses.o rtl-ssa/blocks.o rtl-ssa/changes.o rtl-ssa/functions.o rtl-ssa/insns.o rtl-tests.o rtl.o rtlhash.o rtlanal.o rtlhooks.o rtx-vector-builder.o run-rtl-passes.o sched-deps.o sched-ebb.o sched-rgn.o sel-sched-ir.o sel-sched-dump.o sel-sched.o selftest-rtl.o selftest-run-tests.o sese.o shrink-wrap.o simplify-rtx.o sparseset.o spellcheck.o spellcheck-tree.o splay-tree-utils.o sreal.o stack-ptr-mod.o statistics.o stmt.o stor-layout.o store-motion.o streamer-hooks.o stringpool.o substring-locations.o target-globals.o targhooks.o timevar.o toplev.o tracer.o trans-mem.o tree-affine.o asan.o tsan.o ubsan.o sanopt.o sancov.o tree-call-cdce.o tree-cfg.o tree-cfgcleanup.o tree-chrec.o tree-complex.o tree-data-ref.o tree-dfa.o tree-diagnostic.o tree-diagnostic-client-data-hooks.o tree-diagnostic-path.o tree-dump.o tree-eh.o tree-emutls.o tree-if-conv.o tree-inline.o tree-into-ssa.o tree-iterator.o tree-logical-location.o tree-loop-distribution.o tree-nested.o tree-nrv.o tree-object-size.o tree-outof-ssa.o tree-parloops.o tree-phinodes.o tree-predcom.o tree-pretty-print.o tree-profile.o tree-scalar-evolution.o tree-sra.o tree-switch-conversion.o tree-ssa-address.o tree-ssa-alias.o tree-ssa-ccp.o tree-ssa-coalesce.o tree-ssa-copy.o tree-ssa-dce.o tree-ssa-dom.o tree-ssa-dse.o tree-ssa-forwprop.o tree-ssa-ifcombine.o tree-ssa-live.o tree-ssa-loop-ch.o tree-ssa-loop-im.o tree-ssa-loop-ivcanon.o tree-ssa-loop-ivopts.o tree-ssa-loop-manip.o tree-ssa-loop-niter.o tree-ssa-loop-prefetch.o tree-ssa-loop-split.o tree-ssa-loop-unswitch.o tree-ssa-loop.o tree-ssa-math-opts.o tree-ssa-operands.o gimple-range-path.o tree-ssa-phiopt.o tree-ssa-phiprop.o tree-ssa-pre.o tree-ssa-propagate.o tree-ssa-reassoc.o tree-ssa-sccvn.o tree-ssa-scopedtables.o tree-ssa-sink.o tree-ssa-strlen.o tree-ssa-structalias.o tree-ssa-tail-merge.o tree-ssa-ter.o tree-ssa-threadbackward.o tree-ssa-threadedge.o tree-ssa-threadupdate.o tree-ssa-uncprop.o tree-ssa-uninit.o tree-ssa.o tree-ssanames.o tree-stdarg.o tree-streamer.o tree-streamer-in.o tree-streamer-out.o tree-tailcall.o tree-vect-generic.o gimple-isel.o tree-vect-patterns.o tree-vect-data-refs.o tree-vect-stmts.o tree-vect-loop.o tree-vect-loop-manip.o tree-vect-slp.o tree-vect-slp-patterns.o tree-vectorizer.o tree-vector-builder.o tree-vrp.o tree.o tristate.o typed-splay-tree.o valtrack.o value-pointer-equiv.o value-query.o value-range.o value-range-pretty-print.o value-range-storage.o value-relation.o value-prof.o var-tracking.o varasm.o varpool.o vec-perm-indices.o vmsdbgout.o vr-values.o vtable-verify.o warning-control.o web.o wide-int.o wide-int-print.o i386.o analyzer/analysis-plan.o analyzer/analyzer.o analyzer/analyzer-language.o analyzer/analyzer-logging.o analyzer/analyzer-pass.o analyzer/analyzer-selftests.o analyzer/bar-chart.o analyzer/bounds-checking.o analyzer/call-details.o analyzer/call-info.o analyzer/call-string.o analyzer/call-summary.o analyzer/checker-event.o analyzer/checker-path.o analyzer/complexity.o analyzer/constraint-manager.o analyzer/diagnostic-manager.o analyzer/engine.o analyzer/feasible-graph.o analyzer/function-set.o analyzer/infinite-recursion.o analyzer/kf.o analyzer/kf-analyzer.o analyzer/kf-lang-cp.o analyzer/known-function-manager.o analyzer/pending-diagnostic.o analyzer/program-point.o analyzer/program-state.o analyzer/region.o analyzer/region-model.o analyzer/region-model-asm.o analyzer/region-model-manager.o analyzer/region-model-reachability.o analyzer/sm.o analyzer/sm-file.o analyzer/sm-fd.o analyzer/sm-malloc.o analyzer/sm-pattern-test.o analyzer/sm-sensitive.o analyzer/sm-signal.o analyzer/sm-taint.o analyzer/state-purge.o analyzer/store.o analyzer/supergraph.o analyzer/svalue.o analyzer/trimmed-graph.o analyzer/varargs.o x86-tune-sched.o x86-tune-sched-bd.o x86-tune-sched-atom.o x86-tune-sched-core.o i386-options.o i386-builtins.o i386-expand.o i386-features.o linux.o gnu-property.o host-linux.o\nif [ -f ../stage_final ] \\\n   && cmp -s ../stage_current ../stage_final; then \\\n  cp ../prev-gcc/cc1-checksum.cc cc1-checksum.cc; \\\nelse \\\n  build/genchecksum c/c-lang.o c-family/stub-objc.o attribs.o c/c-errors.o c/c-decl.o c/c-typeck.o c/c-convert.o c/c-aux-info.o c/c-objc-common.o c/c-parser.o c/c-fold.o c/gimple-parser.o c-family/c-common.o c-family/c-cppbuiltin.o c-family/c-dump.o c-family/c-format.o c-family/c-gimplify.o c-family/c-indentation.o c-family/c-lex.o c-family/c-omp.o c-family/c-opts.o c-family/c-pch.o c-family/c-ppoutput.o c-family/c-pragma.o c-family/c-pretty-print.o c-family/c-semantics.o c-family/c-ada-spec.o c-family/c-ubsan.o c-family/known-headers.o c-family/c-attribs.o c-family/c-warn.o c-family/c-spellcheck.o i386-c.o glibc-c.o libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a libcommon.a ../libcpp/libcpp.a ../libiberty/libiberty.a   ../libdecnumber/libdecnumber.a ../libbacktrace/.libs/libbacktrace.a \\\n                     checksum-options > cc1-checksum.cc.tmp &&           \\\n  ../../gcc-13.3.0/gcc/../move-if-change cc1-checksum.cc.tmp cc1-checksum.cc; \\\nfi\nif [ -f ../stage_final ] \\\n   && cmp -s ../stage_current ../stage_final; then \\\n   cp ../prev-gcc/cc1plus-checksum.cc cc1plus-checksum.cc; \\\nelse \\\n  build/genchecksum cp/cp-lang.o c-family/stub-objc.o cp/call.o cp/class.o cp/constexpr.o cp/constraint.o cp/coroutines.o cp/cp-gimplify.o cp/cp-objcp-common.o cp/cp-ubsan.o cp/cvt.o cp/contracts.o cp/cxx-pretty-print.o cp/decl.o cp/decl2.o cp/dump.o cp/error.o cp/except.o cp/expr.o cp/friend.o cp/init.o cp/lambda.o cp/lex.o cp/logic.o cp/mangle.o cp/mapper-client.o cp/mapper-resolver.o cp/method.o cp/module.o cp/name-lookup.o cp/optimize.o cp/parser.o cp/pt.o cp/ptree.o cp/rtti.o cp/search.o cp/semantics.o cp/tree.o cp/typeck.o cp/typeck2.o cp/vtable-class-hierarchy.o attribs.o c-family/c-common.o c-family/c-cppbuiltin.o c-family/c-dump.o c-family/c-format.o c-family/c-gimplify.o c-family/c-indentation.o c-family/c-lex.o c-family/c-omp.o c-family/c-opts.o c-family/c-pch.o c-family/c-ppoutput.o c-family/c-pragma.o c-family/c-pretty-print.o c-family/c-semantics.o c-family/c-ada-spec.o c-family/c-ubsan.o c-family/known-headers.o c-family/c-attribs.o c-family/c-warn.o c-family/c-spellcheck.o i386-c.o glibc-c.o libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a ../libcody/libcody.a libcommon.a ../libcpp/libcpp.a ../libiberty/libiberty.a   ../libdecnumber/libdecnumber.a ../libbacktrace/.libs/libbacktrace.a \\\n                     checksum-options > cc1plus-checksum.cc.tmp &&         \\\n  ../../gcc-13.3.0/gcc/../move-if-change cc1plus-checksum.cc.tmp cc1plus-checksum.cc; \\\nfi\ng++ -no-pie   -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -static-libstdc++ -static-libgcc  -o f951 \\\n        fortran/arith.o fortran/array.o fortran/bbt.o fortran/check.o fortran/class.o fortran/constructor.o fortran/cpp.o fortran/data.o fortran/decl.o fortran/dump-parse-tree.o fortran/error.o fortran/expr.o fortran/interface.o fortran/intrinsic.o fortran/io.o fortran/iresolve.o fortran/match.o fortran/matchexp.o fortran/misc.o fortran/module.o fortran/openmp.o fortran/options.o fortran/parse.o fortran/primary.o fortran/resolve.o fortran/scanner.o fortran/simplify.o fortran/st.o fortran/symbol.o fortran/target-memory.o  fortran/convert.o fortran/dependency.o fortran/f95-lang.o fortran/trans.o fortran/trans-array.o fortran/trans-common.o fortran/trans-const.o fortran/trans-decl.o fortran/trans-expr.o fortran/trans-intrinsic.o fortran/trans-io.o fortran/trans-openmp.o fortran/trans-stmt.o fortran/trans-types.o fortran/frontend-passes.o libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a -lz libcommon.a ../libcpp/libcpp.a   ../libbacktrace/.libs/libbacktrace.a ../libiberty/libiberty.a ../libdecnumber/libdecnumber.a  attribs.o \\\n        -lisl -lmpc -lmpfr -lgmp -rdynamic  -lz\ng++ -no-pie   -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -static-libstdc++ -static-libgcc  -o lto1 \\\n        lto/lto-lang.o lto/lto.o lto/lto-object.o attribs.o lto/lto-partition.o lto/lto-symtab.o lto/lto-common.o libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a -lisl -lmpc -lmpfr -lgmp -rdynamic  -lz  libcommon.a ../libcpp/libcpp.a   ../libbacktrace/.libs/libbacktrace.a ../libiberty/libiberty.a ../libdecnumber/libdecnumber.a\ng++ -no-pie   -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -static-libstdc++ -static-libgcc  -o lto-dump \\\n        lto/lto-lang.o lto/lto-object.o attribs.o lto/lto-partition.o lto/lto-symtab.o lto/lto-dump.o lto/lto-common.o libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a -lisl -lmpc -lmpfr -lgmp -rdynamic  -lz  libcommon.a ../libcpp/libcpp.a   ../libbacktrace/.libs/libbacktrace.a ../libiberty/libiberty.a ../libdecnumber/libdecnumber.a\nif [ -f ../stage_final ] \\\n   && cmp -s ../stage_current ../stage_final \\\n   && [ -f ../prev-gcc/cc1obj-checksum.cc ]; then \\\n  cp ../prev-gcc/cc1obj-checksum.cc cc1obj-checksum.cc; \\\nelse \\\n  build/genchecksum objc/objc-lang.o objc/objc-act.o hash-table.o objc/objc-runtime-shared-support.o objc/objc-gnu-runtime-abi-01.o objc/objc-next-runtime-abi-01.o objc/objc-next-runtime-abi-02.o objc/objc-encoding.o objc/objc-map.o attribs.o c/c-errors.o c/c-decl.o c/c-typeck.o c/c-convert.o c/c-aux-info.o c/c-objc-common.o c/c-parser.o c/c-fold.o c/gimple-parser.o c-family/c-common.o c-family/c-cppbuiltin.o c-family/c-dump.o c-family/c-format.o c-family/c-gimplify.o c-family/c-indentation.o c-family/c-lex.o c-family/c-omp.o c-family/c-opts.o c-family/c-pch.o c-family/c-ppoutput.o c-family/c-pragma.o c-family/c-pretty-print.o c-family/c-semantics.o c-family/c-ada-spec.o c-family/c-ubsan.o c-family/known-headers.o c-family/c-attribs.o c-family/c-warn.o c-family/c-spellcheck.o i386-c.o glibc-c.o \\\n        libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a libcommon.a ../libcpp/libcpp.a ../libiberty/libiberty.a   ../libdecnumber/libdecnumber.a ../libbacktrace/.libs/libbacktrace.a checksum-options > cc1obj-checksum.cc.tmp && \\\n  ../../gcc-13.3.0/gcc/../move-if-change cc1obj-checksum.cc.tmp cc1obj-checksum.cc; \\\nfi\ng++  -fno-PIE -c  -DIN_GCC_FRONTEND -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -I. -I. -I../../gcc-13.3.0/gcc -I../../gcc-13.3.0/gcc/. -I../../gcc-13.3.0/gcc/../include  -I../../gcc-13.3.0/gcc/../libcpp/include -I../../gcc-13.3.0/gcc/../libcody  -I../../gcc-13.3.0/gcc/../libdecnumber -I../../gcc-13.3.0/gcc/../libdecnumber/bid -I../libdecnumber -I../../gcc-13.3.0/gcc/../libbacktrace   -o cc1-checksum.o -MT cc1-checksum.o -MMD -MP -MF ./.deps/cc1-checksum.TPo cc1-checksum.cc\ng++  -fno-PIE -c  -DIN_GCC_FRONTEND -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -I. -I. -I../../gcc-13.3.0/gcc -I../../gcc-13.3.0/gcc/. -I../../gcc-13.3.0/gcc/../include  -I../../gcc-13.3.0/gcc/../libcpp/include -I../../gcc-13.3.0/gcc/../libcody  -I../../gcc-13.3.0/gcc/../libdecnumber -I../../gcc-13.3.0/gcc/../libdecnumber/bid -I../libdecnumber -I../../gcc-13.3.0/gcc/../libbacktrace   -o cc1obj-checksum.o -MT cc1obj-checksum.o -MMD -MP -MF ./.deps/cc1obj-checksum.TPo cc1obj-checksum.cc\ng++ -no-pie   -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -static-libstdc++ -static-libgcc  -o cc1 c/c-lang.o c-family/stub-objc.o attribs.o c/c-errors.o c/c-decl.o c/c-typeck.o c/c-convert.o c/c-aux-info.o c/c-objc-common.o c/c-parser.o c/c-fold.o c/gimple-parser.o c-family/c-common.o c-family/c-cppbuiltin.o c-family/c-dump.o c-family/c-format.o c-family/c-gimplify.o c-family/c-indentation.o c-family/c-lex.o c-family/c-omp.o c-family/c-opts.o c-family/c-pch.o c-family/c-ppoutput.o c-family/c-pragma.o c-family/c-pretty-print.o c-family/c-semantics.o c-family/c-ada-spec.o c-family/c-ubsan.o c-family/known-headers.o c-family/c-attribs.o c-family/c-warn.o c-family/c-spellcheck.o i386-c.o glibc-c.o \\\n  cc1-checksum.o libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a libcommon.a ../libcpp/libcpp.a   ../libbacktrace/.libs/libbacktrace.a ../libiberty/libiberty.a ../libdecnumber/libdecnumber.a  -lisl -lmpc -lmpfr -lgmp -rdynamic  -lz\ng++  -fno-PIE -c  -DIN_GCC_FRONTEND -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -I. -I. -I../../gcc-13.3.0/gcc -I../../gcc-13.3.0/gcc/. -I../../gcc-13.3.0/gcc/../include  -I../../gcc-13.3.0/gcc/../libcpp/include -I../../gcc-13.3.0/gcc/../libcody  -I../../gcc-13.3.0/gcc/../libdecnumber -I../../gcc-13.3.0/gcc/../libdecnumber/bid -I../libdecnumber -I../../gcc-13.3.0/gcc/../libbacktrace   -o cc1plus-checksum.o -MT cc1plus-checksum.o -MMD -MP -MF ./.deps/cc1plus-checksum.TPo cc1plus-checksum.cc\ng++ -no-pie   -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -static-libstdc++ -static-libgcc  -o cc1obj \\\n      objc/objc-lang.o objc/objc-act.o hash-table.o objc/objc-runtime-shared-support.o objc/objc-gnu-runtime-abi-01.o objc/objc-next-runtime-abi-01.o objc/objc-next-runtime-abi-02.o objc/objc-encoding.o objc/objc-map.o attribs.o c/c-errors.o c/c-decl.o c/c-typeck.o c/c-convert.o c/c-aux-info.o c/c-objc-common.o c/c-parser.o c/c-fold.o c/gimple-parser.o c-family/c-common.o c-family/c-cppbuiltin.o c-family/c-dump.o c-family/c-format.o c-family/c-gimplify.o c-family/c-indentation.o c-family/c-lex.o c-family/c-omp.o c-family/c-opts.o c-family/c-pch.o c-family/c-ppoutput.o c-family/c-pragma.o c-family/c-pretty-print.o c-family/c-semantics.o c-family/c-ada-spec.o c-family/c-ubsan.o c-family/known-headers.o c-family/c-attribs.o c-family/c-warn.o c-family/c-spellcheck.o i386-c.o glibc-c.o cc1obj-checksum.o \\\n      libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a libcommon.a ../libcpp/libcpp.a   ../libbacktrace/.libs/libbacktrace.a ../libiberty/libiberty.a ../libdecnumber/libdecnumber.a  -lisl -lmpc -lmpfr -lgmp -rdynamic  -lz\ng++ -no-pie   -g -O2     -DIN_GCC  -DCROSS_DIRECTORY_STRUCTURE   -fno-exceptions -fno-rtti -fasynchronous-unwind-tables -W -Wall -Wno-narrowing -Wwrite-strings -Wcast-qual -Wmissing-format-attribute -Wconditionally-supported -Woverloaded-virtual -pedantic -Wno-long-long -Wno-variadic-macros -Wno-overlength-strings   -DHAVE_CONFIG_H -static-libstdc++ -static-libgcc  -o cc1plus \\\n      cp/cp-lang.o c-family/stub-objc.o cp/call.o cp/class.o cp/constexpr.o cp/constraint.o cp/coroutines.o cp/cp-gimplify.o cp/cp-objcp-common.o cp/cp-ubsan.o cp/cvt.o cp/contracts.o cp/cxx-pretty-print.o cp/decl.o cp/decl2.o cp/dump.o cp/error.o cp/except.o cp/expr.o cp/friend.o cp/init.o cp/lambda.o cp/lex.o cp/logic.o cp/mangle.o cp/mapper-client.o cp/mapper-resolver.o cp/method.o cp/module.o cp/name-lookup.o cp/optimize.o cp/parser.o cp/pt.o cp/ptree.o cp/rtti.o cp/search.o cp/semantics.o cp/tree.o cp/typeck.o cp/typeck2.o cp/vtable-class-hierarchy.o attribs.o c-family/c-common.o c-family/c-cppbuiltin.o c-family/c-dump.o c-family/c-format.o c-family/c-gimplify.o c-family/c-indentation.o c-family/c-lex.o c-family/c-omp.o c-family/c-opts.o c-family/c-pch.o c-family/c-ppoutput.o c-family/c-pragma.o c-family/c-pretty-print.o c-family/c-semantics.o c-family/c-ada-spec.o c-family/c-ubsan.o c-family/known-headers.o c-family/c-attribs.o c-family/c-warn.o c-family/c-spellcheck.o i386-c.o glibc-c.o cc1plus-checksum.o libbackend.a main.o libcommon-target.a libcommon.a ../libcpp/libcpp.a ../libdecnumber/libdecnumber.a ../libcody/libcody.a  \\\n        libcommon.a ../libcpp/libcpp.a   ../libbacktrace/.libs/libbacktrace.a ../libiberty/libiberty.a ../libdecnumber/libdecnumber.a  -lisl -lmpc -lmpfr -lgmp -rdynamic  -lz\ncollect2: fatal error: ld terminated with signal 9 [Killed]\ncompilation terminated.\nmake[2]: *** [../../gcc-13.3.0/gcc/cp/Make-lang.in:145: cc1plus] Error 1\nmake[2]: *** Waiting for unfinished jobs....\nmake[2]: Leaving directory '/tmp/guix-build-gcc-cross-x86_64-linux-gnu-13.3.0.drv-0/build/gcc'\nmake[1]: *** [Makefile:4627: all-gcc] Error 2\nmake[1]: Leaving directory '/tmp/guix-build-gcc-cross-x86_64-linux-gnu-13.3.0.drv-0/build'\nmake: *** [Makefile:1042: all] Error 2\nerror: in phase 'build': uncaught exception:\n%exception #<&invoke-error program: \"make\" arguments: (\"-j\" \"8\" \"FLAGS_FOR_TARGET=-B/gnu/store/x374h6pay478zxafyy1l263qvanznlj0-glibc-cross-x86_64-linux-gnu-2.31/lib\" \"CFLAGS=-g0 -O2\") exit-status: 2 term-signal: #f stop-signal: #f>\nphase `build' failed after 1170.1 seconds\ncommand \"make\" \"-j\" \"8\" \"FLAGS_FOR_TARGET=-B/gnu/store/x374h6pay478zxafyy1l263qvanznlj0-glibc-cross-x86_64-linux-gnu-2.31/lib\" \"CFLAGS=-g0 -O2\" failed with status 2\n```\n\n</p>\n</details> \n\nI will try again and see if I get the same error.\n\nedit: It seems likely this may be an OOM (or similar) in the container. So I will try again using podman with more resources.",
+          "created_at": "2025-06-17T15:34:15Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "Ok I've tried this again twice more:\n\n- M3-aarch64 host\n- using podman\n- both alpine and debian containers\n- building with HOSTS=x86_64-linux-gnu\n\n...and both runs, whilst a little slower than previously, completed successfully.\n\n@Sjors was your container totally fresh for your run, or has it been restored from some kind of saved state?",
+          "created_at": "2025-06-17T19:47:58Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@willcl-ark I'm using UTM: https://mac.getutm.app (not Podman or Docker)\n\nDefinitely not a fresh machine, it's been making guix builds for while. I could make a fresh one if you can't reproduce, but it's a bit of a pain to setup a guix environment from scratch.",
+          "created_at": "2025-06-18T15:58:30Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "What are the minimal steps to reproduce? Can you run a normal shell?\n\n```\nguix time-machine --commit=53396a22afc04536ddf75d8f82ad2eafa5082725 -- shell --container --pure bash",
+          "created_at": "2025-06-18T16:23:57Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "- install UTM\n- create Ubuntu 24.10 machine\n- setup guix environment (method 4 of installing guix through apt)\n  - I don't use substitutes, but it might not matter for this issue \n- checkout master @ c8abd972818f83d90bf50b250131f338034460ef and do a guix build; it should succeed\n- checkout any newer commit, it should fail\n\n```\n$ guix time-machine --commit=53396a22afc04536ddf75d8f82ad2eafa5082725 -- shell --container --pure bash\nThe following derivation will be built:\n  /gnu/store/70dmz7dxm15949rbxiyjkk8gvgas86g4-profile.drv\n\nbuilding CA certificate bundle...\nlisting Emacs sub-directories...\nbuilding fonts directory...\nbuilding directory of Info manuals...\nbuilding profile with 1 package...\nsjors@ubuntu ~ [env]$\n```",
+          "created_at": "2025-06-19T07:56:51Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Sorry, I was asking for the isolated guix command that fails. This can help to see if the issue is guix related or bitcoin-core related.\n\nI was thinking about the shell, because the error message says: `guix shell: error: while setting up the build environment: cannot set armhf-linux personality: Invalid argument`.\n\nMaybe re-try via `V=1 VERBOSE=1 MAX_JOBS=1 HOSTS=arm64-apple-darwin ./contrib/guix/guix-build` to get a linear log?",
+          "created_at": "2025-06-19T08:23:59Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "That doesn't reveal anything new unfortunately. With fed41b75fbfa6d14cce852863271b1fb0206eef0 checked out.\n\n```\ngit clean -dfx\nV=1 VERBOSE=1 MAX_JOBS=1 HOSTS=\"x86_64-linux-gnu\" ./contrib/guix/guix-build\n\n...\n\nbuilding /gnu/store/hiqwnz4mhiad1zcqyf250b1ws0s36djc-attrs-21.2.0.tar.gz.drv...\nThe following builds are still in progress:\n  /gnu/store/hiqwnz4mhiad1zcqyf250b1ws0s36djc-attrs-21.2.0.tar.gz.drv\n  /gnu/store/sf5wwnpy8mr9l8iic2xz5bmg3bppjrj9-asynctest-0.13.0.tar.gz.drv\n  /gnu/store/grpq0sq301rwsz6h4vbdx9sgvi64wai4-Python-2.7.18.tar.xz.drv\n\nnote: keeping build directory `/tmp/guix-build-Python-2.7.18.tar.xz.drv-5'\nnote: keeping build directory `/tmp/guix-build-bash.drv-5'\nnote: keeping build directory `/tmp/guix-build-asynctest-0.13.0.tar.gz.drv-5'\nnote: keeping build directory `/tmp/guix-build-attrs-21.2.0.tar.gz.drv-5'\nguix shell: error: while setting up the build environment: cannot set armhf-linux personality: Invalid argument\n```\n\nFull log: https://gist.github.com/Sjors/47d6fc2162721c8afa405815bfff4108\n\nThough this seems to ignore `MAX_JOBS=1`?",
+          "created_at": "2025-06-19T09:22:22Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Does running the following work:\n```bash\nguix build --system=armhf-linux hello\n```",
+          "created_at": "2025-06-19T09:27:13Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@fanquake that produces the same error, so I guess that's useful info (and it's independent of Bitcoin Core).\n\nhttps://gist.github.com/Sjors/af35816417ead5a45956cda65b8456b8\n\nI'm confused by what `armhf-linux` is doing though since I'm only trying to build `HOSTS=\"x86_64-linux-gnu\"`\n\n\nAdditional info:\n\n```\n$ guix build --list-systems\nThe available systems are:\n\n   - aarch64-linux [current]\n   - armhf-linux\n   - i586-gnu\n   - i686-linux\n   - mips64el-linux\n   - powerpc-linux\n   - powerpc64le-linux\n   - riscv64-linux\n   - x86_64-linux\n```\n\n",
+          "created_at": "2025-06-19T09:32:38Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "It happens for every `--system` I tried so far.\n\nMaybe the issue has nothing to do with the specific new packages installed in #32431, but rather an inability of my guix system to add _any_ new packages. I'll try to test that scenario somehow...\n\n---\n\nIt doesn't seem that simple either, e.g. I can add something random and it builds fine:\n\n```\ndiff --git a/contrib/guix/manifest.scm b/contrib/guix/manifest.scm\nindex 92fc1791f0..42c138df03 100644\n--- a/contrib/guix/manifest.scm\n+++ b/contrib/guix/manifest.scm\n@@ -1,5 +1,6 @@\n (use-modules (gnu packages)\n              ((gnu packages bash) #:select (bash-minimal))\n+             (gnu packages aspell)\n              (gnu packages bison)\n              ((gnu packages certs) #:select (nss-certs))\n              ((gnu packages cmake) #:select (cmake-minimal))\n@@ -527,6 +528,7 @@ inspecting signatures in Mach-O binaries.\")\n  (append\n   (list ;; The Basics\n         bash-minimal\n+        aspell\n         which\n         coreutils-minimal\n         ;; File(system) inspection\n```",
+          "created_at": "2025-06-19T09:45:36Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Going to setup a fresh UTM instance, this time using Apple Virtualization (but not Rosetta, since I don't want x86_64) instead of Qemu. Let's see if that (a) works and (b) doesn't break again after a few months. The other difference would be that I'm installing Ubuntu 25.04 instead of 24.10.\n\n---\n\nSteps I used after installing the OS (mostly repeating my own bash history from the previous VM).\n\nFor some reason it wasn't using the full 100GB I asked for, as seen by `sudo lsblk`. Maybe I wasn't paying attention during installation? Anyway, fix that first:\n\n```\nsudo lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv\nsudo resize2fs /dev/ubuntu-vg/ubuntu-lv\n```\n\n```sh\n$ sudo apt install guix make\n$ guix --version\nguix (GNU Guix) 1.4.0\n```\n\nAdd to `.bashrc`:\n\n```sh\nexport SDK_PATH=$HOME/SDKs\nexport SOURCES_PATH=\"$HOME/depends-SOURCES_PATH\"\nexport BASE_CACHE=\"$HOME/depends-BASE_CACHE\"\nexport ADDITIONAL_GUIX_COMMON_FLAGS='--max-jobs=4 --no-substitutes'\n\nexport DETACHED_SIGS_REPO=\"$HOME/bitcoin-detached-sigs\"\nexport GUIX_SIGS_REPO=\"$HOME/guix.sigs\"\n```\n\n\n\n(exit and login again)\n\n```sh\nmkdir depends-SOURCES_PATH\nmkdir depends-BASE_CACHE\nmkdir SDKs\n```\n\nFrom the host machine:\n\n```\nscp Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz guix-mbp:SDKs \n```\n\n```sh\ncd SDKs\ntar -xzf Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\nrm Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\ncd ..\n\ngit clone https://github.com/bitcoin/bitcoin.git\ngit rev-parse HEAD\n```\n\nAt the time I was at master @ a40e9536588c366886de4f4b9d67b8665a509929.\n\nAnd go!\n\n```sh\ncontrib/guix/guix-build\n```\n\nDeal with the usual hash mismatches (see #31266):\n\n```\nguix download https://www.gnupg.org/ftp/gcrypt/gnutls/v3.7/gnutls-3.7.2.tar.xz\nguix download https://gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-1.8.8.tar.bz2\nguix download https://gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-1.42.tar.bz2\n```\n\nI can't find `net-tools-1.60` online anywhere, so just allowing a substitute to fetch it:\n\n```\nguix build /gnu/store/12iixx4vr706phhwi5xb9a0i1wa7f0jw-net-tools-1.60-0.479bb4a.zip.drv\n```\n\n(could probably just use `guix download` if I know the url to use)\n\nAnd failing openssl tests (see install docs):\n\n```\n...\n```\n\n",
+          "created_at": "2025-07-10T07:24:49Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "The new machine also gives me the \"cannot set armhf-linux personality\" error.\n\nIt seems to happen after successfully building one package (with `--max-jobs=1`). Each time you do `guix build` it'll build another package and throw this error.\n\nIf I switch back to c8abd972818f83d90bf50b250131f338034460ef then `guix build` just works. At least after I fix the app armor issue:\n\nIn `/etc/apparmor.d/guix`:\n\n```\nabi <abi/4.0>,\ninclude <tunables/global>\n\n# Profile for the guix binary\nprofile guix /usr/bin/guix flags=(unconfined) {\n  userns,\n  # Site-specific additions and overrides\n  include if exists <local/guix>\n}\n\n# Profile for unprivileged user namespaces\nprofile unprivileged_userns flags=(unconfined) {\n}\n```\n\nAnd then `sudo apparmor_parser -r /etc/apparmor.d/guix`\n\nBut the following fails regardless:\n\n```\nguix build --system=armhf-linux hello --no-substitutes\nThe following derivations will be built:\n  /gnu/store/y81j374bznilwn5dqnwysjdmg02xi1gw-hello-2.12.1.drv\n  /gnu/store/16kwj1sika6b0lky77kwpfz6cs9cgi4k-diffutils-3.8.drv\n...\n  /gnu/store/rl2ajq6hfph99pymwfm72cd2rb2hqzra-tar-1.34.drv\n  /gnu/store/9rhm0cz4wc1az3c99jpjran28nwqz280-tar-1.34.tar.xz.drv\nguix build: error: while setting up the build environment: cannot set armhf-linux personality: Invalid argument\n```\n\nBut this one does work:\n\n```\nguix build --system=aarch64-linux  hello --no-substitutes\n```\n\nI'll see if I can narrow down the culprit package to one of these and/or one of their dependencies:\n\n```\n((gnu packages python-science) #:select (python-scikit-build-core))\n((gnu packages python-xyz) #:select (python-pydantic-2 python-pydantic-core))\n```\n",
+          "created_at": "2025-07-11T06:32:55Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Perhaps an easier thing for me to test would be if switching to guix own python-lief 0.16.6 package magically fixes things. This would require a time machine bump past: https://codeberg.org/guix/guix/pulls/353\n\n@fanquake in https://github.com/bitcoin/bitcoin/pull/32764#pullrequestreview-2942922469 you mentioned having a time machine bump branch?\n\nMeanwhile I'll try if the simple act of adding either `python-scikit-build-core`, `python-pydantic-2` or `python-pydantic-core` on top of https://github.com/bitcoin/bitcoin/commit/c8abd972818f83d90bf50b250131f338034460ef breaks my guix machine. Calling `guix gc` uninstalls everything from the Bitcoin Core manifest, so might be a practical (albeit slow) way of trying these three things independently.\n\n(presumably I'd have to remove `python-lief` from the manifest entirely to get far enough into the `guix build` process to trigger the original error) ",
+          "created_at": "2025-07-11T07:19:06Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "I created a branch to debug this: https://github.com/Sjors/bitcoin/commits/2025/07/guix-aarch64-debug/\n\nIt starts from https://github.com/bitcoin/bitcoin/commit/c8abd972818f83d90bf50b250131f338034460ef. First it drops `python-tomli` and `lief` and disables the security checks. I run `HOSTS=\"arm64-apple-darwin\" contrib/guix/guix-build` and make sure it succeeds.\n\nNext I add `python-scikit-build-core` and pretend its needed for `signapple`. Depending on whether that succeeds, I'll add `python-pydantic-2` and `python-pydantic-core` to see if the failure is there. And if it fails, I'll try to drill down to the sub-sub-sub dependency that's the culprit. If so then it's probably an upstream issue. But if it doesn't fail, then the issue might be with our own LIEF package.",
+          "created_at": "2025-07-11T13:43:45Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "So far I found:\n\n- `python-scikit-build-core` builds fine\n- `python-pydantic-2` fails\n- `python-pydantic-core` fails\n\nMy current suspicion is that `Python-2.7.18` / `python2-minimal` is the culprit, based on what was being built around the time it fails.\n\nHowever I'm unable to produce the failure if I just insert `python-2.7` somewhere in the manifest. Part of the problem is that I don't really understand how these manifest files work.\n\nBut if my suspicion is current, then it might be a matter of replacing `python-2.7` with `python2-minimal` somewhere in the dependency spider web. Or of just getting rid of python 2.",
+          "created_at": "2025-07-13T07:55:06Z"
+        },
+        {
+          "user": "dongcarl",
+          "body": "Don't have full context but it's curious what causes `guix` to want to `set armhf-linux personality` in the first place.\n\nClearly M4 macOS hosts are `aarch64-linux`, and as @Sjors mentions:\n- `guix build --system=armhf-linux hello` \"produces the same error\"\n- `guix build --system=aarch64-linux  hello --no-substitutes` does work\n\nAnother clue from the Guix manual for `--system=system` (added [here](https://issues.guix.gnu.org/31473)):\n\n> **Note**: Building for an armhf-linux system is unconditionally enabled on aarch64-linux machines, although certain aarch64 chipsets do not allow for this functionality, notably the ThunderX. \n\nPerhaps the M4 chipset doesn't allow for this functionality either.\n\n@Sjors what if you try to build the upstream [lief 0.16.6](https://packages.guix.gnu.org/packages/python-lief/0.16.6/)?",
+          "created_at": "2025-07-17T13:44:51Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> Perhaps the M4 chipset doesn't allow for this functionality either.\n\nThat's quite possible, because trying to run the arm CI job also doesn't work, see #31344.\n\n---\n\nNot sure how to go about building the upstream lief 0.16.6:\n\n```\n$ guix install python-lief@0.16.6\nguix install: error: python-lief: package not found for version 0.16.6\n```\n\nGuess I need to do `guix pull` first?",
+          "created_at": "2025-07-17T14:18:38Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Yes that was needed... Afterwards:\n\n```\n$ guix --version\nguix (GNU Guix) 945c6ff9f222efed460ce8ab31fb6911f89436c9\n...\nguix install python-lief@0.16.6 --no-substitutes\n...\n\nbuilding /gnu/store/1krys8fl33k7bzr9md8fgd38k41av1fk-babel-2.16.0.tar.gz.drv...\nguix install: error: while setting up the build environment: cannot set armhf-linux personality: Invalid argument\n```\n\n> Don't have full context but it's curious what causes `guix` to want to `set armhf-linux personality` in the first place.\n\nIt must be one of the dependencies of lief, because without that I can do guix builds just fine on this machine - and have been for several major releases.\n",
+          "created_at": "2025-07-17T18:20:10Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Giving up on this for now, my x86_64 box works fine.",
+          "created_at": "2025-12-09T09:35:10Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 7,
+    "issues": 2
+  }
+}

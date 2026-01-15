@@ -1,0 +1,468 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:02:48.208321+00:00",
+  "date": "2025-07-30",
+  "pull_requests": [
+    {
+      "number": 33105,
+      "title": "validation: detect witness stripping without re-running Script checks",
+      "body": "Since it was introduced in 4eb515574e1012bc8ea5dafc3042dcdf4c766f26 (#18044), the detection of a stripped witness relies on running the Script checks 3 times. In the worst case, this consists in running Script validation for every single input 3 times.\r\n\r\nDetection of a stripped witness is necessary because in this case wtxid==txid, and the transaction's wtxid must not be added to the reject filter or it could allow a malicious peer to interfere with txid-based orphan resolution as used in 1p1c package relay.\r\n\r\nHowever it is not necessary to run Script validation to detect a stripped witness (much less so doing it 3 times in a row). There are 3 types of witness program: defined program types (Taproot, P2WPKH and P2WSH), undefined types, and the Pay-to-anchor carve-out.\r\n\r\nFor defined program types, Script validation with an empty witness will always fail (by consensus). For undefined program types, Script validation is always going to fail regardless of the witness (by standardness). For P2A, an empty witness is never going to lead to a failure.\r\n\r\nTherefore it holds that we can always detect a stripped witness without re-running Script validation. However this might lead to more \"false positives\" (cases where we return witness stripping for an otherwise invalid transaction) than the existing implementation. For instance a transaction with one P2PKH input with an invalid signature and one P2WPKH input with its witness stripped. The existing implementation would treat it as consensus invalid while the implementation in this PR would always consider it witness stripped.\r\n\r\nh/t AJ: this essentially implements a variant of https://github.com/bitcoin/bitcoin/pull/33066#issuecomment-3135258539.",
+      "state": "closed",
+      "user": "darosior",
+      "created_at": "2025-07-30T20:13:44Z",
+      "updated_at": "2025-08-08T18:59:25Z",
+      "comments": 20,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33105",
+      "labels": [
+        "Validation"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33105.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [sipa](https://github.com/bitcoin/bitcoin/pull/33105#issuecomment-3168340979), [Crypt-iQ](https://github.com/bitcoin/bitcoin/pull/33105#issuecomment-3168392270), [glozow](https://github.com/bitcoin/bitcoin/pull/33105#pullrequestreview-3101796139) |\n| Approach ACK | [ajtowns](https://github.com/bitcoin/bitcoin/pull/33105#pullrequestreview-3073725534) |\n| Stale ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/33105#issuecomment-3141419839), [nervana21](https://github.com/bitcoin/bitcoin/pull/33105#issuecomment-3143760463) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32317](https://github.com/bitcoin/bitcoin/pull/32317) (kernel: Separate UTXO set access from validation functions by TheCharlatan)\n* [#31682](https://github.com/bitcoin/bitcoin/pull/31682) ([IBD] specialize CheckBlock's input & coinbase checks by l0rinc)\n* [#28676](https://github.com/bitcoin/bitcoin/pull/28676) (Cluster mempool implementation by sdaftuar)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-30T20:13:49Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 0e22a1401c7edee8946f404dd0deb59a94231340",
+          "created_at": "2025-07-31T21:39:52Z"
+        },
+        {
+          "user": "nervana21",
+          "body": "tACK 0e22a14\r\n\r\nAfter understanding the larger context of this PR, I thoroughly reviewed all code. I also ran the updated tests locally and modified them such that they all passed and failed in the expected manner.",
+          "created_at": "2025-08-01T08:46:44Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "I'm a little out of my depth and it is getting late so might be off-base, but reviewing this PR I think it's a slight behavior change in what we see as witness-stripped? P2SH-P2WSH are not caught by `IsWitnessProgram` in this PR, but they are caught as witness-stripped in master. I checked by running the test_p2sh_witness subtest in p2p_segwit.py and printing if witness-stripped was detected. I didn't test P2SH-P2WPKH. Not sure if it matters, figured I'd point it out.",
+          "created_at": "2025-08-04T02:03:45Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Good catch.",
+          "created_at": "2025-08-04T04:42:54Z"
+        },
+        {
+          "user": "darosior",
+          "body": "I fixed the bug @Crypt-iQ found (thanks!) and added a functional test that explicitly tests for witness-stripping detection for both native and p2sh-wrapped outputs. This test would have failed without the fix. In addition, i made the segwit-spend detection into its own helper function for which i added a unit test to sanity check detection against all defined output types.",
+          "created_at": "2025-08-04T18:23:39Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "Why would this case ever occur? Seems like a lot of code to handle an unexpected path. And would-be DoS attackers can defeat it with a dummy witness anyway, right?",
+          "created_at": "2025-08-05T01:40:05Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> Why would this case ever occur?\r\n\r\nMost likely never because we have the detection. If we didn't, someone may try to exploit this case to hinder propagation of 1p1c packages (see OP).\r\n\r\n> Seems like a lot of code to handle an unexpected path.\r\n\r\nYeah. Note however this is *replacing* expensive code. I think it's always fair to question adding more code, but i hope in this instance it is pretty clear that replacing the expensive code by an inexpensive, albeit slightly more verbose, one is worth it. Note also 80% of code added in this PR is tests, some for currently-untested behaviour.\r\n\r\n> And would-be DoS attackers can defeat it with a dummy witness anyway, right?\r\n\r\nI think you are confusing the witness-stripping detection, which we do for \"censorship resistance\", with the rationale for this PR which is \"DoS resistance\" (by making said detection a lot cheaper).",
+          "created_at": "2025-08-05T13:55:34Z"
+        },
+        {
+          "user": "darosior",
+          "body": "I changed the call site for `SpendsNonAnchorWitnessProg` to be where we detect witness stripping today. Besides being a smaller diff this minimizes the potential for behaviour changes. Note this PR still slightly changes behaviour (see last commit's message and https://github.com/bitcoin/bitcoin/pull/33105#discussion_r2254632919).",
+          "created_at": "2025-08-05T19:29:59Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Replying out of thread to not derail the thread conversation.\r\n\r\n> This would make sure we don't weaken any existing standardness or consensus error into a witness-stripped one.\r\n\r\nIn current master, these are the consensus errors (I think?) that can be returned as witness-stripped:\r\n- SCRIPT_ERR_WITNESS_MALLEATED (changes txid)\r\n- SCRIPT_ERR_WITNESS_MALLEATED_P2SH (changes txid)\r\n- SCRIPT_ERR_WITNESS_PROGRAM_MISMATCH (for P2WPKH, not the case for P2WSH)\r\n- SCRIPT_ERR_WITNESS_PROGRAM_WRONG_LENGTH\r\n\r\nThe other errors require a witness and would fail the `CheckInputScripts` logic early. I might be misunderstanding the comment / being a bit pedantic and maybe you're referring to not adding even more errors that can be converted into witness-stripped?",
+          "created_at": "2025-08-05T21:34:32Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Concept ACK",
+          "created_at": "2025-08-06T18:02:47Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> maybe you're referring to not adding even more errors that can be converted into witness-stripped?\r\n\r\nYes this is what i meant. There are cases today where we would return WITNESS_STRIPPED for an otherwise invalid transaction (such as it could only be made valid by changing its txid, and we are missing the opportunity of adding its txid to the reject filter). This PR adds more such cases. This is minimized in the latest iteration (https://github.com/bitcoin/bitcoin/pull/33105#issuecomment-3156334619) by leaving the witness detection be at the same site as today, since an early witness-stripped detection may overlook even more ways in which the transaction is invalid (for instance too many sigops).",
+          "created_at": "2025-08-06T21:00:37Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Corrected commit message and OP as per @Crypt-iQ's [point](https://github.com/bitcoin/bitcoin/pull/33105#discussion_r2260386539).",
+          "created_at": "2025-08-07T20:26:40Z"
+        },
+        {
+          "user": "sipa",
+          "body": "ACK ffd82f3783d1af4f94f7dbd0af3a80d4591eb185\r\n\r\nWhile discussing possible alternatives to this with @darosior and @glozow, I feel I came to an understanding about the problem I didn't have before.\r\n\r\nConsider an approach where there are completely separate txid and wtxid rejection caches. The txid cache is used when one has a txid, the wtxid cache is used when one has a wtxid. Ideally then, we insert failed transactions:\r\n* Always into the wtxid cache (even when TX_WITNESS_STRIPPED, because it won't be used for txid lookups)\r\n* Into the txid cache whenever the failure is known to be independent of the witness. There are many potential reasons we can detect as such:\r\n  * a. Script validation errors that occur before witness validation.\r\n  * b. Base-weight variations of resource checks (e.g. base_size above 100000, fee/base_size is below mempool feerate, ...)\r\n  * c. Miscellaneous non-witness related transaction failures (e.g. non-standard input/output script types, too large scriptSigs, dust, ...)\r\n\r\nWe can see the current code as an approximation of this:\r\n* All failures are inserted into the wtxid cache *except* `TX_WITNESS_STRIPPED`.\r\n* Into the txid cache we insert:\r\n  * `TX_NONSTANDARD_INPUTS` failures (one specific instance of (c) above).\r\n  * All failed non-segwit transactions except `TX_WITNESS_STRIPPED`, which covers a subset of (a), (b), and (c), implicitly because txid=wtxid here and the tables are shared.\r\n\r\nRelying on txid=wtxid for non-segwit transactions kind of does the right thing, though it feels accidental. For example, a non-witness transaction failing due to low feerate is inserted into the txid cache (by virtue of its wtxid=txid), which is correct, and a special case of (b). However, it has one case where it blatantly does the wrong thing, which is exactly what `TX_WITNESS_STRIPPED` fixes by special-casing it and not inserting it at all.\r\n\r\nSo I think there are two follow-ups possible after this:\r\n* Get rid of the txid rejection cache (i.e., #33066).\r\n* Make the txid rejection cache work correctly (i.e., split the caches into txid/wtxid, and annotate each failure with whether it's witness-dependent or witness-independent).\r\n\r\nIn both cases, the `TX_WITNESS_STRIPPED` can go away. That means the `SpendsNonAnchorWitnessProg()` added here can go away too, but it could also be transformed into an independent optimization. We could choose to detect (very) early whether a transaction has any input type that necessarily needs a witness (i.e., P2WPKH, P2WSH, P2SH-P2WPKH, P2SH-P2WSH, P2TR) but lacks one. If so, transaction validation can instantly fail (with witness-dependent failure). Unlike now, where the location of calling `SpendsNonAnchorWitnessProg()` is a trade-off between fast failure and cache accuracy, it would be unambiguously better to do the check earlier (or not at all).\r\n",
+          "created_at": "2025-08-07T22:35:28Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> So I think there are two follow-ups possible after this:\r\n> \r\n> * ..\r\n> * Make the txid rejection cache work correctly (i.e., split the caches into txid/wtxid, and annotate each failure with whether it's witness-dependent or witness-independent).\r\n> \r\n> In both cases, the `TX_WITNESS_STRIPPED` can go away.\r\n\r\nI don't think that's straightforwardly true: if we have separate caches working correctly, we still should not be adding failures that may be solely due to witness stripping to the txid cache, as that would (allow an attacker to) prevent us from doing orphan resolution/1p1c from our wtxidrelay peers, unless we also ignore the txid cache in that case, but that was the other follow-up.",
+          "created_at": "2025-08-08T14:09:06Z"
+        },
+        {
+          "user": "sipa",
+          "body": "> I don't think that's straightforwardly true: if we have separate caches working correctly, we still should not be adding failures that may be solely due to witness stripping to the txid cache\r\n\r\nOf course! But that is captured by annotating each failure with whether it's witness-dependent or witness-independent. Any script failure that happens after witness validation begins would be witness-dependent, and therefore not eligible to enter the txid rejection cache.\r\n\r\nThe difference is that this is just directly assessing what failure should go where, rather than the current patchwork of essentially inserting `(([all txid=wtxid tx failures] + TX_NONSTANDARD_INPUTS) - TX_WITNESS_STRIPPED)` into the txid cache.\r\n\r\n---\r\n\r\nLet me maybe be more explicit about what I mean: in both cases, the concept of a special class of failure (`TX_WITNESS_STRIPPED`) which should not be inserted into any rejection filter can go away. In both approaches, all failures can be inserted into the wtxid rejection caches. Depending on the approach, either none, or all the appropriate, failures can be inserted into the txid rejection caches.",
+          "created_at": "2025-08-08T14:15:49Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "re-ACK ffd82f3783d1af4f94f7dbd0af3a80d4591eb185",
+          "created_at": "2025-08-08T15:14:27Z"
+        },
+        {
+          "user": "sipa",
+          "body": "re-ACK 27aefac42505e9c083fa131d3d7edbec7803f3c0",
+          "created_at": "2025-08-08T15:40:04Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "re-ACK 27aefac42505e9c083fa131d3d7edbec7803f3c0",
+          "created_at": "2025-08-08T15:59:13Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> Let me maybe be more explicit about what I mean: in both cases, the concept of a special class of failure (`TX_WITNESS_STRIPPED`) which should not be inserted into any rejection filter can go away. In both approaches, all failures can be inserted into the wtxid rejection caches. Depending on the approach, either none, or all the appropriate, failures can be inserted into the txid rejection caches.\r\n\r\nAh, in that case we could have an early check for \"this utxo's scriptPubKey (which I understand and would accept spends of) requires witness data and you didn't provide it\" and translate that to a `TX_MISSING_EXPECTED_WITNESS_DATA` error which would go into the wtxid reject cache, but not the txid reject cache, even in the case where all witness data was missing and wtxid=txid.\r\n\r\nI guess I don't mind it, but it seems like it wouldn't be very helpful over doing the same logic and just reporting `TX_WITNESS_STRIPPED` and having a shared cache -- it'd help you avoid requesting it if multiple buggy/adversarial peers announce the same wtxid which seems unlikely, but wouldn't improve orphan resolution.",
+          "created_at": "2025-08-08T18:37:36Z"
+        }
+      ]
+    },
+    {
+      "number": 33104,
+      "title": "test: Perform backup filename checks in migrate_and_get_rpc in wallet_migration.py",
+      "body": "Some test cases were unnecessarily checking the backup filename, which involved setting the mocktime before `migrate_and_get_rpc`. However, this could cause a failure if the test was slow since `migrate_and_get_rpc` also sets the mocktime. Since it also already checks that the backup file is named correctly, there's no need for those tests to also do their own mocktime and filename check.\r\n\r\nThe CI failure can be reproduced locally by adding a sleep to `migrate_and_get_rpc`:\r\n```diff\r\ndiff --git a/test/functional/wallet_migration.py b/test/functional/wallet_migration.py\r\nindex 704204425c7..e87a6100623 100755\r\n--- a/test/functional/wallet_migration.py\r\n+++ b/test/functional/wallet_migration.py\r\n@@ -129,6 +129,7 @@ class WalletMigrationTest(BitcoinTestFramework):\r\n                 assert_equal(w[\"warnings\"], [\"This wallet is a legacy wallet and will need to be migrated with migratewallet before it can be loaded\"])\r\n \r\n         # Mock time so that we can check the backup filename.\r\n+        time.sleep(1)\r\n         mocked_time = int(time.time())\r\n         self.master_node.setmocktime(mocked_time)\r\n         # Migrate, checking that rescan does not occur\r\n```\r\n\r\nFixes #33096",
+      "state": "closed",
+      "user": "achow101",
+      "created_at": "2025-07-30T17:17:43Z",
+      "updated_at": "2025-08-01T08:51:14Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33104",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33104.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/33104#pullrequestreview-3076775979), [fjahr](https://github.com/bitcoin/bitcoin/pull/33104#issuecomment-3141363807), [Sammie05](https://github.com/bitcoin/bitcoin/pull/33104#issuecomment-3141944954), [rkrux](https://github.com/bitcoin/bitcoin/pull/33104#pullrequestreview-3078241724) |\n| Stale ACK | [enirox001](https://github.com/bitcoin/bitcoin/pull/33104#pullrequestreview-3076154925) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-30T17:17:47Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "reACK 4b80147feb97300e92e1f940b8d989a0af331e06",
+          "created_at": "2025-07-31T21:17:27Z"
+        },
+        {
+          "user": "Sammie05",
+          "body": " tACK 4b80147\r\nConfirmed the test passes and mocktime is handled consistently within migrate_and_get_rpc.\r\n\r\nReproduced the failure when mocktime is set redundantly and confirmed the fix removes the race. Clean change, and no unnecessary test logic outside the migration function.\r\nGood to go from my end.",
+          "created_at": "2025-08-01T02:23:45Z"
+        }
+      ]
+    },
+    {
+      "number": 33103,
+      "title": "2025 07 30 Add release note for `dumptxoutset` breaking change",
+      "body": "See discussion here: https://github.com/bitcoin/bitcoin/pull/30808#issuecomment-3134394012",
+      "state": "closed",
+      "user": "Christewart",
+      "created_at": "2025-07-30T15:27:48Z",
+      "updated_at": "2025-07-30T15:50:33Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33103",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33103.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-30T15:27:52Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Thanks. Given this was missed in the 29.0 release notes, it seems like it should be added to the 29.1 release notes. In that case, I'll roll this into #33074.",
+          "created_at": "2025-07-30T15:42:05Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "See https://github.com/bitcoin/bitcoin/pull/33074/commits/264418f80cea7fd5ae818a2a2887fab62de2b0a2 in #33074.",
+          "created_at": "2025-07-30T15:50:33Z"
+        }
+      ]
+    },
+    {
+      "number": 33102,
+      "title": "fuzz: cover BanMan::IsDiscouraged",
+      "body": "This PR adds fuzz coverage for the `IsDiscouraged` function in the banman target. This is the only function missing from `BanMan`.",
+      "state": "closed",
+      "user": "brunoerg",
+      "created_at": "2025-07-30T12:51:46Z",
+      "updated_at": "2025-10-30T13:57:49Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33102",
+      "labels": [
+        "Tests",
+        "Fuzzing"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33102.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/33102#issuecomment-3136269998), [marcofleon](https://github.com/bitcoin/bitcoin/pull/33102#pullrequestreview-3071548512) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-30T12:51:51Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK c2ed576d2caf282a51aa9df5df55d844ab1da794",
+          "created_at": "2025-07-30T13:06:19Z"
+        }
+      ]
+    },
+    {
+      "number": 33101,
+      "title": "cmake: Proactively avoid use of `SECP256K1_DISABLE_SHARED`",
+      "body": "The `SECP256K1_DISABLE_SHARED` CMake variable has been [removed](https://github.com/bitcoin-core/secp256k1/pull/1688) upstream.\r\n\r\nThis PR removes its usage ahead of the next `secp256k1` subtree update to prevent breakage and simplify integration.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-07-30T12:48:29Z",
+      "updated_at": "2025-08-06T13:14:26Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33101",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33101.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fanquake](https://github.com/bitcoin/bitcoin/pull/33101#pullrequestreview-3091896535) |\n| Stale ACK | [theuni](https://github.com/bitcoin/bitcoin/pull/33101#pullrequestreview-3072902914) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32617](https://github.com/bitcoin/bitcoin/pull/32617) ([Draft/POC] Add secp256k1-based HPKE (Hybrid Public Key Encryption) For Payjoin v2 by w0xlt)\n* [#32367](https://github.com/bitcoin/bitcoin/pull/32367) (cmake: Check user-defined `APPEND_*FLAGS` variables early by hebasto)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- “during building depends and configuring this build system” -> “during building dependencies and configuring this build system” [“depends” is incorrect here and hinders comprehension; “dependencies” fits the context]\n\n<sup>drahtbot_id_4_m</sup>\n",
+          "created_at": "2025-07-30T12:48:34Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @theuni @purpleKarrot ",
+          "created_at": "2025-07-30T15:52:52Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Rebased due to a conflict with merged #31244.",
+          "created_at": "2025-08-01T09:37:30Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Guix Build (aarch64):\r\n```bash\r\n1a4f3c804b729fdc5a3d4831239b6bd7e34e0ca9061395578dfce07ffa8ea1cf  guix-build-b093a19ae2ef/output/aarch64-linux-gnu/SHA256SUMS.part\r\n03563287d5fd2f87829e2569e2fc02e8e6c0f9dc3db22d196fe442b852b242f0  guix-build-b093a19ae2ef/output/aarch64-linux-gnu/bitcoin-b093a19ae2ef-aarch64-linux-gnu-debug.tar.gz\r\n5aee57e7e430fe8c7d0214dcc5717a1e50992fa9a28252804658fe262d6cde0e  guix-build-b093a19ae2ef/output/aarch64-linux-gnu/bitcoin-b093a19ae2ef-aarch64-linux-gnu.tar.gz\r\nd619695f4a0ce8b74a70a222f9c4ff3532b7eaf3e46b19bb585bc8d0a44d8fa4  guix-build-b093a19ae2ef/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n29444e50a63ff8971bd72b02a297740baf129de543ebe280f78462a0529d08a1  guix-build-b093a19ae2ef/output/arm-linux-gnueabihf/bitcoin-b093a19ae2ef-arm-linux-gnueabihf-debug.tar.gz\r\nce3aa54f27cd02bd96cd52d13113f9e3e78c11f4eec20caa66273506065847c3  guix-build-b093a19ae2ef/output/arm-linux-gnueabihf/bitcoin-b093a19ae2ef-arm-linux-gnueabihf.tar.gz\r\nbfaa3a80d8078f46bf757e4e17794cf0371b7bcc3c7246b59d8d4d414bf2a25b  guix-build-b093a19ae2ef/output/arm64-apple-darwin/SHA256SUMS.part\r\nb61c4b4638eec218f391af243790ccdbbcec61d668ab70082153167e3d5abc45  guix-build-b093a19ae2ef/output/arm64-apple-darwin/bitcoin-b093a19ae2ef-arm64-apple-darwin-codesigning.tar.gz\r\n73bef894bfabbf69ff5802c96dcee4418d270c8a5a69f84f7a5aa614337107fe  guix-build-b093a19ae2ef/output/arm64-apple-darwin/bitcoin-b093a19ae2ef-arm64-apple-darwin-unsigned.tar.gz\r\n2b73a6354bfc746c7e8b34d35e1144c2e1ea0c5718146e4f879b03da65b033b4  guix-build-b093a19ae2ef/output/arm64-apple-darwin/bitcoin-b093a19ae2ef-arm64-apple-darwin-unsigned.zip\r\nf3fd8a9eaa640dd7532da6af1a2a81883f220d68c12313ff70a9292a81de979d  guix-build-b093a19ae2ef/output/dist-archive/bitcoin-b093a19ae2ef.tar.gz\r\nb9e0fde4d6a3a37837206ead8687a1639498a080b48a7f7a2ce89094d9794631  guix-build-b093a19ae2ef/output/powerpc64-linux-gnu/SHA256SUMS.part\r\nd75ba692b6c55c69f8d52f70f68985dfc3ae9c6fa60fec3967fa2c18cfa3161f  guix-build-b093a19ae2ef/output/powerpc64-linux-gnu/bitcoin-b093a19ae2ef-powerpc64-linux-gnu-debug.tar.gz\r\nb39303207f3a4cf54a79f76f655b02cf23b8f91f2b342885b4f622e9ab6245cc  guix-build-b093a19ae2ef/output/powerpc64-linux-gnu/bitcoin-b093a19ae2ef-powerpc64-linux-gnu.tar.gz\r\n02e519b8825c089df62def0ebf33595323183b832fb466cccf885792558581aa  guix-build-b093a19ae2ef/output/riscv64-linux-gnu/SHA256SUMS.part\r\n07ff752956fb318b1b9ea7851f300f7f8a38f0bf80aa4c5ab552a05daeb8b15e  guix-build-b093a19ae2ef/output/riscv64-linux-gnu/bitcoin-b093a19ae2ef-riscv64-linux-gnu-debug.tar.gz\r\nb1da13582199184d860686150c382a83161230a58eafc7987372691b51933085  guix-build-b093a19ae2ef/output/riscv64-linux-gnu/bitcoin-b093a19ae2ef-riscv64-linux-gnu.tar.gz\r\n71b90a0e33269ee883058394c14037447762178b172f56e66c8b84fae5277dab  guix-build-b093a19ae2ef/output/x86_64-apple-darwin/SHA256SUMS.part\r\n7ea2e8214aaf42c8e4b63f6ab7ce5d69d347918b2bd4cd07761859ebc441c466  guix-build-b093a19ae2ef/output/x86_64-apple-darwin/bitcoin-b093a19ae2ef-x86_64-apple-darwin-codesigning.tar.gz\r\n1e626756c7e899700fec5d060dbf791b169c83da6696d2df538b2bdd40da732d  guix-build-b093a19ae2ef/output/x86_64-apple-darwin/bitcoin-b093a19ae2ef-x86_64-apple-darwin-unsigned.tar.gz\r\ne06e445ef6382e6f51cd3cbe4197a07b2c14033a4f7f633fa0a2ec53e8479186  guix-build-b093a19ae2ef/output/x86_64-apple-darwin/bitcoin-b093a19ae2ef-x86_64-apple-darwin-unsigned.zip\r\na75743dcbf9e83f93d9e8f973b67fb6be39a216c3e7e598e5c1ca852b388a701  guix-build-b093a19ae2ef/output/x86_64-linux-gnu/SHA256SUMS.part\r\nb23ae4acda8d9ccb85ce813b6857a024d46c529a285ab44f0b4f4a00e4369c9e  guix-build-b093a19ae2ef/output/x86_64-linux-gnu/bitcoin-b093a19ae2ef-x86_64-linux-gnu-debug.tar.gz\r\nb5428cb3de138ecf159784b33ef64ae5cb444997a7a3608cf79d1b61310d67d1  guix-build-b093a19ae2ef/output/x86_64-linux-gnu/bitcoin-b093a19ae2ef-x86_64-linux-gnu.tar.gz\r\nfe680b04532d08366c68ea3ed33208a2a9b76981e90ac9c4ca93d638ba00052d  guix-build-b093a19ae2ef/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n0f4de9ccba8f1dc39bb477423e168a3735467cd7d956085a35688fe08b6e4ab6  guix-build-b093a19ae2ef/output/x86_64-w64-mingw32/bitcoin-b093a19ae2ef-win64-codesigning.tar.gz\r\n83101c499b05d05ee2dc44a3927ddd6c895d34459c97df25598641bb9217631b  guix-build-b093a19ae2ef/output/x86_64-w64-mingw32/bitcoin-b093a19ae2ef-win64-debug.zip\r\nc8036cb6a582a539981213499f3e9b48b3fd3432b412912f390a97d62b4c6ef4  guix-build-b093a19ae2ef/output/x86_64-w64-mingw32/bitcoin-b093a19ae2ef-win64-setup-unsigned.exe\r\n246e39e8d7abcd7f08b627ceb2981176b9f7bc7ff703ad57267dc9028e00f858  guix-build-b093a19ae2ef/output/x86_64-w64-mingw32/bitcoin-b093a19ae2ef-win64-unsigned.zip\r\n```",
+          "created_at": "2025-08-06T10:47:33Z"
+        }
+      ]
+    },
+    {
+      "number": 33100,
+      "title": "ci: remove `ninja-build` from MSAN jobs",
+      "body": "It is part of `CI_BASE_PACKAGES`.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-07-30T12:13:10Z",
+      "updated_at": "2025-07-30T15:23:59Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33100",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33100.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/33100#pullrequestreview-3071150626), [maflcko](https://github.com/bitcoin/bitcoin/pull/33100#issuecomment-3136606083) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-30T12:13:16Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review ACK cab6736b701f203d6e823e1b5d619368d8d4c5e0 🕸\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK cab6736b701f203d6e823e1b5d619368d8d4c5e0 🕸\r\n3MM9ENYD4nBl9lZmHOO7w7jI4Qc0GMm9wCa3eac68apZmqKnsuY2jQqAZw2eYQUJ2TGIlUAtBAnKil/RKt1DBQ==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-07-30T14:26:58Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "CI failure here is #33096.",
+          "created_at": "2025-07-30T15:23:36Z"
+        }
+      ]
+    },
+    {
+      "number": 33099,
+      "title": "ci: allow for any libc++ intrumentation & use it for TSAN",
+      "body": "Allow for instrumenting libc++ with a sanitizer other than MemoryWithOrigins.\r\n\r\nWould also close #33087, as with the extra instrumentation, the issue from https://github.com/bitcoin/bitcoin/pull/32862#issuecomment-3114706601 is avoided (also see https://github.com/bitcoin/bitcoin/pull/33081), and we can drop `DEBUG_LOCKORDER`.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-07-30T12:03:46Z",
+      "updated_at": "2025-07-31T21:07:04Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33099",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33099.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/33099#issuecomment-3137022944), [dergoegge](https://github.com/bitcoin/bitcoin/pull/33099#pullrequestreview-3075208244) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32989](https://github.com/bitcoin/bitcoin/pull/32989) (ci: Migrate CI to hosted Cirrus Runners by willcl-ark)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-30T12:03:51Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm, but the tsan depends build seems to be taking significantly longer now for some reason?",
+          "created_at": "2025-07-30T13:19:33Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> lgtm, but the tsan depends build seems to be taking significantly longer now for some reason?\r\n\r\nYea, the QT build has started taking a ridiculous amount of time. Maybe we can just disable it in this job?",
+          "created_at": "2025-07-30T13:20:45Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Yeah, I guess it may be best to disable it for now, if the instrumented libc++ turns the qt depends build into a time sink. For reference, the task never in history took that long, looking at https://0xb10c.github.io/bitcoin-core-ci-stats/graph/build/#TSan,%20depends,%20gui. \r\n\r\nObviously, it would be good to retain depends-qt-tsan as a nightly CI task, but I can open a general brainstorming issue about it.",
+          "created_at": "2025-07-30T13:29:14Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/47028451291</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by errors detected in the lint check step.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-30T13:40:25Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Squashed into a single option. Should have fixed the linter. Dropped Qt.",
+          "created_at": "2025-07-30T13:41:00Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Looks like the flags are correctly picked up: https://cirrus-ci.com/task/6536414633918464?logs=ci#L4866\r\n\r\n`[10:46:11.059] C++ compiler flags .................... -fsanitize=thread -nostdinc++ -nostdlib++ -isystem /cxx_build/include/c++/v1 -L/cxx_build/lib -Wl,-rpath,/cxx_build/lib -lc++ -lc++abi -lpthread -Wno-unused-command-line-argument -O2 -g -std=c++20 -fPIC -fdebug-prefix-map=/ci_container_base/src=. -fmacro-prefix-map=/ci_container_base/src=. -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -Wstack-protector -fstack-protector-all -fcf-protection=full -fstack-clash-protection -Werror -fsanitize=thread -Wall -Wextra -Wgnu -Wformat -Wformat-security -Wvla -Wshadow-field -Wthread-safety -Wloop-analysis -Wredundant-decls -Wunused-member-function -Wdate-time -Wconditional-uninitialized -Woverloaded-virtual -Wsuggest-override -Wimplicit-fallthrough -Wunreachable-code -Wdocumentation -Wself-assign -Wundef -Wno-unused-parameter -DARENA_DEBUG -DDEBUG_LOCKCONTENTION -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES`\r\n\r\nre-ACK 7aa5b67132dfb71e915675a3dbcb806284e08197 🦀\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: re-ACK 7aa5b67132dfb71e915675a3dbcb806284e08197 🦀\r\nOyyQPnNeYeoIGyqxI2eGBLJtsektDZ5KnIzt+KvErGx+bi0/DbkCdDqPmIikup+yrN8NOjrjECe+kKIFjdHvAg==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-07-30T16:23:33Z"
+        }
+      ]
+    },
+    {
+      "number": 33098,
+      "title": "qt: clear command history when clearing the console",
+      "body": "Clears the command history in the qt console when the user clears the console output. ",
+      "state": "closed",
+      "user": "waketraindev",
+      "created_at": "2025-07-30T11:08:21Z",
+      "updated_at": "2025-07-30T11:50:52Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33098",
+      "labels": [
+        "GUI"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33098.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-30T11:08:26Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "That seems like a good idea, but maybe open the PR on the GUI repo: https://github.com/bitcoin-core/gui",
+          "created_at": "2025-07-30T11:23:50Z"
+        }
+      ]
+    },
+    {
+      "number": 33095,
+      "title": "ci: Remove unused ci/lint_run_all.sh",
+      "body": "As per the file content, this can be deleted now. (Stale re-runs are no longer performed for `lint` right now and the CI will be reworked anyway)",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-07-30T07:35:10Z",
+      "updated_at": "2025-07-30T07:36:36Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33095",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33095.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-30T07:35:14Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Hmm, let's just do it in the other pull.",
+          "created_at": "2025-07-30T07:36:32Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33097,
+      "title": "fuzz: `txgraph`: Assertion `cmp == 0' failed",
+      "body": "```\n$ echo \"oK+goKCgArv/GMG0oAkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOTkAr6AAAgIC/wICAgICAgICCAAAAAAAAAAAAAgAAP8A/wACAAAAAAAAAAAAAAAAAAAAAAAAAAAAABACAgICf/8AoKAAAAAAAAAAAAgAAP8AAgAAAAAAABACAgICf/8AAAAAIAAAAAAAAAAAAAAACAAA/wACgIAAAAAAgIAAAAAAAAAAAAAACAAA/wACAAAAAAAAAAAAAAAAAAAAAAAAAAAAABACAgICf/8AoF4AFgAAAAAAAAAIAAD/AAIAAICAAAA=\" | base64 --decode > txgraph.crash\n$ FUZZ=txgraph ./fuzz txgraph.crash \nfuzz: test/fuzz/txgraph.cpp:1057: void txgraph_fuzz_target(FuzzBufferType): Assertion `cmp == 0' failed.\n==6038== ERROR: libFuzzer: deadly signal\n/usr/bin/llvm-symbolizer: error: 'linux-vdso.so.1': No such file or directory\n   #0 0xaaaae4109fc4 in __sanitizer_print_stack_trace /llvm-project/compiler-rt/lib/asan/asan_stack.cpp:87:3\n   #1 0xaaaae4005890 in fuzzer::PrintStackTrace() /llvm-project/compiler-rt/lib/fuzzer/FuzzerUtil.cpp:210:5\n   #2 0xaaaae3feae50 in fuzzer::Fuzzer::CrashCallback() /llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:231:3\n   #3 0xffff856b57b8  (linux-vdso.so.1+0x7b8) (BuildId: d721ef96679f76202b9d0a21a3db1069daa73c69)\n   #4 0xffff851b7dbc  (/lib/aarch64-linux-gnu/libc.so.6+0x87dbc) (BuildId: 817c172ae01de5c5673c0e5a5d33e8fa0d4c6bd5)\n   #5 0xffff8516697c in raise (/lib/aarch64-linux-gnu/libc.so.6+0x3697c) (BuildId: 817c172ae01de5c5673c0e5a5d33e8fa0d4c6bd5)\n   #6 0xffff85151ac0 in abort (/lib/aarch64-linux-gnu/libc.so.6+0x21ac0) (BuildId: 817c172ae01de5c5673c0e5a5d33e8fa0d4c6bd5)\n   #7 0xffff8515f9b8  (/lib/aarch64-linux-gnu/libc.so.6+0x2f9b8) (BuildId: 817c172ae01de5c5673c0e5a5d33e8fa0d4c6bd5)\n   #8 0xaaaae461b4b0 in txgraph_fuzz_target(std::span<unsigned char const, 18446744073709551615ul>) txgraph.cpp\n   #9 0xaaaae4791604 in LLVMFuzzerTestOneInput fuzz.cpp\n   #10 0xaaaae3fec344 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13\n   #11 0xaaaae3fd7ff8 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:328:6\n   #12 0xaaaae3fdd4ac in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:863:9\n   #13 0xaaaae4006070 in main /llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10\n   #14 0xffff85152298  (/lib/aarch64-linux-gnu/libc.so.6+0x22298) (BuildId: 817c172ae01de5c5673c0e5a5d33e8fa0d4c6bd5)\n   #15 0xffff85152378 in __libc_start_main (/lib/aarch64-linux-gnu/libc.so.6+0x22378) (BuildId: 817c172ae01de5c5673c0e5a5d33e8fa0d4c6bd5)\n   #16 0xaaaae3fd19ac in _start (/workdir/out/libfuzzer_asan/fuzz+0x14819ac)\n```",
+      "state": "closed",
+      "user": "dergoegge",
+      "created_at": "2025-07-30T08:17:02Z",
+      "updated_at": "2025-08-21T09:51:31Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33097",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "dergoegge",
+          "body": "I'm guessing this is new after #32263 was merged yesterday. cc @sipa @glozow ",
+          "created_at": "2025-07-30T08:20:31Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Do you recall the fuzzing engine used to find this? I tried libFuzzer on 8 threads for two weeks, but haven't re-found it so far.",
+          "created_at": "2025-08-21T08:45:07Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "The crashing input was found by afl++ but libFuzzer and honggfuzz were also part of the campaign (probably took ~64 CPU hours).",
+          "created_at": "2025-08-21T09:51:31Z"
+        }
+      ]
+    },
+    {
+      "number": 33096,
+      "title": "ci: failure in wallet_migration.py",
+      "body": "https://cirrus-ci.com/task/5576386364047360?logs=ci#L1549:\n```bash\n[15:21:12.678]  node0 2025-07-29T19:21:12.075826Z [httpworker.4] [rpc/request.cpp:243] [void JSONRPCRequest::parse(const UniValue&)] [rpc] ThreadRPCServer method=listwalletdir user=__cookie__ \n[15:21:12.678]  test  2025-07-29T19:21:12.085334Z TestFramework (ERROR): Unexpected exception \n[15:21:12.678]                                    Traceback (most recent call last):\n[15:21:12.678]                                      File \"/ci_container_base/test/functional/test_framework/test_framework.py\", line 195, in main\n[15:21:12.678]                                        self.run_test()\n[15:21:12.678]                                      File \"/ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/test/functional/wallet_migration.py\", line 1575, in run_test\n[15:21:12.678]                                        self.test_default_wallet()\n[15:21:12.678]                                      File \"/ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/test/functional/wallet_migration.py\", line 684, in test_default_wallet\n[15:21:12.678]                                        assert backup_path.exists()\n[15:21:12.678]                                    AssertionError\n[15:21:12.678]  test  2025-07-29T19:21:12.087106Z TestFramework (DEBUG): Closing down network thread \n```\n\nSeems to be caused by #32273.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-07-30T08:16:46Z",
+      "updated_at": "2025-08-01T08:51:13Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33096",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "fanquake",
+          "body": "Other failures:\n\nhttps://cirrus-ci.com/task/6693205086830592?logs=ci#L1556\nhttps://cirrus-ci.com/task/5499213573783552?logs=ci#L1556",
+          "created_at": "2025-07-30T08:20:02Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "The failures are so frequent that I've disabled the DrahtBot silent-merge-conflict detection for now",
+          "created_at": "2025-07-30T08:44:10Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "https://github.com/bitcoin/bitcoin/actions/runs/16619385866/job/47020380651?pr=32989#step:12:17491",
+          "created_at": "2025-07-30T10:24:04Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "https://cirrus-ci.com/task/5410514727075840?logs=ci#L1549",
+          "created_at": "2025-07-30T15:14:50Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "Should the PR be reverted while being fixed? It's causing a lot of intermittent failures...",
+          "created_at": "2025-07-30T15:16:05Z"
+        },
+        {
+          "user": "achow101",
+          "body": "I should have a fix in a few minutes.",
+          "created_at": "2025-07-30T17:05:32Z"
+        },
+        {
+          "user": "achow101",
+          "body": "#33104",
+          "created_at": "2025-07-30T17:18:08Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 9,
+    "issues": 2
+  }
+}

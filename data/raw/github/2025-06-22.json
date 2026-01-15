@@ -1,0 +1,98 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:51:38.098376+00:00",
+  "date": "2025-06-22",
+  "pull_requests": [
+    {
+      "number": 32796,
+      "title": "rpc: use CScheduler for HTTPRPCTimer",
+      "body": "This removes the dependency on libevent for events scheduled by RPC commands, like re-locking a wallet some time after decryption with `walletpassphrase`.\r\n\r\nThis PR is cherry-picked from #32061 and is part of [removing libevent from the project](https://github.com/bitcoin/bitcoin/issues/31194)\r\n\r\nThis does result in a slightly less reliable timing compared to libevent as described in #32793. In the test I added a little bit more time for the event to execute. I don't think this a big deal but reviewers lemme know what you think.",
+      "state": "closed",
+      "user": "pinheadmz",
+      "created_at": "2025-06-22T23:37:22Z",
+      "updated_at": "2025-07-03T13:14:11Z",
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32796",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32796.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fjahr](https://github.com/bitcoin/bitcoin/pull/32796#issuecomment-3006057356), [vasild](https://github.com/bitcoin/bitcoin/pull/32796#pullrequestreview-2961018364), [janb84](https://github.com/bitcoin/bitcoin/pull/32796#pullrequestreview-2961081158), [furszy](https://github.com/bitcoin/bitcoin/pull/32796#pullrequestreview-2966805286) |\n| Stale ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32796#issuecomment-3001064611) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32061](https://github.com/bitcoin/bitcoin/pull/32061) (Replace libevent with our own HTTP and socket-handling implementation by pinheadmz)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-22T23:37:26Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "re-ACK e70c2087b00f6cfe1a95e9d82e8cb7e01b7f7675 💱\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: re-ACK e70c2087b00f6cfe1a95e9d82e8cb7e01b7f7675 💱\r\n0Z8+Lq6UK9Umi7X/Sw90DJybA2GqemOEJTj3easwUe4mQHVwlv4o89DbF9488dTerb2ROAWnXTiw5wZG95CsAg==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-06-24T16:00:00Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "Code review ACK d06942c6731d5db7326bc565655b33a379a5d9b0",
+          "created_at": "2025-06-25T20:30:37Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "@furszy I think it makes more sense to move the validation signals to their own scheduler thread if we are really concerned scheduled events will slow down block validation. `walletpassphrase` is currently the only RPC that schedules a new event, so all this PR will add to the queue are calls to `CWallet::Lock()` after the user needs a private key (and in the GUI an entirely different timer is used for this, based in Qt!).\r\n\r\nWe can also run some benchmarks, ie unlock 1000 wallets during IBD and try to evaluate the impact on validation signals.\r\n\r\n@maflcko do you have any instincts about this?",
+          "created_at": "2025-06-27T14:17:36Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> `walletpassphrase` is currently the only RPC that schedules a new event, so all this PR will add to the queue are calls to `CWallet::Lock()` after the user needs a private key\r\n\r\n`WalletContext` has its own `CScheduler` as well. I think it would probably make more sense to drop `HTTPRPCTimer` altogether and have `walletpassphrase` schedule the lock by itself instead of taking a trip through the interfaces.\r\n\r\nEdit: It's the same `CScheduler`, but would probably still make for a good cleanup.",
+          "created_at": "2025-06-27T20:44:21Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "> drop HTTPRPCTimer altogether\r\n\r\nInteresting, I can try that approach... for that matter, could we rip out `QtRPCTimerInterface` and the base class `RPCTimerInterface` as well? I don't think any of it is used outside of `walletpassphrase` and any future RPCs we add can just use the node/wallet scheduler as well...",
+          "created_at": "2025-06-28T12:43:23Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "@achow101 I started working on calling `WalletContext.scheduler` directly from `walletpassphrase()` but there is one nice extra feature we get from using `RPCRunLater` and `RPCTimerBase` which is that timers are mapped by name and can be removed by name if, for example, the user calls the RPC again with a different timeout value. This might result in a change of behavior where the shorter timer will still lock the wallet, and the longer timer will sit in the queue and eventually do nothing. Current behavior I believe is to only honor the most recent `walletpassphrase` argument.",
+          "created_at": "2025-07-02T14:48:10Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> which is that timers are mapped by name and can be removed by name if, for example, the user calls the RPC again with a different timeout value.\r\n\r\nThis behavior would already be changing in this PR. Deleting the `HTTPRPCTimer` does not de-schedule the task and it will still execute later.\r\n\r\n> Current behavior I believe is to only honor the most recent walletpassphrase argument.\r\n\r\nThis behavior would still be maintained even if the task runs multiple times because there is an explicit check in the relock function for whether the current run of that function is actually the most recently scheduled relock.",
+          "created_at": "2025-07-02T21:44:44Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "https://github.com/bitcoin/bitcoin/blob/a92e8b10a5fb1ac25484aa17787e27b4a8632f69/src/wallet/rpc/encrypt.cpp#L103-L104\r\n\r\n🤦  yup clear as day thanks",
+          "created_at": "2025-07-02T23:01:34Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "Opened https://github.com/bitcoin/bitcoin/pull/32862 with the suggested approach, closing this in favor of that.",
+          "created_at": "2025-07-03T11:06:40Z"
+        }
+      ]
+    },
+    {
+      "number": 32795,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "reregd",
+      "created_at": "2025-06-22T07:09:43Z",
+      "updated_at": "2025-06-24T15:05:38Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32795",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32795.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-22T07:09:47Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 2,
+    "issues": 0
+  }
+}

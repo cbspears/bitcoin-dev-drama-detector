@@ -1,0 +1,151 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:33:46.525048+00:00",
+  "date": "2025-11-22",
+  "pull_requests": [
+    {
+      "number": 33926,
+      "title": "Align legacy script policy with P2SH policy in AreInputsStandard",
+      "body": "Legacy scripts currently require solvability, while P2SH scripts only check sigop count. This asymmetry causes some non-solvable legacy scripts to be rejected even when they have acceptable sigop counts, while equivalent P2SH scripts would be accepted.\n\nThis change updates AreInputsStandard to check sigop count for legacy scripts instead of requiring solvability, matching P2SH behavior. Non-solvable legacy scripts with sigop counts within the limit are now accepted, consistent with P2SH.\n\nThis implements the approach suggested by roconnor-blockstream in #33882 to address the policy asymmetry between legacy and P2SH script redemption.\n\nThe test suite covers boundary conditions (0, 14, 15, and 16 sigops), different sigop types (CHECKSIG and CHECKMULTISIG), multiple inputs, and regression cases to ensure existing behavior for standard and WITNESS_UNKNOWN scripts is preserved.",
+      "state": "closed",
+      "user": "151henry151",
+      "created_at": "2025-11-22T19:03:51Z",
+      "updated_at": "2025-11-29T21:40:52Z",
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33926",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33926.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33645](https://github.com/bitcoin/bitcoin/pull/33645) (refactor: optimize: avoid allocations in script & policy verification by Raimo33)\n* [#29060](https://github.com/bitcoin/bitcoin/pull/29060) (Policy: Report debug message why inputs are non standard by ismaelsadeeq)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible places where named args may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- AddCoins(coins, CTransaction(txFrom), 0) in src/test/script_p2sh_tests.cpp\n\n\n\n<sup>2025-11-27</sup>\n",
+          "created_at": "2025-11-22T19:03:57Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `macOS native, fuzz`: https://github.com/bitcoin/bitcoin/actions/runs/19599919918/job/56129931926</sub>\n<sub>LLM reason (✨ experimental): Fuzz target crash: assertion failed (mempoolDuplicate.HaveCoin) in txmempool.cpp during process_messages, causing non-zero exit.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-11-22T19:49:04Z"
+        },
+        {
+          "user": "151henry151",
+          "body": "Our change allows NONSTANDARD legacy scripts with acceptable sigop counts to pass AreInputsStandard, which breaks tests that relied on those scripts being rejected.\r\n\r\np2p_segwit.py uses a NONSTANDARD script (0 sigops) as self.utxo[0] that now passes instead of being rejected, so transactions that should be rejected are getting accepted.\r\n\r\nfeature_taproot.py has some spenders with NONSTANDARD scripts that are now allowed, so the test's standardness checks don't match the new policy.\r\n\r\nI'll fix both by updating the tests to match the new policy.",
+          "created_at": "2025-11-22T21:33:07Z"
+        },
+        {
+          "user": "151henry151",
+          "body": "I updated the tests to match the new policy. The NONSTANDARD script in p2p_segwit.py now passes AreInputsStandard since it has zero sigops. For test_segwit_versions, I switched the input from the NONSTANDARD UTXO to the standard UTXOs created earlier, so the transaction now passes all checks and gets accepted. For feature_taproot.py, I adjusted the is_standard flag for the compat/nocsa spender because bare NONSTANDARD scripts with low sigop counts now pass policy checks. \r\n\r\nPlease check this all out and let me know if this looks correct or needs any adjustment.",
+          "created_at": "2025-11-23T18:34:15Z"
+        },
+        {
+          "user": "151henry151",
+          "body": "The `process_messages` fuzz test fails with `Assertion failed: (mempoolDuplicate.HaveCoin(txin.prevout))` at `txmempool.cpp:727` after allowing NONSTANDARD scripts with ≤15 sigops to pass `AreInputsStandard`.\r\n\r\nI added a coin validity check in `AreInputsStandard` (verifying `coin.IsSpent()` before `GetSigOpCount`), but the test still fails. Since this PR only aligns policy behavior and shouldn't require mempool changes, perhaps the issue is how the policy change interacts with the consistency check.\r\n\r\nI'm not seeing why transactions accepted by the policy fail the consistency check. Any help diagnosing this would be appreciated. Perhaps you might have some ideas, @roconnor-blockstream ?",
+          "created_at": "2025-11-24T21:30:23Z"
+        },
+        {
+          "user": "roconnor",
+          "body": "My best guess is that making legacy script standard means that randomly generated ScriptPubKeys are now generally mempool acceptable whereas before only very few specifically shaped ScriptPubKeys could be accepted and weren't being generated by the fuzzer.  This is exposing some kind of error in the `process_messages` fuzz test harness.\r\n\r\nOne thing to explore is to see if reverting PR #32822 makes the failure disappear.  If so then we maybe narrowed down the problem to the recent changes to this fuzz test.\r\n\r\nAnother angle we might take is that legacy script perhaps ought to require at least one checksig operation, otherwise it is unsecured and, theoretically, eligible as an upgrade mechanism similar to Segwit.  This might sweep any potential existing  `process_messages` fuzz test issues under the rug.",
+          "created_at": "2025-11-25T17:56:44Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Closing, to break the bot loop",
+          "created_at": "2025-11-27T08:16:22Z"
+        },
+        {
+          "user": "151henry151",
+          "body": "Sorry about that -- not trying to falsely represent anything here. I thought I had a pretty good start with my changes to policy.cpp, but then I've been struggling with getting the tests working. I know that overuse of LLMs is frowned upon and I realize that accidentally committing and pushing a bunch of MD files with notes generated by an LLM is not a good look, but I'm going to keep trying to figure this out locally and hope to make a valuable contribution here. I also realize that I should have got my code to a point where the tests are passing first before opening the PR so closing it makes sense, sorry. I've been applying myself to this enthusiastically but it's proven to be more difficult than I anticipated, and I have been leveraging every tool available to me to try and get a good result that will be of some use to the project.",
+          "created_at": "2025-11-27T08:36:08Z"
+        },
+        {
+          "user": "151henry151",
+          "body": "@maflcko \r\n> Please note that contributors are required to fully understand their authored code themselves.\r\n\r\nI appreciate the feedback and want to make sure it's clear that I do comprehend the code I've written.\r\n\r\nThe core change applies sigop limits to legacy scripts and fixes CLEANSTACK to only apply to P2SH as specified in BIP62. Most of the diff is test updates—the functional tests were using 0-sigop scripts that fail under the new policy, so they needed to be switched to 1-sigop scripts with proper signing.\r\n\r\nI've been stuck on a `p2p_segwit.py` failure for quite a while now. The issue appears to be that `test_non_witness_transaction` creates a UTXO requiring a signature (scriptPubKey: `[OP_TRUE, OP_DROP] * 14 + [OP_CHECKSIG]`), but `test_standardness_v0` later tries to spend it without signing. I've tried several approaches to fix this but haven't been able to get it working, which is where I ended up making too many CI runs trying different things.\r\n\r\nI apologize for the excessive CI usage. I've now set up local testing and will continue debugging there until I have a working solution.",
+          "created_at": "2025-11-27T22:12:45Z"
+        },
+        {
+          "user": "151henry151",
+          "body": "@maflcko I think I've resolved the issue in https://github.com/151henry151/bitcoin/commit/1c67900568\r\n\r\nWitness scripts (P2WSH, P2WPKH, etc.) were incorrectly falling into the legacy script path, so they're now explicitly skipped since they're handled by `IsWitnessStandard`. Anyone-can-spend scripts like `CScript([OP_TRUE])` were being rejected as NONSTANDARD, so they're now explicitly allowed. NONSTANDARD scripts also needed sigop limit checking applied to match P2SH behavior.\r\n\r\nAll tests now pass locally: `p2p_segwit.py`, `feature_taproot.py`, `script_p2sh_tests`, and related policy/script tests.\r\n\r\nCould this PR be reopened so we can verify the fixes pass CI? The previous failures were due to missing edge case handling in the policy logic, which has now been addressed.",
+          "created_at": "2025-11-29T21:34:32Z"
+        }
+      ]
+    },
+    {
+      "number": 33925,
+      "title": "qt: Defer transaction signing until user clicks Send",
+      "body": "Fixes #30070\n\nWhen creating an unsigned PSBT from the GUI, the transaction was already signed during preparation, causing legacy inputs to have non-empty scriptSig fields. The PSBT parser then rejects them.\n\nThis defers signing until the user clicks \"Send\" instead of signing during preparation. Fee calculation still works since transactions can be created without signing.\n\nFollows the approach suggested by @achow101 in the issue comments.",
+      "state": "closed",
+      "user": "151henry151",
+      "created_at": "2025-11-22T16:57:43Z",
+      "updated_at": "2025-11-22T19:20:09Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33925",
+      "labels": [
+        "GUI"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33925.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-22T16:57:50Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Please move this PR to the GUI repository: https://github.com/bitcoin-core/gui/pulls.",
+          "created_at": "2025-11-22T19:16:13Z"
+        }
+      ]
+    },
+    {
+      "number": 33924,
+      "title": "qa: Remove no longer needed `feature_dirsymlinks.py`",
+      "body": "This PR follows up on https://github.com/bitcoin/bitcoin/pull/33842, which removed (1) the [unused `create_directories` workaround](https://github.com/bitcoin/bitcoin/pull/33842/commits/fa9dacdbde7dc18d134019bdad24f47e4dea1dda) and (2) the corresponding [unit test](https://github.com/bitcoin/bitcoin/pull/33842/commits/fa3854e43295f71f5dad8557dd621f0f799b0ee0), but left the related functional test in place. The latter is now being removed.\r\n\r\nFor historical context, see:\r\n- https://github.com/bitcoin/bitcoin/pull/24338\r\n- https://github.com/bitcoin/bitcoin/pull/33842",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-11-22T15:56:30Z",
+      "updated_at": "2025-12-05T11:50:40Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33924",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33924.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-22T15:56:37Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Being able to symlink  the dir seems like a Bitcoin Core feature that should be supported and tested?",
+          "created_at": "2025-11-22T16:54:40Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Being able to symlink the dir seems like a Bitcoin Core feature that should be supported and tested?\r\n\r\nIf \"a Bitcoin Core feature\" is taken to mean something explicitly implemented in the Bitcoin Core codebase, then this PR would indeed reduce test coverage. But that is not the case here.",
+          "created_at": "2025-11-22T21:40:05Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Yeah, I guess there may not be a reduced path coverage inside Bitcoin Core right now, but will it always be that case in the future?\r\n\r\nIs there some other benefit to removing the test?",
+          "created_at": "2025-11-27T08:47:53Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Yeah, I guess there may not be a reduced path coverage inside Bitcoin Core right now, but will it always be that case in the future?\r\n\r\nI think so, as long as Bitcoin Core relies on the C++ filesystem library.\r\n\r\n> Is there some other benefit to removing the test?\r\n\r\nThe only reason to remove it is that it does not test any Bitcoin Core–specific functionality. It is simply a logical reversal of the principle that a test should not be added if it verifies nothing of our own.",
+          "created_at": "2025-11-27T09:52:53Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "~0. Seems fine to leave this for now.",
+          "created_at": "2025-12-05T10:22:28Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 3,
+    "issues": 0
+  }
+}

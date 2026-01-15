@@ -1,0 +1,299 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:06:18.220246+00:00",
+  "date": "2025-08-14",
+  "pull_requests": [
+    {
+      "number": 33191,
+      "title": "net: Provide block templates to peers on request",
+      "body": "Implements the sending side of `SENDTEMPLATE`, `GETTEMPLATE`, `TEMPLATE` message scheme for sharing block templates with peers via compact block encoding/reconstruction.",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2025-08-14T22:33:27Z",
+      "updated_at": "2025-12-09T23:39:38Z",
+      "comments": 19,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33191",
+      "labels": [
+        "P2P",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33191.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33629](https://github.com/bitcoin/bitcoin/pull/33629) (Cluster mempool by sdaftuar)\n* [#33591](https://github.com/bitcoin/bitcoin/pull/33591) (Cluster mempool followups by sdaftuar)\n* [#33300](https://github.com/bitcoin/bitcoin/pull/33300) (fuzz: compact block harness by Crypt-iQ)\n* [#30595](https://github.com/bitcoin/bitcoin/pull/30595) (kernel: Introduce C header API by TheCharlatan)\n* [#30442](https://github.com/bitcoin/bitcoin/pull/30442) (precalculate SipHash constant salt XORs by l0rinc)\n* [#30277](https://github.com/bitcoin/bitcoin/pull/30277) ([DO NOT MERGE] Erlay: bandwidth-efficient transaction relay protocol (Full implementation) by sr-gi)\n* [#29641](https://github.com/bitcoin/bitcoin/pull/29641) (scripted-diff: Use LogInfo over LogPrintf [WIP, NOMERGE, DRAFT] by maflcko)\n* [#29415](https://github.com/bitcoin/bitcoin/pull/29415) (Broadcast own transactions only via short-lived Tor or I2P connections by vasild)\n* [#17783](https://github.com/bitcoin/bitcoin/pull/17783) (common: Disallow calling IsArgSet() on ALLOW_LIST options by ryanofsky)\n* [#17581](https://github.com/bitcoin/bitcoin/pull/17581) (refactor: Remove settings merge reverse precedence code by ryanofsky)\n* [#17580](https://github.com/bitcoin/bitcoin/pull/17580) (refactor: Add ALLOW_LIST flags and enforce usage in CheckArgFlags by ryanofsky)\n* [#17493](https://github.com/bitcoin/bitcoin/pull/17493) (util: Forbid ambiguous multiple assignments in config file by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-08-14T22:33:33Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/48132397637</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by a circular dependency detected during lint checks.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-08-15T00:47:32Z"
+        },
+        {
+          "user": "gmaxwell",
+          "body": "I like this, but is there a way to avoid reintroducing the mempool message transaction spying vulnerability?   Construct the block skipping txn that have not yet been announced?\r\n\r\nWhat are your thoughts on the size of template, I don't think it makes sense to just limit them to being one block in size, perhaps it would be reasonable to be 2 blocks in size so it always can run one block ahead?",
+          "created_at": "2025-08-18T00:11:47Z"
+        },
+        {
+          "user": "sipa",
+          "body": "It may be hard to do that perfectly; for example, if a recent CPFP occurred that bumped a low-fee old parent up high enough to make it into the template, but the child has not been announced to the peer yet. The child can be skipped when sending, but the presence of the parent would stand out and reveal the sender knew about the child.\r\n\r\nIf latency is not very important, there may be a simpler solution: compute the template, and schedule it for sending, but only send it as soon as all transactions in it have been announced.",
+          "created_at": "2025-08-18T00:25:44Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> I like this, but is there a way to avoid reintroducing the mempool message transaction spying vulnerability? Construct the block skipping txn that have not yet been announced?\r\n\r\nEach template is [annotated](https://github.com/ajtowns/bitcoin/blob/355e0b2665952c4c16d98a4212d1f74df8bf5263/src/net_processing.cpp#L5210) with the mempool's `GetSequence()` and a template [won't be presented](https://github.com/ajtowns/bitcoin/blob/355e0b2665952c4c16d98a4212d1f74df8bf5263/src/net_processing.cpp#L4473-L4478) to a peer if its `m_last_inv_sequence` isn't at least that value. Since we announce the highest fee txs first when updating `m_last_in_sequence` that should mean they'll have already seen any txs in the template via INV (or implicitly via INV'ing a child/descendant).\r\n\r\nCurrently it will just immediately give an old template if the current template is too new; it would also be possible to delay providing the current template until `m_last_inv_sequence` is bumped when the next INV is sent, but that would have been a little more complicated and I wanted to keep things as simple as possible.\r\n\r\n> It may be hard to do that perfectly; for example, if a recent CPFP occurred that bumped a low-fee old parent up high enough to make it into the template, but the child has not been announced to the peer yet.\r\n\r\nI think the above should also take care of this case already.\r\n\r\nI guess that reveals a little more ordering info: if you received two high fee txs (tx1 and tx2) in a single INV cycle, but generate a new template after receiving tx1 but before receiving tx2, then you'll reveal the ordering of tx1 and tx2 to your peers. So perhaps aligning template generation with INV messages to inbound peers would be a worthwhile improvement. That would perhaps be a slightly leak to outbounds, but nothing they couldn't discover just by making an inbound connection to you.\r\n\r\n> What are your thoughts on the size of template, I don't think it makes sense to just limit them to being one block in size, perhaps it would be reasonable to be 2 blocks in size so it always can run one block ahead?\r\n\r\nThat seems pretty appealing; I didn't do anything along those lines here mostly to keep things simple, and because waiting for cluster mempool before building even bigger collections of packages seemed plausible. If miners were to enforce their own soft blocksize limits (perhaps to reduce blockchain growth and marginally improve IBD, or as a cartel-style way of limiting supply to push prices up), then a 4M weight template might already account for 2 or more blocks worth of transactions. (signet blocks are mostly limited to 1M weight, eg)\r\n\r\nA double-size block wouldn't give you an ideal predictor for the next block: it would miss timelocked transactions and transactions that exceed ancestor/descendant limits for a single block, though equally a sufficiently clever peer could just include those in a template anyway, especially if consensus/locktime checks weren't being performed. At least they could if they ever saw them in the first place, which is presumably doubtful.\r\n\r\nI'm not sure what level of template overlap is likely in the real world -- if it's just \"everyone thinks these txs are valid, but some nodes don't think these are, and others don't think these other ones are\", maybe that just adds up to ~6MB of memory total across all your peers (even if there are simultaneous surges across both unusual types of transactions) plus maybe 15% to account for churn. On the other hand, at times there might conceivably be a lot of double spends in the top of varius mempools, (perhaps posted to the network by chainanalysis-type nodes in order to try to discover the p2p network's structure to help figure out where txs came from or which nodes are most likely to be building templates for mining). If that's the case, it might not be sensible to try to keep all your peers' conflicting template txs in memory, and I think there's probably a variety of different approaches that might be worth trying there.",
+          "created_at": "2025-08-18T02:31:13Z"
+        },
+        {
+          "user": "gmaxwell",
+          "body": "The timelocks could be relaxed analogous to increasing the size however. With MTP we essentially know the lock criteria for one block out.\r\n\r\nI don't really think the memory usage is a concern, -- because there is just not a need to constantly do this with all peers in the face of memory pressure.\r\n\r\nYou could add an additional message that lets peers say \"I have X fees in Y weight in my template\" -- if the max size they were targeting was standardized then this would be a pretty good indicator when someone you haven't been syncing against has something you might want to see.  Perhaps multiple breakpoints, like a little fee/weight curve communicated in a dozen bytes.\r\n",
+          "created_at": "2025-08-18T21:52:01Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Nice idea.\r\n\r\nA couple of questions:\r\n\r\n1. How do nodes build the block template they share with peers? When they use only their mempool to build those templates, I don’t think that the transactions with diverging mempool policy will relay through the network and improve the compact block reconstruction process via this mechanism. Only peers whose outbound connections are miners will benefit.\r\n\r\n2. We don’t accept transactions in the mempool that have divergent policy because we deem them non-standard. How does this proposal prevent a scenario where an adversary stuff transactions that are harmful to peers, forcing them to validate and save them? (I think this is where weak blocks are superior to this proposal because they show that work has been done previously.)\r\n\r\n3. Is there a limit to the memory used to store the transactions that violate a node’s mempool policy but are received from peers? How do you decide which to keep and which to evict when the limit is reached?\r\nOne approach could be linearization based on incentive compatibility and then evicting low-fee transactions, although this has the drawback of then making us not saving transactions paid for via out-of-band.\r\n\r\n",
+          "created_at": "2025-08-19T10:24:15Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "> If latency is not very important, there may be a simpler solution: compute the template, and schedule it for sending, but only send it as soon as all transactions in it have been announced.\r\n\r\nMaybe a stupid question and I'm not understanding something, but what is the point of this if we have to wait for all transactions to be announced? Isn't the whole idea to make sure our peers know about what we think will be the next block?",
+          "created_at": "2025-08-19T21:17:02Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "@ismaelsadeeq \r\n\r\n> How does this proposal prevent a scenario where an adversary stuff transactions that are harmful to peers, forcing them to validate and save them\r\n\r\nThere's no need to fully validate these transactions you are given. If they violate your own policy you just won't include them in your own mempool (or include them in a block template).",
+          "created_at": "2025-08-20T18:03:26Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> 1. How do nodes build the block template they share with peers?\r\n\r\nThe same way they build a block template for the `getblocktemplate` RPC (well, except ignoring config options that might otherwise reduce the block size). See [here](https://github.com/ajtowns/bitcoin/blob/355e0b2665952c4c16d98a4212d1f74df8bf5263/src/net_processing.cpp#L5192-L5203).\r\n\r\n> When they use only their mempool to build those templates, I don’t think that the transactions with diverging mempool policy will relay through the network and improve the compact block reconstruction process via this mechanism.\r\n\r\nThis doesn't aim to improve tx relay in most cases. The scenario this helps with is when a subset of the network has a relaxed policy compared to your node (eg, the librerelay nodes on the network vs you; or the core nodes on the network vs a default knots node; or nodes that have adopted newer policy/replacement rules (eg TRUC, lower min fee, pay to anchor, etc) vs an older/non-enabled node). In that case, if you happen to peer with one of those nodes that have a relaxed policy, and you request templates from that node, you'll be able to reconstruct blocks mined with that relaxed policy without needing a round trip.\r\n\r\n(The main case where it might improve relay is when a tx was evicted from many but not all mempools due to size limits, but eventually mempools clear and its eligible again, but has not already been widely rebroadcast for other reasons. In some circumstances it also might help with replacement cycling attacks, allowing the victim transaction to automatically be rebroadcast once the conflicting tx has been replaced)\r\n\r\n> 2. We don’t accept transactions in the mempool that have divergent policy because we deem them non-standard. How does this proposal prevent a scenario where an adversary stuff transactions that are harmful to peers, forcing them to validate and save them?\r\n\r\nNote that this PR does not include code for requesting templates, only providing them; so there's no change here from this PR alone.\r\n\r\nThe proof of concept code linked from https://delvingbitcoin.org/t/sharing-block-templates/1906/ that does request templates grabs templates from outbound/manual peers, and validates any txs in templates that aren't in the mempool according to the usual standardness rules, adding them to the mempool if they pass. That's no more harmful (CPU-wise) than receiving the same txs via INV/GETDATA, and the memory usage is limited by only keeping one template per selected peer, and rejecting templates that are more than 1MvB.\r\n\r\nIf you were to validate txs in templates against consensus rules only (without the additional standardness rules), then that could be more costly (you'd be missing the tx size limit and BIP 54 rules so might be hitting significant amounts of hashing), though. The proof of concept code doesn't do that.\r\n\r\n> 3. Is there a limit to the memory used to store the transactions that violate a node’s mempool policy but are received from peers? How do you decide which to keep and which to evict when the limit is reached?\r\n>    One approach could be linearization based on incentive compatibility and then evicting low-fee transactions, although this has the drawback of then making us not saving transactions paid for via out-of-band.\r\n\r\nIf transactions in templates are ordered by (modified) fee rate, then you could keep the first transactions in a template, which might help you preserve transactions that were paid for out-of-band if you have a peer that's aware of the out-of-band payments. That could also work for things like mempool.space's accelerator product, where there's an API that will tell you about the prioritised transactions, provided a sufficient number of nodes use the API and prioritise transactions accordingly.",
+          "created_at": "2025-08-21T04:51:08Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> Maybe a stupid question and I'm not understanding something, but what is the point of this if we have to wait for all transactions to be announced? Isn't the whole idea to make sure our peers know about what we think will be the next block?\r\n\r\nIf you include a transaction in a template you send to a peer, that implicitly announces the tx to that peer.\r\n\r\nThe reason we delay announcing txs to a peer is to add some uncertainty about when precisely we received a transaction, and the order in which we received similarly recent transactions -- knowing when many nodes in the network first heard about transactions with precision allows you to make a very good guess about how the network is structured and who heard about a transaction first, which makes it easier to work out who created the transaction which is bad for privacy, and possibly identify weak points in the p2p network to better plan DoS attacks.\r\n\r\nSo preserving the same timing uncertainty when adding a potentially new way to announce txs seems worthwhile.",
+          "created_at": "2025-08-21T04:57:23Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "Bumped the size of templates up to 2MvB, and added `latest_template_weight` and `latest_template_tx` to `gettemplateinfo` to report on the size of the current template.",
+          "created_at": "2025-08-21T05:52:11Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `ARM, unit tests, no functional tests`: https://github.com/bitcoin/bitcoin/runs/48553661676</sub>\n<sub>LLM reason (✨ experimental): The failure is caused by a missing initializer for the constexpr static member 'ALLOW_OVERSIZED_BLOCKS' in miner.h.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-08-21T06:54:20Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "Rebased over #33253 but not optimised to iterate over template txs efficiently.",
+          "created_at": "2025-08-29T13:05:52Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "from CI: [09:20:21.596] SUMMARY: MemorySanitizer: use-of-uninitialized-value /ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/src/crypto/./crypto/siphash.cpp:132:5 in SipHashUint256(unsigned long, unsigned long, uint256 const&)",
+          "created_at": "2025-08-30T14:37:19Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "Dropped the code to use our own prior templates for compact block reconstruction to keep this patchset simple.",
+          "created_at": "2025-09-16T07:59:24Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "Patchset to also request templates from outbound peers is at https://github.com/ajtowns/bitcoin/commits/202508-sendtemplate3/",
+          "created_at": "2025-09-19T15:52:13Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> On a conceptual level, this seems like a strong fingerprinting vector (tor/clearnet response would be identical if requests happen roughly at the same time and the same template is used). I'm not sure if we have given up on that, considering that there seems to be no lack of other existing fingerprinting methods.\r\n\r\nThis might be a little better than it seems at first glance, because the top 2MvB of txs is likely to be fairly common across nodes running similar mempool acceptance policies, and you don't benefit from being able to send bait transactions at bottom-of-mempool feerates.\r\n\r\nIt would be possible to generate separate templates at separate times for each private network you're listening on; though the similarity between templates might still imply your two public interfaces are very nearby on the network. Just observing INV messages via a node that never announces INVs itself is probably equally effective at fingerprint a node's different interfaces.\r\n\r\nIt might also be that there's a fundamental tension between trying to relay transactions and blocks as quickly as possible and trying to make your node hard to identify -- a node that's only available over tor probably has good privacy, but bad latency for example; likewise a node that only relays blocks but not transactions.\r\n\r\nAnyway, open to suggestions on how to improve things here.",
+          "created_at": "2025-09-21T06:20:00Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-11-04T17:35:00Z"
+        }
+      ]
+    },
+    {
+      "number": 33190,
+      "title": "build: Enable ENABLE_IPC option by default",
+      "body": "This change toggles `-DENABLE_IPC` default value from `OFF` to `ON` so IPC features will be compiled by default in source builds.\r\n\r\nThe main feature this provides is an [`-ipcbind`](https://github.com/bitcoin/bitcoin/blob/8405fdb06e8ff3220590bfac84e98547067ec6b7/src/init.cpp#L685) option that lets the node listen on a unix socket and expose a [mining interface](https://github.com/bitcoin/bitcoin/blob/8405fdb06e8ff3220590bfac84e98547067ec6b7/src/interfaces/mining.h#L77-L135) to support Stratum v2 mining software.\r\n\r\nThis change doesn't affect `bitcoind` or `bitcoin-qt` since IPC features are implemented in separate binaries accessible through a new [`bitcoin`](https://github.com/bitcoin/bitcoin/blob/8405fdb06e8ff3220590bfac84e98547067ec6b7/doc/release-notes-31375-31679.md) command.\r\n\r\n---\r\n\r\nThis PR is a minimal change that just enables IPC by default in cmake. #31802 is more comprehensive and additionally enables IPC by default in depends, uses it in more CI jobs, and updates documentation. If you like this PR, you will love #31802!\r\n\r\nI prefer the approach in #31802 of enabling IPC in source builds, release binaries, and CI at the same time, without an intermediate state where source and binary releases are different. But there was a comment in todays [irc meeting](https://www.erisian.com.au/bitcoin-core-dev/log-2025-08-14.html#l-239) \"i think it'd be nice if we had IPC enabled in from-source builds by default for a while before we add it to releases\" and there have been similar comments previously, so maybe this PR will be of interest if we want to take that approach.\r\n\r\n---\r\n\r\nThis PR is part of the [process separation project](https://github.com/bitcoin/bitcoin/issues/28722).",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-08-14T20:33:50Z",
+      "updated_at": "2025-08-19T16:59:14Z",
+      "comments": 13,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33190",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33190.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/33190#issuecomment-3189808634), [Sjors](https://github.com/bitcoin/bitcoin/pull/33190#issuecomment-3190777618) |\n| Stale ACK | [ismaelsadeeq](https://github.com/bitcoin/bitcoin/pull/33190#pullrequestreview-3123892855), [josibake](https://github.com/bitcoin/bitcoin/pull/33190#issuecomment-3191583377), [sipa](https://github.com/bitcoin/bitcoin/pull/33190#issuecomment-3196869655) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33201](https://github.com/bitcoin/bitcoin/pull/33201) (Add functional test for IPC interface by sipa)\n* [#31802](https://github.com/bitcoin/bitcoin/pull/31802) (Add bitcoin-{node,gui} to release binaries for IPC by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-08-14T20:33:55Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK",
+          "created_at": "2025-08-14T20:37:31Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Concept ACK. I prefer #31802 but that's a simple rebase after this lands.\r\n\r\nYou'll probably want to include 71f29d4fa90aaeb6472b3ce9d4f4e97f85ed487b from that PR here to update the build docs.",
+          "created_at": "2025-08-15T06:44:21Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I want to elaborate on why I prefer #31802 to this change.\r\n\r\nThe idea of enabling IPC in source builds before binary releases sounds nice at first, but more thought, stops really making sense.\r\n\r\nFor one thing, this is not how we've rolled out any other features I'm aware of. Most features aren't toggled by build flags, but theoretically any new feature could be gated by a build flag, enabled first in source builds, and later in binary releases. We don't roll out features this way because it's cumbersome and offers no clear benefits. I don't think IPC is different from other features in this respect. Even looking at the last feature that was toggled by a build flag, SQLite, there was never a point where it was enabled in source builds but disabled in depends and binary releases (see #19077).\r\n\r\nI think some people like the idea of turning IPC on in source builds but leaving it off in depends and binary releases because they think it would lead to more feature testing before inclusion in a binary release. But IPC has already been enabled in the \"dev-mode\" CMake preset for as long as that preset has existed. And since the only real functionality added by ENABLE_IPC is the third-party mining interface, I doubt changing its default will meaningfully increase testing, unless there's a user or developer who (1) is willing to write or download a program that connects to the interface, (2) builds Bitcoin Core from source with default CMake options, but (3) is unwilling to manually enable ENABLE_IPC. That seems like a narrow group.\r\n\r\nThe only possible benefit I see from changing the default to ON in source builds is that it would confirm IPC builds and tests work on more platforms and with a wider variety of build options beyond what CI covers. That has some value, but I don't see build flag compatibility or platform-specific bugs as major concerns, so putting the feature in a half-enabled state just to get a few more builds and automated tests doesn't seem appealing.\r\n\r\nI have no objection to this change if it helps us move forward. I just want to explain why I don't think it's very useful on its own, and why I dropped it from #31741 after initially implementing it there.",
+          "created_at": "2025-08-15T13:46:44Z"
+        },
+        {
+          "user": "josibake",
+          "body": "ACK https://github.com/bitcoin/bitcoin/pull/33190/commits/732c134bfc1208377f449e5956e01dd8b78d73d9\r\n\r\n> The only possible benefit I see from changing the default to ON in source builds is that it would confirm IPC builds and tests work on more platforms and with a wider variety of build options beyond what CI covers\r\n\r\nWhile I also prefer https://github.com/bitcoin/bitcoin/pull/31802 (and largely agree with everything you said in the rest of your comment), I think there is one additional benefit, namely signalling progress to external projects. I do think this PR would be most impactful if it also included a release note for v30 to inform users this is now on by default when compiling from source, with the expectation it will be fully turned on in the v31 release.",
+          "created_at": "2025-08-15T14:05:29Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> I think there is one additional benefit, namely signalling progress\r\n\r\nYes that's a great point, and reminds me that even without this PR or #33190 we could add a release note saying that in 30.0 the Mining interface has new `checkBlock` and `waitNext` methods (see `git diff v29.0..origin/master src/ipc/capnp/mining.capnp`) and the `WITH_MULTIPROCESS` cmake option has been renamed to `ENABLE_IPC`.",
+          "created_at": "2025-08-15T14:25:20Z"
+        },
+        {
+          "user": "sipa",
+          "body": "ACK 732c134bfc1208377f449e5956e01dd8b78d73d9. See also tests added in #33201.\r\n\r\nI think #31802 should be seen as a successor to this PR, regardless of which release it goes into.",
+          "created_at": "2025-08-18T13:24:59Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> You'll probably want to include https://github.com/bitcoin/bitcoin/commit/71f29d4fa90aaeb6472b3ce9d4f4e97f85ed487b from that PR here to update the build docs.\r\n\r\nYou'll also need to update the valgrind and valgrind fuzz CI jobs (run in qa-assets / elsewhere), otherwise they wont work, after this is merged.",
+          "created_at": "2025-08-18T13:52:00Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Updated 732c134bfc1208377f449e5956e01dd8b78d73d9 -> 5a34156ab65ac7460c26141bb29651477e000d19 ([`pr/ipc-default.3`](https://github.com/ryanofsky/bitcoin/commits/pr/ipc-default.3) -> [`pr/ipc-default.4`](https://github.com/ryanofsky/bitcoin/commits/pr/ipc-default.4), [compare](https://github.com/ryanofsky/bitcoin/compare/pr/ipc-default.3..pr/ipc-default.4) applying fanquake's suggestion https://github.com/bitcoin/bitcoin/pull/33190#issuecomment-3197036114 to update valgrind jobs, and sjors suggestion https://github.com/bitcoin/bitcoin/pull/33190#issuecomment-3190777618 to cherry-pick documentation from https://github.com/bitcoin/bitcoin/pull/31802.\r\n\r\n",
+          "created_at": "2025-08-18T17:32:58Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "re: https://github.com/bitcoin/bitcoin/pull/33190#issuecomment-3196869655\r\n\r\n> I think https://github.com/bitcoin/bitcoin/pull/31802 should be seen as a successor to this PR, regardless of which release it goes into.\r\n\r\n@sipa if you are saying you see this PR as a prerequisite to #31802, that seems ok, but I would be interested to know why.\r\n\r\nAs far as I can tell, there haven't been any other features in bitcoin core enabled by default in non-depends builds but disabled by default by default in depends builds and releases, so it seems like this PR leaves the build configuration in a strange state without a justification for what it is trying to achieve.\r\n\r\nI could imagine it making sense to enable a feature in ordinary source builds that is disabled in depends builds if the feature changed default behavior of the node or wallet, and we wanted to opt developers into the change before rolling it out more widely. But the IPC feature features are off by default so flipping this switch isn't opting anyone into actually using IPC features. All it is doing is compiling some extra files and enabling some extra automated tests in the non-depends build. Which is nice, but does not seem like a compelling reason to leave this feature in an unusual half-enabled state.\r\n\r\nBasically the more I think about this PR the less it seems to make sense to me, and I think I'd like to close it, but no problem keeping it open if others think this is a good idea.",
+          "created_at": "2025-08-18T18:48:33Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Thinking on this further, I think I agree that there isn't a good reason to be making this change. When building from source, we already don't enable several optional features, including the GUI, that we ship in the release binaries. Since the switch to cmake, having the dependencies installed doesn't enable those features automatically, they still need to be enabled explicitly during configuration. Developers should probably be using the dev-mode preset, or similar, which enables a bunch of the optional features so this shouldn't make a difference to them.\r\n\r\nSince this PR defaults the option to on, it isn't really an optional feature anymore. It can be turned off, but if you just do the default configuration, you will need to have capnproto installed.",
+          "created_at": "2025-08-18T19:48:00Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Thanks everybody who commented! Will close this in favor of #31802. If anybody thinks this should be reopened, I'd be curious and can reopen it. But balance of opinion seems to be in favor of not doing this.",
+          "created_at": "2025-08-19T14:00:06Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Note: achow101 commented against enabling ENABLE_IPC by default in https://github.com/bitcoin/bitcoin/pull/31802#pullrequestreview-3129705803 and sipa commented in favor in https://github.com/bitcoin/bitcoin/pull/31802#issuecomment-3201020041, so more discussion about this is happening in the other PR.\r\n\r\nI think the difference comes down to short vs. long term perspective. In the short term it doesn't make a huge amount of sense to turn this one feature on by default while comparable features are turned off. But in the longer term it does not make sense to support and maintain the IPC feature at all if it is not used for more things and turned on by default.",
+          "created_at": "2025-08-19T16:59:14Z"
+        }
+      ]
+    },
+    {
+      "number": 33189,
+      "title": "rpc: followups for min fee changes",
+      "body": "Followups from #33106:\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2271855287\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2271909132\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2274373368\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2275327727\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2275120698\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2275470140\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2271864670\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2275120698\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2277786375\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2277669475\r\n- https://github.com/bitcoin/bitcoin/pull/33106#discussion_r2279251263",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2025-08-14T18:12:56Z",
+      "updated_at": "2025-09-16T19:31:59Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33189",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33189.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [davidgumberg](https://github.com/bitcoin/bitcoin/pull/33189#pullrequestreview-3124852845), [instagibbs](https://github.com/bitcoin/bitcoin/pull/33189#pullrequestreview-3136380951), [ajtowns](https://github.com/bitcoin/bitcoin/pull/33189#issuecomment-3234248084) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-08-14T18:13:00Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `multiprocess, i686, DEBUG`: https://github.com/bitcoin/bitcoin/runs/48115164025</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by a compilation error in mining.cpp due to an unimplemented pure virtual method in an abstract class marked 'final', leading to build failure.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-08-14T21:12:18Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "https://github.com/bitcoin/bitcoin/pull/33189/checks?check_run_id=48115164025:\r\n```bash\r\n[14:51:10.997] In file included from /ci_container_base/src/ipc/capnp/mining-types.h:11:\r\n[14:51:10.997] /ci_container_base/ci/scratch/build-i686-pc-linux-gnu/src/ipc/capnp/mining.capnp.proxy.h:317:8: error: abstract class is marked 'final' [-Werror,-Wabstract-final-class]\r\n[14:51:10.997]   317 | struct ProxyClient<ipc::capnp::messages::Mining> final : public ProxyClientCustom<ipc::capnp::messages::Mining, interfaces::Mining>\r\n[14:51:10.997]       |        ^\r\n[14:51:10.997] /ci_container_base/src/interfaces/mining.h:137:22: note: unimplemented pure virtual method 'GetBlockMinFee' in 'ProxyClient'\r\n[14:51:10.997]   137 |     virtual CFeeRate GetBlockMinFee() const = 0;\r\n[14:51:10.997]       |                      ^\r\n[14:51:10.997] 1 error generated.\r\n```",
+          "created_at": "2025-08-15T13:53:25Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Not everyone knows what \"33106\" is. To avoid it being interpreted as trying to hide something, could you please detail the changes in the PR title and description to help the reviewers and provide full transparency?",
+          "created_at": "2025-08-21T17:34:38Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "> Not everyone knows what \"33106\" is\r\n\r\n\"33106\" refers to the pull request with that number: #33106, which is also linked in the PR description (only 12 times). It's common practice to link to a related PR like this (e.g. for a followup) in the PR title. Hope this helps.",
+          "created_at": "2025-08-22T10:36:01Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> Hope this helps.\r\n\r\nWhy do you think that exactly? You didn't say anything new, my comment was about [making it obvious from the PR's title](https://github.com/bitcoin/bitcoin/pull/32740#issuecomment-2968813874) what it's about (without having to open it) - and not only to ones who [already know](https://github.com/bitcoin/bitcoin/pull/33233#pullrequestreview-3142237551) what 33106 was about.",
+          "created_at": "2025-08-22T19:28:44Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Could remove the outdated comment as well, after 3eab8b724044dc321f70e5eed66b149713158a04?\r\n\r\n```diff\r\ndiff --git a/test/functional/test_framework/mempool_util.py b/test/functional/test_framework/mempool_util.py\r\nindex 9ffd934f5a..3c4609c0b4 100644\r\n--- a/test/functional/test_framework/mempool_util.py\r\n+++ b/test/functional/test_framework/mempool_util.py\r\n@@ -57,8 +57,7 @@ def fill_mempool(test_framework, node, *, tx_sync_fun=None):\r\n     \"\"\"Fill mempool until eviction.\r\n \r\n     Allows for simpler testing of scenarios with floating mempoolminfee > minrelay\r\n-    Requires -maxmempool=5 and assumes -minrelaytxfee\r\n-    is 1 sat/vbyte.\r\n+    Requires -maxmempool=5.\r\n     To avoid unintentional tx dependencies, the mempool filling txs are created with a\r\n     tagged ephemeral miniwallet instance.\r\n     \"\"\"\r\n",
+          "created_at": "2025-08-28T14:04:56Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> \"33106\" refers to the pull request with that number: #33106, which is also linked in the PR description (only 12 times). It's common practice to link to a related PR like this (e.g. for a followup) in the PR title.\r\n\r\nCan we please make this not common practice anymore? Memorising PR numbers is no fun. \"Followups for min fee changes\" would have been fine.",
+          "created_at": "2025-08-28T16:45:10Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "ACK daa40a3ff97346face9dcc64564010a66c91ccb2 ; cursory review, seems reasonable",
+          "created_at": "2025-08-28T16:54:36Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> Not everyone knows what \"33106\" is. To avoid it being interpreted as trying to hide something, could you please detail the changes in the PR title and description to help the reviewers and provide full transparency?\r\n> Can we please make this not common practice anymore? Memorising PR numbers is no fun. \"Followups for min fee changes\" would have been fine.\r\n\r\nAgree with this practice, changed now. The intention was not to \"hide something\" - that's pretty hurtful.",
+          "created_at": "2025-09-02T13:31:29Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "My intention wasn't to hurt, thanks for clarifying the title.",
+          "created_at": "2025-09-02T17:12:23Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33188,
+      "title": "asan: GCC warning about use-after-free",
+      "body": "GCC is warning about use-after-free in the recently added ASAN unpoisoning:\n```bash\n# gcc (GCC) 15.2.1 20250808 (Red Hat 15.2.1-1)\n# cmake -B build -DSANITIZERS=address\nIn file included from /root/bitcoin/src/util/check.h:131,\n                 from /root/bitcoin/src/random.h:13,\n                 from /root/bitcoin/src/test/util/random.h:9,\n                 from /root/bitcoin/src/test/util/setup_common.h:19,\n                 from /root/bitcoin/src/test/util/setup_common.cpp:5:\nIn destructor ‘PoolResource<MAX_BLOCK_SIZE_BYTES, ALIGN_BYTES>::~PoolResource() [with long unsigned int MAX_BLOCK_SIZE_BYTES = 152; long unsigned int ALIGN_BYTES = 8]’,\n    inlined from ‘virtual CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7,\n    inlined from ‘std::pair<CMutableTransaction, long int> TestChain100Setup::CreateValidTransaction(const std::vector<std::shared_ptr<const CTransaction> >&, const std::vector<COutPoint>&, int, const std::vector<CKey>&, const std::vector<CTxOut>&, const std::optional<CFeeRate>&, const std::optional<unsigned int>&)’ at /root/bitcoin/src/test/util/setup_common.cpp:486:1:\n/root/bitcoin/src/support/allocators/pool.h:210:13: warning: pointer ‘chunk’ used after ‘void operator delete(void*, std::align_val_t)’ [-Wuse-after-free]\n  210 |             ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);\n      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~\nIn file included from /root/bitcoin/src/memusage.h:10,\n                 from /root/bitcoin/src/core_memusage.h:10,\n                 from /root/bitcoin/src/kernel/mempool_entry.h:10,\n                 from /root/bitcoin/src/test/util/setup_common.cpp:18:\n/root/bitcoin/src/support/allocators/pool.h:209:31: note: call to ‘void operator delete(void*, std::align_val_t)’ here\n  209 |             ::operator delete ((void*)chunk, std::align_val_t{ELEM_ALIGN_BYTES});\n      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nIn destructor ‘PoolResource<MAX_BLOCK_SIZE_BYTES, ALIGN_BYTES>::~PoolResource() [with long unsigned int MAX_BLOCK_SIZE_BYTES = 152; long unsigned int ALIGN_BYTES = 8]’,\n    inlined from ‘virtual CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7,\n    inlined from ‘std::pair<CMutableTransaction, long int> TestChain100Setup::CreateValidTransaction(const std::vector<std::shared_ptr<const CTransaction> >&, const std::vector<COutPoint>&, int, const std::vector<CKey>&, const std::vector<CTxOut>&, const std::optional<CFeeRate>&, const std::optional<unsigned int>&)’ at /root/bitcoin/src/test/util/setup_common.cpp:486:1:\n/root/bitcoin/src/support/allocators/pool.h:210:13: warning: pointer ‘chunk’ used after ‘void operator delete(void*, std::align_val_t)’ [-Wuse-after-free]\n  210 |             ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);\n      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~\n/root/bitcoin/src/support/allocators/pool.h:209:31: note: call to ‘void operator delete(void*, std::align_val_t)’ here\n  209 |             ::operator delete ((void*)chunk, std::align_val_t{ELEM_ALIGN_BYTES});\n      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n<snip>\nIn file included from /root/bitcoin/src/util/check.h:131,\n                 from /root/bitcoin/src/random.h:13,\n                 from /root/bitcoin/src/test/util/random.h:9,\n                 from /root/bitcoin/src/test/util/setup_common.h:19,\n                 from /root/bitcoin/src/test/transaction_tests.cpp:7:\nIn destructor ‘PoolResource<MAX_BLOCK_SIZE_BYTES, ALIGN_BYTES>::~PoolResource() [with long unsigned int MAX_BLOCK_SIZE_BYTES = 152; long unsigned int ALIGN_BYTES = 8]’,\n    inlined from ‘CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7:\n/root/bitcoin/src/support/allocators/pool.h:210:13: warning: pointer ‘chunk’ used after ‘void operator delete(void*, std::align_val_t)’ [-Wuse-after-free]\n  210 |             ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);\n      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~\nIn file included from /root/bitcoin/src/memusage.h:10,\n                 from /root/bitcoin/src/core_memusage.h:10,\n                 from /root/bitcoin/src/coins.h:10,\n                 from /root/bitcoin/src/script/sign.h:10,\n                 from /root/bitcoin/src/test/transaction_tests.cpp:23:\n/root/bitcoin/src/support/allocators/pool.h:209:31: note: call to ‘void operator delete(void*, std::align_val_t)’ here\n  209 |             ::operator delete ((void*)chunk, std::align_val_t{ELEM_ALIGN_BYTES});\n      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nIn destructor ‘PoolResource<MAX_BLOCK_SIZE_BYTES, ALIGN_BYTES>::~PoolResource() [with long unsigned int MAX_BLOCK_SIZE_BYTES = 152; long unsigned int ALIGN_BYTES = 8]’,\n    inlined from ‘virtual CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7,\n    inlined from ‘virtual CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7:\n/root/bitcoin/src/support/allocators/pool.h:210:13: warning: pointer ‘chunk’ used after ‘void operator delete(void*, std::align_val_t)’ [-Wuse-after-free]\n  210 |             ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);\n      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~\n/root/bitcoin/src/support/allocators/pool.h:209:31: note: call to ‘void operator delete(void*, std::align_val_t)’ here\n  209 |             ::operator delete ((void*)chunk, std::align_val_t{ELEM_ALIGN_BYTES});\n      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nIn destructor ‘PoolResource<MAX_BLOCK_SIZE_BYTES, ALIGN_BYTES>::~PoolResource() [with long unsigned int MAX_BLOCK_SIZE_BYTES = 152; long unsigned int ALIGN_BYTES = 8]’,\n    inlined from ‘virtual CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7,\n    inlined from ‘void transaction_tests::max_standard_legacy_sigops::test_method()’ at /root/bitcoin/src/test/transaction_tests.cpp:1150:1:\n/root/bitcoin/src/support/allocators/pool.h:210:13: warning: pointer ‘chunk’ used after ‘void operator delete(void*, std::align_val_t)’ [-Wuse-after-free]\n  210 |             ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);\n      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~\n/root/bitcoin/src/support/allocators/pool.h:209:31: note: call to ‘void operator delete(void*, std::align_val_t)’ here\n  209 |             ::operator delete ((void*)chunk, std::align_val_t{ELEM_ALIGN_BYTES});\n      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nIn destructor ‘PoolResource<MAX_BLOCK_SIZE_BYTES, ALIGN_BYTES>::~PoolResource() [with long unsigned int MAX_BLOCK_SIZE_BYTES = 152; long unsigned int ALIGN_BYTES = 8]’,\n    inlined from ‘virtual CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7,\n    inlined from ‘void transaction_tests::spends_witness_prog::test_method()’ at /root/bitcoin/src/test/transaction_tests.cpp:1305:1:\n/root/bitcoin/src/support/allocators/pool.h:210:13: warning: pointer ‘chunk’ used after ‘void operator delete(void*, std::align_val_t)’ [-Wuse-after-free]\n  210 |             ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);\n      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~\n/root/bitcoin/src/support/allocators/pool.h:209:31: note: call to ‘void operator delete(void*, std::align_val_t)’ here\n  209 |             ::operator delete ((void*)chunk, std::align_val_t{ELEM_ALIGN_BYTES});\n      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nIn destructor ‘PoolResource<MAX_BLOCK_SIZE_BYTES, ALIGN_BYTES>::~PoolResource() [with long unsigned int MAX_BLOCK_SIZE_BYTES = 152; long unsigned int ALIGN_BYTES = 8]’,\n    inlined from ‘virtual CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7,\n    inlined from ‘void transaction_tests::test_Get::test_method()’ at /root/bitcoin/src/test/transaction_tests.cpp:450:1:\n/root/bitcoin/src/support/allocators/pool.h:210:13: warning: pointer ‘chunk’ used after ‘void operator delete(void*, std::align_val_t)’ [-Wuse-after-free]\n  210 |             ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);\n      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~\n/root/bitcoin/src/support/allocators/pool.h:209:31: note: call to ‘void operator delete(void*, std::align_val_t)’ here\n  209 |             ::operator delete ((void*)chunk, std::align_val_t{ELEM_ALIGN_BYTES});\n      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nIn destructor ‘PoolResource<MAX_BLOCK_SIZE_BYTES, ALIGN_BYTES>::~PoolResource() [with long unsigned int MAX_BLOCK_SIZE_BYTES = 152; long unsigned int ALIGN_BYTES = 8]’,\n    inlined from ‘virtual CCoinsViewCache::~CCoinsViewCache()’ at /root/bitcoin/src/coins.h:362:7,\n    inlined from ‘void transaction_tests::test_IsStandard::test_method()’ at /root/bitcoin/src/test/transaction_tests.cpp:1055:1:\n/root/bitcoin/src/support/allocators/pool.h:210:13: warning: pointer ‘chunk’ used after ‘void operator delete(void*, std::align_val_t)’ [-Wuse-after-free]\n  210 |             ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);\n      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~\n/root/bitcoin/src/support/allocators/pool.h:209:31: note: call to ‘void operator delete(void*, std::align_val_t)’ here\n  209 |             ::operator delete ((void*)chunk, std::align_val_t{ELEM_ALIGN_BYTES});\n      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n```\n\ncc @dergoegge ",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2025-08-14T14:45:19Z",
+      "updated_at": "2026-01-14T21:58:43Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33188",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "dergoegge",
+          "body": "This is a false positive. If someone is using gcc with asan we could move `ASAN_UNPOISON_MEMORY_REGION(chunk, m_chunk_size_bytes);` above the `delete` call to avoid this warning (I suspect).",
+          "created_at": "2025-09-02T12:34:55Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 3,
+    "issues": 1
+  }
+}

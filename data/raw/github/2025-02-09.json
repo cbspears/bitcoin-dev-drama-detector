@@ -1,0 +1,126 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:15:49.007760+00:00",
+  "date": "2025-02-09",
+  "pull_requests": [
+    {
+      "number": 31829,
+      "title": "p2p: improve TxOrphanage denial of service bounds",
+      "body": "This PR is part of the orphan resolution project, see #27463.\r\n\r\nThis design came from collaboration with sipa - thanks.\r\n\r\nWe want to limit the CPU work and memory used by `TxOrphanage` to avoid denial of service attacks. On master, this is achieved by limiting the number of transactions in this data structure to 100, and the weight of each transaction to 400KWu (the largest standard tx) [0]. We always allow new orphans, but if the addition causes us to exceed 100, we evict one randomly. This is dead simple, but has problems:\r\n- It makes the orphanage trivially churnable: any one peer can render it useless by spamming us with lots of orphans. It's possible this is happening: \"Looking at data from node alice on 2024-09-14 shows that we’re sometimes removing more than 100k orphans per minute. This feels like someone flooding us with orphans.\" [1]\r\n- Effectively, opportunistic 1p1c is useless in the presence of adversaries: it is *opportunistic* and pairs a low feerate tx with a child that happens to be in the orphanage. So if nothing is able to stay in orphanages, we can't expect 1p1cs to propagate.\r\n- This number is also often insufficient for the volume of orphans we handle: historical data show that overflows are pretty common, and there are times where \"it seems like [the node] forgot about the orphans and re-requested them multiple times.\" [1] \r\n \r\nJust jacking up the `-maxorphantxs` number is not a good enough solution, because it doesn't solve the churnability problem, and the effective resource bounds scale poorly.\r\n\r\nThis PR introduces numbers for {global, per-peer} {memory usage, announcements + number of inputs}, representing resource limits:\r\n- The (constant) **global latency score limit** is the number of unique (wtxid, peer) pairs in the orphanage + the number of inputs spent by those (deduplicated) transactions floor-divided by 10 [2]. This represents a cap on CPU or latency for any given operation, and does not change with the number of peers we have. Evictions must happen whenever this limit is reached. The primary goal of this limit is to ensure we do not spend more than a few ms on any call to `LimitOrphans` or `EraseForBlock`.\r\n- The (variable) **per-peer latency score limit** is the global latency score limit divided by the number of peers. Peers are allowed to exceed this limit provided the global announcement limit has not been reached. The per-peer announcement limit decreases with more peers.\r\n- The (constant) **per-peer memory usage reservation** is the amount of orphan weight [3] reserved per peer [4]. Reservation means that peers are effectively guaranteed this amount of space. Peers are allowed to exceed this limit provided the global usage limit is not reached. The primary goal of this limit is to ensure we don't oom.\r\n- The (variable) **global memory usage limit** is the number of peers multiplied by the per-peer reservation [5]. As such, the global memory usage limit scales up with the number of peers we have. Evictions must happen whenever this limit is reached.\r\n- We introduce a \"Peer DoS Score\" which is the maximum between its \"CPU Score\" and \"Memory Score.\" The CPU score is the ratio between the number of orphans announced by this peer / peer announcement limit. The memory score is the total usage of all orphans announced by this peer / peer usage reservation.\r\n\r\nEviction changes in a few ways:\r\n- It is triggered if either limit is exceeded.\r\n- On each iteration of the loop, instead of selecting a random orphan, we select a peer and delete 1 of its announcements. Specifically, we select the peer with the highest DoS score, which is the maximum between its CPU DoS score (based on announcements) and Memory DoS score (based on tx weight). After the peer has been selected, we evict the oldest orphan (non-reconsiderable sorted before reconsiderable).\r\n- Instead of evicting orphans, we evict announcements. An orphan is still in the orphanage as long as there is 1 peer announcer. Of course, over the course of several iteration loops, we may erase all announcers, thus erasing the orphan itself. The purpose of this change is to prevent a peer from being able to trigger eviction of another peer's orphans.\r\n\r\nThis PR also:\r\n- Reimplements `TxOrphanage` as single multi-index container.\r\n- Effectively bounds the number of transactions that can be in a peer's work set by ensuring it is a subset of the peer's announcements.\r\n- Removes the `-maxorphantxs` config option, as the orphanage no longer limits by unique orphans.\r\n\r\nThis means we can receive 1p1c packages in the presence of spammy peers. It also makes the orphanage more useful and increases our download capacity without drastically increasing orphanage resource usage.\r\n\r\n[0]: This means the effective memory limit in orphan weight is 100 * 400KWu = 40MWu\r\n[1]: https://delvingbitcoin.org/t/stats-on-orphanage-overflows/1421\r\n[2]: Limit is 3000, which is equivalent to one max size ancestor package (24 transactions can be missing inputs) for each peer (default max connections is 125).\r\n[3]: Orphan weight is used in place of actual memory usage because something like \"one maximally sized standard tx\" is easier to reason about than \"considering the bytes allocated for vin and vout vectors, it needs to be within N bytes...\" etc. We can also consider a different formula to encapsulate more the memory overhead but still have an interface that is easy to reason about.\r\n[4]: The limit is 404KWu, which is the maximum size of an ancestor package.\r\n[5]: With 125 peers, this is 50.5MWu, which is a small increase from the existing limit of 40MWu. While the actual memory usage limit is higher (this number does not include the other memory used by `TxOrphanage` to store the outpoints map, etc.), this is within the same ballpark as the old limit.",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2025-02-09T21:14:45Z",
+      "updated_at": "2025-08-19T11:15:02Z",
+      "comments": 60,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31829",
+      "labels": [
+        "P2P"
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 31830,
+      "title": "wallet: Branch and Bound producing change",
+      "body": "My fuzz server crashed due to Branch and Bound producing change. I could reproduce the issue with the following test:\n\n```cpp\nBOOST_AUTO_TEST_CASE(bnb_change)\n{\n    FastRandomContext fast_random_context{};\n    CoinSelectionParams coin_params{\n        /*rng_fast*/fast_random_context,\n        /*change_output_size=*/31,\n        /*change_spend_size=*/68,\n        /*min_change_target=*/50'000,\n        /*effective_feerate=*/CFeeRate(5000),\n        /*long_term_feerate=*/CFeeRate(10'000),\n        /*discard_feerate=*/CFeeRate(3000),\n        /*tx_noinputs_size=*/11 + 31, //static header size + output size\n        /*avoid_partial=*/false,\n    };\n    coin_params.m_change_fee = /*155 sats=*/coin_params.m_effective_feerate.GetFee(coin_params.change_output_size);\n    coin_params.min_viable_change = /*204 sats=*/coin_params.m_discard_feerate.GetFee(coin_params.change_spend_size);\n    coin_params.m_cost_of_change = /*204 + 155 sats=*/coin_params.min_viable_change + coin_params.m_change_fee;\n    coin_params.m_subtract_fee_outputs = false;\n\n    std::vector<COutput> utxo_pool;\n    CMutableTransaction tx;\n    tx.vout.resize(8);\n    tx.vout[7].nValue = 1395186823946715;\n    tx.nLockTime = 1; // all transactions get different hashes\n    utxo_pool.emplace_back(COutPoint(tx.GetHash(), 7), tx.vout.at(7), /*depth=*/1, /*input_bytes=*/1578, /*spendable=*/true, /*solvable=*/true, /*safe=*/true, /*time=*/0, /*from_me=*/true, coin_params.m_effective_feerate.GetFee(1578));\n\n    std::vector<OutputGroup> output_groups;\n    auto output_group = OutputGroup(coin_params);\n    output_group.Insert(std::make_shared<COutput>(utxo_pool[0]), /*ancestors=*/0, /*descendants=*/0);\n    output_groups.push_back(output_group);\n\n    const auto target{1395186823938466};\n    auto result_bnb = SelectCoinsBnB(output_groups, target, coin_params.m_cost_of_change, 400000);\n    if (result_bnb) {\n        assert(result_bnb->GetChange(coin_params.min_viable_change, coin_params.m_change_fee) == 0);\n    }\n}\n```\n\nI noted that `change` and `min_viable_change` have the same values. For reference: https://bitcoincore.space/src/wallet/coinselection.cpp#987",
+      "state": "closed",
+      "user": "brunoerg",
+      "created_at": "2025-02-09T21:47:23Z",
+      "updated_at": "2025-02-13T20:12:26Z",
+      "comments": 14,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31830",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "brunoerg",
+          "body": "friendly ping: @murchandamus ",
+          "created_at": "2025-02-10T20:37:35Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Change is computed as: \n\n```\neffective_values - target - change_fee\n1395186823938825 - 1395186823938466 - 155\n204\n```\n\nWhy does the test assert this should be zero instead of 204?",
+          "created_at": "2025-02-10T21:25:01Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "In otherwords, I think setting the change_fee to 359 would produce zero change, although I'm not sure what you are testing.",
+          "created_at": "2025-02-10T21:29:47Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "This is a failing test to show BnB is producing change.",
+          "created_at": "2025-02-10T21:30:31Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "> This is a failing test to show BnB is producing change.\n\nWith those parameters though, BnB should be producing change.",
+          "created_at": "2025-02-10T21:34:00Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Also, the cost_of_change is computed as `359`, so any solution between target and target + cost_of_change is valid (inclusive).",
+          "created_at": "2025-02-10T21:59:31Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> With those parameters though, BnB should be producing change.\n\nTake a look at coinselection fuzz target. See that regardless the parameters/coins/etc we assert that BnB does not produce change (this is the expected for this algorithm).\n\n```cpp\n// Run coinselection algorithms\nauto result_bnb = coin_params.m_subtract_fee_outputs ? util::Error{Untranslated(\"BnB disabled when SFFO is enabled\")} :\n                  SelectCoinsBnB(group_pos, target, coin_params.m_cost_of_change, max_selection_weight);\nif (result_bnb) {\n    assert(result_bnb->GetChange(coin_params.min_viable_change, coin_params.m_change_fee) == 0);\n    assert(result_bnb->GetSelectedValue() >= target);\n    assert(result_bnb->GetWeight() <= max_selection_weight);\n    (void)result_bnb->GetShuffledInputVector();\n    (void)result_bnb->GetInputSet();\n}\n```",
+          "created_at": "2025-02-11T16:06:02Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "I tracked down the PR that add this: https://github.com/bitcoin/bitcoin/pull/27585 and commit https://github.com/bitcoin/bitcoin/pull/27585/commits/6d9b26d56ab5295dfcfe0f80a3069046a263fb2f.  I'm a little confused by this since this is counter to what I would expect.  BnB seeks to find a changelss solution, however only if the change created is less than the cost of creating a new output.  That is, if it's more expansive to add the change leftover to a new output, don't bother.",
+          "created_at": "2025-02-12T00:20:20Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "The issue appears to have been introduced by myself in #28366 in the commit https://github.com/bitcoin/bitcoin/commit/7aa7e30441fe77bf8e8092916e36b004bbbfe2a7#diff-d473ed8396f9451afb848923cfcfaa630c9811a78e07f3ae1ffd3a65da218accR197\n\nBranch and Bound uses `target + cost_of_change` as the upper bound inclusive of the solution space. In the mentioned PR, it also uses `cost_of_change` as the value for `min_viable_change` in the `RecalculateWaste` call. However, `min_viable_change` denotes _the smallest permitted_ value for creating change. This causes an overlap on the edge, where the largest permitted value for a changeless solution matches the minimum viable amount for creating change.\n\nThe short term solution would be to increase the value passed to `RecalculateWaste` for `min_viable_change` by 1 to remove the overlap. \n\n![Image](https://github.com/user-attachments/assets/4ef9837c-5e10-4774-aa77-074d4da39b94)\n\nThis chart implies that a better solution would be to use `target + min_viable_change - 1` as the upper bound for the Branch and Bound solution space, although I would also like to change the definition of `min_viable_change, because it doesn’t make sense to me that the input cost is tied to the current feerate if we are creating a transaction at high feerates.\n\n@brunoerg: Do you happen to have a copy of the input that crashed the fuzzer? If so, could you either share it or run the fuzz input against the following fix to [line 197 in coinselection.cpp](https://github.com/bitcoin/bitcoin/blob/master/src/wallet/coinselection.cpp#L197)\n\n```diff\n-    result.RecalculateWaste(cost_of_change, cost_of_change, CAmount{0});\n+    result.RecalculateWaste(cost_of_change + 1, cost_of_change, CAmount{0});\n```",
+          "created_at": "2025-02-12T22:02:08Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "I tried this change running the test @brunoerg posted above and it still results in a change amount of 204 with the given params.",
+          "created_at": "2025-02-12T22:52:10Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> @brunoerg: Do you happen to have a copy of the input that crashed the fuzzer? If so, could you either share it or run the fuzz input against the following fix to [line 197 in coinselection.cpp](https://github.com/bitcoin/bitcoin/blob/master/src/wallet/coinselection.cpp#L197)\n\nIt's a custom target I wrote but I changed the test that I provided here and it's still producing change.",
+          "created_at": "2025-02-12T23:12:43Z"
+        },
+        {
+          "user": "furszy",
+          "body": "q: isn't the test just wrong?.  `min_viable_change` is initialized to the future input fee without increasing the window by one as we do in the actual code. Thats why there is an overlap here. See the wallet code:\nhttps://github.com/bitcoin/bitcoin/blob/c242fa5be358150d83c2446896b6f4c45c6365e9/src/wallet/spend.cpp#L1131-L1132\n\nWhile you are manually setting it to:\n```c++\ncoin_params.min_viable_change = coin_params.m_discard_feerate.GetFee(coin_params.change_spend_size);\n```",
+          "created_at": "2025-02-13T16:14:02Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> q: isn't the test just wrong?. `min_viable_change` is initialized to the future input fee without increasing the window by one as we do in the actual code. Thats why there is an overlap here. See the wallet code:\n> \n> [bitcoin/src/wallet/spend.cpp](https://github.com/bitcoin/bitcoin/blob/c242fa5be358150d83c2446896b6f4c45c6365e9/src/wallet/spend.cpp#L1131-L1132)\n> \n> Lines 1131 to 1132 in [c242fa5](/bitcoin/bitcoin/commit/c242fa5be358150d83c2446896b6f4c45c6365e9)\n> \n>  const auto change_spend_fee = coin_selection_params.m_discard_feerate.GetFee(coin_selection_params.change_spend_size); \n>  coin_selection_params.min_viable_change = std::max(change_spend_fee + 1, dust); \n> While you are manually setting it to:\n> \n> coin_params.min_viable_change = coin_params.m_discard_feerate.GetFee(coin_params.change_spend_size);\n\nInteresting, makes sense, this is how I could reproduce using a similar setup of #29532. I just tested it by increasing the window by one and it did not produce change. Will close for now since our fuzz target reproduces exactly the `spend` behavior (`std::max(change_spend_fee + 1, dust)`) so it's fine.",
+          "created_at": "2025-02-13T17:23:53Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Nice catch, @furszy. Thanks!",
+          "created_at": "2025-02-13T20:12:24Z"
+        }
+      ]
+    },
+    {
+      "number": 31828,
+      "title": "Hellobtc",
+      "body": "I trying for learn how works crypto",
+      "state": "closed",
+      "user": "onlinesipahimithu",
+      "created_at": "2025-02-09T01:33:34Z",
+      "updated_at": "2025-02-09T02:27:13Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31828",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 1,
+    "issues": 2
+  }
+}

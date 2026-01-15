@@ -1,0 +1,429 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:14:53.023763+00:00",
+  "date": "2025-02-05",
+  "pull_requests": [
+    {
+      "number": 31807,
+      "title": "kernel: Avoid duplicating symbols in the kernel and downstream users",
+      "body": "The possibility of this happening came up in the discussion here: https://github.com/bitcoin/bitcoin/pull/31158#issuecomment-2635223309, and it turned that we already had a case of it in our code.\r\n\r\ntl;dr: Certain symbols when defined in headers may end up existing in both the shared lib and the application using it, leading to subtle bugs. More info can be found [here](https://www.mail-archive.com/cfe-commits@lists.llvm.org/msg503669.html).\r\n\r\nThe solution is generally to avoid defining static/inline vars in headers if they aren't meant to be shared with downstream kernel users.\r\n\r\nClang has recently added a warning for this (see link above), so this PR enables that too. It adds a new place to specify warnings which only apply to the kernel. In this case, it's warnings that only apply to shared libs. But I can also imagine wanting to enable more aggressive warnings for the kernel than the rest of the code.\r\n\r\nThe warning is only enabled by clang 21 (which is not yet released), and only useful when our [kernel symbol visibility hack](https://github.com/bitcoin/bitcoin/blob/master/src/kernel/CMakeLists.txt#L100) is disabled, which we can't do yet. So it's mostly a placeholder for the future. In the meantime it can be used manually by building clang from git and disabling our hack, which I've done, and can confirm that after this change there are no more warnings.",
+      "state": "open",
+      "user": "theuni",
+      "created_at": "2025-02-05T19:32:42Z",
+      "updated_at": "2026-01-14T13:12:18Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31807",
+      "labels": [
+        "Build system",
+        "Validation",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31807.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Approach ACK | [sedited](https://github.com/bitcoin/bitcoin/pull/31807#issuecomment-3749507980) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33077](https://github.com/bitcoin/bitcoin/pull/33077) (kernel: create monolithic kernel static library by hebasto)\n* [#32543](https://github.com/bitcoin/bitcoin/pull/32543) (kernel: Remove dependency on clientversion by TheCharlatan)\n* [#28690](https://github.com/bitcoin/bitcoin/pull/28690) (build: Introduce internal kernel library by TheCharlatan)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-05T19:32:45Z"
+        },
+        {
+          "user": "theuni",
+          "body": "Thinking about this some more, this would mostly only be a problem if we attempted to define a native c++ api for the kernel, as opposed to the [C api](https://github.com/bitcoin/bitcoin/pull/30595) which does not expose our internal headers. Because currently, we mark all symbols as externally visible.\r\n\r\nBut still, with a c++17-style `inline` variable in a header, it's not clear to me that all linkers are guaranteed to do the right thing in all cases (I admit I might be totally wrong on that), and I would at least like some way to be warned about these so that we can investigate.\r\n",
+          "created_at": "2025-02-05T20:02:36Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> tl;dr: Certain symbols when defined in headers may end up existing in both the shared lib and the application using it, leading to subtle bugs. More info can be found [here](https://www.mail-archive.com/cfe-commits@lists.llvm.org/msg503669.html).\r\n> \r\n> The solution is generally to avoid defining static/inline vars in headers if they aren't meant to be shared with downstream kernel users.\r\n\r\nI don't think these concerns are relevant to shared kernel library users, as https://github.com/llvm/llvm-project/pull/117622 clearly limits its scope to \"_multiple_ shared libraries\".",
+          "created_at": "2025-02-06T11:46:34Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> But still, with a c++17-style `inline` variable in a header, it's not clear to me that all linkers are guaranteed to do the right thing in all cases (I admit I might be totally wrong on that), and I would at least like some way to be warned about these so that we can investigate.\r\n\r\nI do believe that this case is covered by the [ODR](https://en.cppreference.com/w/cpp/language/definition):\r\n> There can be more than one definition in a program of each of the following: ... inline variable ...\r\n> If all these requirements are satisfied, _the program behaves as if there is only one definition in the entire program_. Otherwise, the program is ill-formed, no diagnostic required.\r\n\r\n(highlighted by me).",
+          "created_at": "2025-02-06T13:01:46Z"
+        },
+        {
+          "user": "theuni",
+          "body": "> I do believe that this case is covered by the [ODR](https://en.cppreference.com/w/cpp/language/definition):\r\n> \r\n> > There can be more than one definition in a program of each of the following: ... inline variable ...\r\n> > If all these requirements are satisfied, _the program behaves as if there is only one definition in the entire program_. Otherwise, the program is ill-formed, no diagnostic required.\r\n> \r\n> (highlighted by me).\r\n\r\nThe ODR defines what happens \"in a program\". Symbol resolution between shared libs and binaries is linker/loader specific. See ld's options for duplicate/weak symbol handling for example, or macOS's complicated mess of namespacing. Windows forces you to specify \"I'm importing this from a dll\", which is kinda nice actually.\r\n\r\nYou're right that the warning is aimed at \"multiple shared libraries\", but our Linux binaries are basically just shared libs with an entry point. You can even link against bitcoind or dlopen from it as though it's a .so. That's why I'm concerned about linker behavior.\r\n\r\nGoing to convert this to draft for now. I doubt it'll even matter much as we'll probably never selectively export our c++ symbols. But I still don't have 100% confidence in the `cs_main` issue from #31158.\r\n\r\nEdit: Hah, [here's an s/o answer](https://stackoverflow.com/a/55635250) that more elegantly says what I attempted above.",
+          "created_at": "2025-02-06T15:05:43Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-08-06T13:40:54Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Are you still working on this?",
+          "created_at": "2025-10-22T14:19:31Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Approach ACK\r\n\r\nCan you rebase this?",
+          "created_at": "2026-01-14T13:12:14Z"
+        }
+      ]
+    },
+    {
+      "number": 31806,
+      "title": "fuzz: coinselection: cover `SetBumpFeeDiscount`",
+      "body": "`SetBumpFeeDiscount` sets the bump fee discount which is used to calculate the waste. We currently have no fuzz coverage for this function, so this PR adds it by calling `SetBumpFeeDiscount` before `RecalculateWaste`.",
+      "state": "closed",
+      "user": "brunoerg",
+      "created_at": "2025-02-05T17:46:55Z",
+      "updated_at": "2025-04-01T16:40:07Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31806",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31806.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [marcofleon](https://github.com/bitcoin/bitcoin/pull/31806#pullrequestreview-2711621352) |\n| Stale ACK | [Prabhat1308](https://github.com/bitcoin/bitcoin/pull/31806#pullrequestreview-2608300048), [arejula27](https://github.com/bitcoin/bitcoin/pull/31806#issuecomment-2651560728) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n",
+          "created_at": "2025-02-05T17:46:58Z"
+        },
+        {
+          "user": "arejula27",
+          "body": "ACK [0289f03](https://github.com/bitcoin/bitcoin/pull/31806/commits/0289f03790151135afbd5281a45a9f6256f0a235)\r\n\r\nThis PR aims to improve code coverage of the fuzzing test by ensuring `SetBumpFeeDiscount` is called before the fee discount is used in `RecalculateWaste`. To achieve this, `SetBumpFeeDiscount` is added before `RecalculateWaste` is invoked. As @Prabhat1308 pointed out, there is another instance where this function could be added (line 290).\r\n\r\nThe value set by `SetBumpFeeDiscount` is also used in other functions, such as `GetSelectedEffectiveValue` and `GetTotalBumpFees`, which are referenced, for example, in line 203. @brunoerg  Is there a specific reason why you applied `SetBumpFeeDiscount` only to `RecalculateWaste` and not to these other functions? If not, it might be worth considering adding it to them as well.\r\n\r\nI ran the fuzz test for 1 minute and It was ok",
+          "created_at": "2025-02-11T17:38:11Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @marcofleon ",
+          "created_at": "2025-03-21T08:55:31Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "Rebased",
+          "created_at": "2025-03-21T13:17:06Z"
+        }
+      ]
+    },
+    {
+      "number": 31805,
+      "title": "doc: improve NODE_NETWORK_LIMITED documentation per BIP159",
+      "body": "Per BIP159, the definition is:\r\n\r\nNODE_NETWORK_LIMITED || bit 10 (0x400) || If signaled, the peer <I>MUST</I> be capable of serving at least the last 288 blocks (~2 days).\r\n\r\nFix our documentation related to this, and add BIP159 mentions where relevant.\r\n\r\n---\r\n\r\nOriginally this PR also tried to clarify the following, but it was dropped in response to review:\r\n\r\n`NODE_NETWORK_LIMITED` is set by default, and it only signals a pruned or otherwise limited node if `NODE_NETWORK` is not also set. See the init setup logic or `IsLimitedPeer()` in `src/net_processing.cpp` for examples.\r\n",
+      "state": "closed",
+      "user": "jonatack",
+      "created_at": "2025-02-05T17:32:27Z",
+      "updated_at": "2025-10-22T15:51:23Z",
+      "comments": 14,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31805",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31805.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Stale ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/31805#issuecomment-2639150752), [kevkevinpal](https://github.com/bitcoin/bitcoin/pull/31805#issuecomment-2639939670) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-02-05T17:32:30Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK 39e15f6ca4fd44cc459d80b7a1540c03923906dd\r\n\r\nIt's good to clarify the description, because the term `NODE_NETWORK_LIMITED` has confused me before into assuming that a node that isn't limited doesn't use the flag. But instead it signals the minimum capability, and `NODE_NETWORK` is added when ready to signal full capability. Too late to rename them.\r\n\r\nYou can also see this in the `init.cpp`.\r\n\r\nWe start with just `NODE_NETWORK_LIMITED`:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/82ba50513425bf0568d4f9456282dc9713132490/src/init.cpp#L807-L811\r\n\r\nAnd then add `NODE_NETWORK`, if possible:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/82ba50513425bf0568d4f9456282dc9713132490/src/init.cpp#L1733-L1739\r\n\r\nWe don't drop `NODE_NETWORK_LIMITED`.\r\n",
+          "created_at": "2025-02-06T08:32:08Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "ACK [39e15f6](https://github.com/bitcoin/bitcoin/pull/31805/commits/39e15f6ca4fd44cc459d80b7a1540c03923906dd)\r\n\r\nI agree with @maflcko maybe instead of using pruned node we can refer to the node as \"network limited node\"",
+          "created_at": "2025-02-06T14:11:42Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Updated per review feedback (thanks!)\r\n\r\n> It's good to clarify the description, because the term `NODE_NETWORK_LIMITED` has confused me before into assuming that a node that isn't limited doesn't use the flag. But instead it signals the minimum capability, and `NODE_NETWORK` is added when ready to signal full capability. Too late to rename them.\r\n\r\nWell said -- same for me.\r\n\r\n\r\n",
+          "created_at": "2025-02-06T15:23:47Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "In response to review feedback, I've reduced the scope of this PR and updated the pull description. Originally this tried to clarify the following, but it is now dropped:\r\n\r\n`NODE_NETWORK_LIMITED` is set by default, and it only signals a pruned or otherwise limited node if `NODE_NETWORK` is not also set (see the init setup logic or `IsLimitedPeer()` in `src/net_processing.cpp` for examples).\r\n",
+          "created_at": "2025-02-12T20:58:46Z"
+        },
+        {
+          "user": "jonasschnelli",
+          "body": "I haven't looked at this closely, but it could be that the implementation needs an update.\r\nThe important point is *fingerprinting resistance*.\r\n\r\nDuring designing the BIP, we decided that LIMITED NODES should always cut off at HEAD-288 to avoid getting fingerprinted by leaking the prune depth.\r\n\r\nSee the BIP:\r\n\r\n> Counter-measures for peer fingerprinting\r\n> \r\n> Peers may have different prune depths (depending on the peers configuration, disk space, etc.) which can result in a fingerprinting weakness (finding the prune depth through getdata requests). NODE_NETWORK_LIMITED supporting peers SHOULD avoid leaking the prune depth and therefore not serve blocks deeper than the signaled NODE_NETWORK_LIMITED threshold (288 blocks).\r\n```",
+          "created_at": "2025-02-13T19:56:18Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "@jonasschnelli Good point. Yes. A BIP159 node MUST be able to serve at least the latest 288 blocks, but SHOULD not serve more.",
+          "created_at": "2025-02-13T20:10:29Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "> During designing the BIP, we decided that LIMITED NODES should always cut off at HEAD-288 to avoid getting fingerprinted by leaking the prune depth.\r\n\r\nMaybe the BIP and documentation here should clarify that limited nodes are defined by both the limited bit being set and by the node network bit not being set, as described in https://github.com/bitcoin/bitcoin/pull/31805#issuecomment-2654830209.\r\n\r\nEdit: after offline discussion with @jonasschnelli and the BIP editors, will look at slightly clarifying BIP159.",
+          "created_at": "2025-02-13T21:08:50Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Opened https://github.com/bitcoin/bips/pull/1768 and putting this in draft for now.",
+          "created_at": "2025-02-14T21:00:45Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> Opened https://github.com/bitcoin/bips/pull/1768 and putting this in draft for now.\r\n\r\nThat has been merged.",
+          "created_at": "2025-03-17T07:28:04Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "What is the status of this?",
+          "created_at": "2025-05-13T11:53:52Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Will push a wider update based on the BIP159 since https://github.com/bitcoin/bips/pull/1768.",
+          "created_at": "2025-05-13T22:05:36Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Are you still working on this?",
+          "created_at": "2025-10-22T14:49:20Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "I have a wider update to this since March, with more doc sites fixed or improved. Need to convince myself that the improvements might be merged someday and to push them here, I suppose. I'll re-open if I do.",
+          "created_at": "2025-10-22T15:50:19Z"
+        }
+      ]
+    },
+    {
+      "number": 31804,
+      "title": "ci: Remove no longer needed `-Wno-error=documentation`",
+      "body": "Picked from https://github.com/bitcoin/bitcoin/pull/31726.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-02-05T17:25:45Z",
+      "updated_at": "2025-02-06T10:01:53Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31804",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31804.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/31804#issuecomment-2637613179) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-02-05T17:25:48Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK f1d7a6dfa1411ccf741fbf7351ea4f229dd1e63e\r\n\r\nNot sure why and since when this is no longer needed. I am happy to bisect, if someone is interested.",
+          "created_at": "2025-02-05T17:46:07Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Not sure why and since when this is no longer needed. I am happy to bisect, if someone is interested.\r\n\r\nFrom https://github.com/bitcoin/bitcoin/commit/b088062e687d95deff28b0715fd4859449b56584 it follows that it comes \"from Boost Test code\". CMake adds dependencies' include directories with `-isystem`, which effectively silences warnings.",
+          "created_at": "2025-02-05T17:50:41Z"
+        },
+        {
+          "user": "theuni",
+          "body": "It would be really nice to add comments for these in the future, whenever we add them. So it's clear when/why they can be removed.\r\n\r\n(I guess git gave away the answer very quickly, but it'd be easier to eyeball and immediately understand if something's still relevant)",
+          "created_at": "2025-02-06T00:01:14Z"
+        }
+      ]
+    },
+    {
+      "number": 31803,
+      "title": "fuzz: Extend mini_miner fuzz coverage to max block weight",
+      "body": "This is follow-up to #31384 which should be merged shortly. Only the last commit is new.\r\n\r\nIt expands the fuzz test to cover the full range of allow block sizes in `BlockAssembler` by utilizing the `block_adjusted_max_weight` option if necessary.\r\n\r\nSee also the brief discussion here for context: https://github.com/bitcoin/bitcoin/pull/31384/files#r1942039833",
+      "state": "closed",
+      "user": "fjahr",
+      "created_at": "2025-02-05T16:46:15Z",
+      "updated_at": "2025-10-15T22:25:47Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31803",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31803.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Stale ACK | [ismaelsadeeq](https://github.com/bitcoin/bitcoin/pull/31803#pullrequestreview-2654431647), [glozow](https://github.com/bitcoin/bitcoin/pull/31803#pullrequestreview-2713599065) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33629](https://github.com/bitcoin/bitcoin/pull/33629) (Cluster mempool by sdaftuar)\n* [#33591](https://github.com/bitcoin/bitcoin/pull/33591) (Cluster mempool followups by sdaftuar)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-05T16:46:19Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "https://github.com/bitcoin/bitcoin/pull/31384 was merged, so this is rebased and ready for review.",
+          "created_at": "2025-02-10T18:35:42Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "I finally got back to this today and it drove me nuts in many different ways! The primary source of frustration was a my lack of experience with fuzzing tests + recent changes on the build system and where the bins are placed + this PR not having these changes but me thinking it had these changes + fuzzing and macos dislike each other. Thanks to @marcofleon for support and hence the rebase here!\r\n\r\nHowever, I did eventually also find something interesting! :) @marcofleon had already mentioned to me in a DM that the latest iteration of the code here was still not reaching the full-block case within a reasonable amount of iterations. I thought my guestimate numbers were just a bit off and so I cranked up the number of outputs per tx so they would take up more space in the block. (The number of tx per block are limited to 500 by cluster mempool DoS protection as @glozow mentioned above as well.) But this didn't work.\r\n\r\n### Learning 1: Filling up the block with smaller txs\r\n\r\nIf the numbers of outputs are higher the number of outputs also increases because we use the number of available coins there. This means we get really large transactions fast, which is what we want to fill up the block. But then it becomes very unlikely that the last (huge) transaction we are adding is actually fitting exactly into the block so that the block size requires a reconfiguration of the reserved weight. So in order to fill up the block completely with a bit of consistency we need to add some smaller transactions in the end. At least that seemed the most intuitive way to deal with this but I am also open to reconsider this. I am sure that there are other solutions possible and I guess it might also be fine if say it's fine if the block gets only filled up only very seldomly but I think adding something that adds consistency is valuable. So, I am suggesting to fill up the block with a `ConsumeBool()` chance.\r\n\r\n### Learning 2: Apples and Oranges\r\n\r\nThis line currently in master actually doesn't work as expected:\r\n\r\n```cpp\r\nif (pool.GetTotalTxSize() + GetVirtualTransactionSize(*tx) >= block_adjusted_max_weight) break;\r\n```\r\n\r\nI compares bytes (left) with weight units (right). It didn't matter though because the test currently adds so few and small transactions that this condition could never get hit anyway.\r\n\r\n### Conclusion\r\n\r\nThis is now obviously now increasing in scope more than I had expected. I am pushing a commit that has the changes that I propose and also includes some debug changes so you can test it out and confirm what I found. I would just as for some quick feedback on the approach I have chosen with regards to 1 or if I should try something different. For example, producing these full blocks probably slows the test down a bit, if that's a concern I could model it a bit differently so we don't fill up blocks that often.\r\n\r\nEDIT: The debug code isn't there but can still be seen here: https://github.com/bitcoin/bitcoin/commit/54bf199efaddbf4aa4c1307f5d63d7902f352e67",
+          "created_at": "2025-03-26T21:22:49Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/39476452828</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-26T23:04:10Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "Alright, after spending some more time with this I have convinced myself that the \"fill up with small transactions\" approach is somewhat reasonable and intuitive. An alternative approach would have been to continue looping after the last large transaction didn't fit and try to halven the last input and output numbers until we encounter a transaction that fits. This would save us a few loops probably but I think it would be less intuitive.\r\n\r\nWhat I wasn't happy with was that we were doing only full blocks with the last iteration which made the test slow. I found a simple way to let the test choose between full block mode and (probably) small block mode which I think is what we want.\r\n\r\nSince I am a bit more confident with these latest changes in the approach I have cleaned up the code and restructured the commits.",
+          "created_at": "2025-03-27T23:11:28Z"
+        },
+        {
+          "user": "marcofleon",
+          "body": "```bash\r\nFUZZ=mini_miner_selection ./fuzzbuild/bin/fuzz minimized-from-2d45d726fcc50840467fc32bae9a88c23560f4b6 \r\n./fuzzbuild/bin/fuzz: Running 1 inputs 1 time(s) each.\r\nRunning: minimized-from-2d45d726fcc50840467fc32bae9a88c23560f4b6\r\nfuzz: ../../../../src/test/fuzz/mini_miner.cpp:237: void (anonymous namespace)::mini_miner_selection_fuzz_target(FuzzBufferType): Assertion `mock_template_txids.size() == blocktemplate->block.vtx.size()\r\n' failed.\r\n```\r\n[miniminer_crash.txt](https://github.com/user-attachments/files/19585898/miniminer_crash.txt)\r\n<details>\r\n<summary>base64</summary>\r\n\r\n```bash\r\nhyUP2dn9JwDRLpVgfX19/////wEAAAAAAAAWMDNhABk5YbkmuSwPMDU1DwAE2dlZAgAAAAAAAP0/\r\n/T/Z2dnZ2dn////wJ9nRB11//2FgJQ84MmAlD/9hDzzZ////MScn8NnZ2dnZ////MScn8P0n8NnZ\r\n2f3TAAAAAAAAAADZJ/D9J/DZ2dn90/Da2dnZ2WAlDzkxYCUxDycn8P0n8NnZx9PH2fDax/3Z2dnZ\r\n2dnZ2dnZ////MScn8P0n8NnZ2dnZ2f0n8NnZx9PH2fDax/3Z2dnZ2dnZ2dnZ////MScn8P0n8NnZ\r\n2dnZ2dnZ2dEHXX//YWAlDzgyYCUPJ/DZ2dn90/Da2dnZ2WAlDzkxYCUxDycn8P0n8NnZx9PH2fDa\r\nx/3Z2dnZ2dnZ2dnZ////MScn8P0n8NnZ2dnZ2dnZ2dEHXX//YWAlDzgyYCUPf/9h//8PODJgJQ85\r\nMWAlMQ8nJ/D9J/DZ2cfTx9nw2sf92dnZ2dnZ2dnZ2f///zEnJ/D9J/DZ2dnZ2dnZ2dnRB11//2Fg\r\nJQ84MmAlDw==\r\n```\r\n\r\n</details>\r\n\r\nI did a bit of debugging and `target_feerate` is 0 for this input, which I think affects the way mini miner constructs its block. The mini miner mock template puts in every transaction from the fuzz test's mempool, which ends up being one more tx than the template that the actual miner creates. ",
+          "created_at": "2025-04-03T11:53:26Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Given the mini_miner_selection fuzz target is removed in #33629 (see https://github.com/bitcoin/bitcoin/pull/33629/commits/c88360cd82b6ba59b345d6d573b791e4964930d2), it might be appropriate to close this? Thanks for working on this fwiw!",
+          "created_at": "2025-10-15T17:05:52Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> Given the mini_miner_selection fuzz target is removed in #33629 (see [c88360c](https://github.com/bitcoin/bitcoin/commit/c88360cd82b6ba59b345d6d573b791e4964930d2)), it might be appropriate to close this? Thanks for working on this fwiw!\r\n\r\nMakes sense, thanks for the heads up.",
+          "created_at": "2025-10-15T17:24:25Z"
+        }
+      ]
+    },
+    {
+      "number": 31802,
+      "title": "Add bitcoin-{node,gui} to release binaries for IPC",
+      "body": "Have depends make libmultiprocess by default. This PR causes the following behavior changes:\r\n\r\n1. **bitcoin-node and bitcoin-gui binaries are included in releases**, due to `ENABLE_IPC` option being switched on by default in depends builds\r\n2. `ENABLE_IPC` is also switched on by default in non-depends builds (instructions updated, #33190 does this as a standalone PR)\r\n3. Various changes to CI: switching on `ENABLE_IPC` on in most configurations and using `bitcoin-node` binary (`bitcoin -m`) for functional tests in two of them.\r\n4. The `bitcoin-node` and `bitcoin-gui` are added to `Maintenance.cmake` (since they're now in the release)\r\n\r\nThis PR doesn't need to do all of these things at once. However it's is simpler, avoids code churn (especially in CI), and  probably less confusing to make all these changes in the same PR.\r\n\r\nWindows is not supported yet, so `ENABLE_IPC` is off by default for it. It can be enabled after https://github.com/bitcoin/bitcoin/pull/32387.\r\n\r\nThe initial main use case for IPC is to enable experimental support for the Mining IPC interface. A working example of a Stratum v2 Template Provider client using this interface can be found here: https://github.com/Sjors/bitcoin/pull/48. \r\n\r\nSee #31756 for discussion of when this should happen. Supersedes #30975.\r\n\r\n## Wait what, why?\r\n\r\nThe [Stratum v2 spec](https://stratumprotocol.org/specification) has been around for a few years now, mostly stable but with [ongoing activity](https://github.com/stratum-mining/sv2-spec/commits/main/) to clarify and fix more subtle issues encountered by implementers. Most of the implementation is built in Rust in a project called the Stratum Reference Implementation ([SRI](https://github.com/stratum-mining/stratum)).\r\n\r\n[Braiins](https://demand.work) added Stratum v2 support to both their (custom) firmware and pool several years ago, though they have fallen behind on recent spec changes (update: it seems they've fixed that). Apparently [new hardware is underway](https://github.com/bitcoin/bitcoin/pull/31802#issuecomment-3189623427) that supports Stratum v2 without the need for custom firmware. \r\n\r\n[DMND pool](https://www.dmnd.work) is Stratum v2 native from the start and employs several of the SRI developers (they haven't fully launched though). The industry is rather secretive, but apparently [there is more underway](https://github.com/bitcoin/bitcoin/pull/31802#issuecomment-3190601926).\r\n\r\nWhat does Bitcoin Core have to do with this? Well, in Stratum v2 jargon we are the Template Provider.\r\n\r\nOr at least, the Template Provider role needs us to make block templates. Initially back in 2023 the plan was to have Bitcoin Core implement this role entirely, see #23049. It would speak the sv2 encrypted message protocol. In fact the spec was designed around this assumption, making sure to only use cryptographic primitives already in our codebase.\r\n\r\nI took over that effort in late 2023, but during 2024 it became quite clear there was [strong resistance](https://github.com/bitcoin/bitcoin/pull/29432#pullrequestreview-2132699185) to the idea of including all this new code, opening another network ports, etc.\r\n\r\nAt the same time there was the long running multiprocess / IPC project #10102, and the idea was born to apply that here: instead of including Stratum v2 specific stuff, we offer a general Mining interface via an IPC connection that can e.g. push out fresh block templates as fees rise above a threshold (something not possible and/or very inefficient with `getblocktemplate`). A client sidecar application then sits between the Stratum v2 world and our node.\r\n\r\nCurrently there's only one such sidecar application, maintained by me, and reusing the same codebase from the integrated approach. An attempt has been made to connect to our interface from Rust https://github.com/bitcoin-core/libmultiprocess/issues/174, which would pave the way for SRI include the Template Provider role. Plebhash below indicates he's also working on that: https://github.com/bitcoin/bitcoin/pull/31802#issuecomment-3191547244.\r\n\r\nSo with this new approach in mind, between mid 2024 until spring 2025, I introduced a new Mining interface (#30200 - #31785). At the same time Russ Ryanosky worked on more tight integration of [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess), including making it a subtree in #31741. See [design/multiprocess.md](https://github.com/bitcoin/bitcoin/blob/master/doc/design/multiprocess.md).\r\n\r\nMeanwhile I've been maintaining a fork of Bitcoin Core that includes the Template Provider, in the original integrated approach (https://github.com/Sjors/bitcoin/pull/68) as well as an IPC + sidecar variant (https://github.com/Sjors/bitcoin/pull/48). I've been shipping [regular releases](https://github.com/Sjors/bitcoin/releases), mostly after bug fixes or major rebases. The SRI team has been testing both variants, though the \"official\" [instruction on their web page](https://stratumprotocol.org/developers) is to stick to integrated version. Bug reports on [my repo fork](https://github.com/Sjors/bitcoin/issues?q=is%3Aissue) as well as on the [SRI repo](https://github.com/stratum-mining/stratum/issues?q=is%3Aissue%20%20label%3A%22template%20provider%22) are evidence of actual testing happening.\r\n\r\nBut as Pavlenex writes below:\r\n\r\n> one recurring feedback I kept getting regardless of the size/type of miner is that the need to run a forked version of Bitcoin Core remains a significant barrier to adoption\r\n\r\nThis PR gets rids of that significant barrier. People can download a \"pristine\" version of Bitcoin Core and the only change is to start it with `bitcoin node -m -ipcconnect=unix` instead of the usual `bitcoind`.\r\n\r\nOnce that's released, I can dramatically simplify my sidecar codebase (https://github.com/Sjors/bitcoin/pull/48) by removing pretty much all Bitcoin Core code  that it doesn't need. My plan is to then make that a separate repository, which should be much easier to contribute to. I can then also make (deterministically built) signed releases, while making it clear that sidecar code has nothing to do with Bitcoin Core. Perhaps later on SRI implements the same and I can stop maintaining that project.\r\n\r\nConceptually the situation will be a lot clearer;\r\n- today: download forked version of `bitcoind` (or a forked version of `bitcoin-node`, plus `bitcoin-mine`), install SRI stuff\r\n- tomorrow: download Bitcoin Core v30, install `bitcoin-mine` and SRI\r\n- future: download Bitcoin Core v30 and SRI\r\n\r\n<details>\r\n<summary>\r\nGuix hashes:\r\n</summary>\r\n\r\n```\r\nfind guix-build-$(git rev-parse --short=12 HEAD)/output/ -type f -print0 | env LC_ALL=C sort -z | xargs -r0 sha256sum\r\n6dbf29baecb1d1593087ef1306ae7c78aa160c8beb04dc016e02549ae2d6d90d  guix-build-ce7d94a492e6/output/aarch64-linux-gnu/SHA256SUMS.part\r\n4b465e5e8f9652c176aa57cfe5c289267c28c3a3c684034a9ce471b529b95275  guix-build-ce7d94a492e6/output/aarch64-linux-gnu/bitcoin-ce7d94a492e6-aarch64-linux-gnu-debug.tar.gz\r\n85bc6fa008b83419d96443d9dcc212b46f0992387fd58fd2dda5da76536ee22c  guix-build-ce7d94a492e6/output/aarch64-linux-gnu/bitcoin-ce7d94a492e6-aarch64-linux-gnu.tar.gz\r\n5ed9ea52a8bd55361d2d9c01fbd1b25ec9970530c2776e6c1959424ba1689f52  guix-build-ce7d94a492e6/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n2e483011fac64462d3aa000b577c3c05c825506032d879e39612e096d7a6c65b  guix-build-ce7d94a492e6/output/arm-linux-gnueabihf/bitcoin-ce7d94a492e6-arm-linux-gnueabihf-debug.tar.gz\r\n7ff1e3ba54944a2be89dd7d68cb91dff6f8950de9d7b521e15dfb746965f81bd  guix-build-ce7d94a492e6/output/arm-linux-gnueabihf/bitcoin-ce7d94a492e6-arm-linux-gnueabihf.tar.gz\r\nabdf89e701b21b8c1238a8cec46aeaa55e0c3a0b88ad718636e89cde9813ca08  guix-build-ce7d94a492e6/output/arm64-apple-darwin/SHA256SUMS.part\r\nfb55cff0296cd5474811fe5cedcf28603628729dd085eeefa007c72582459b33  guix-build-ce7d94a492e6/output/arm64-apple-darwin/bitcoin-ce7d94a492e6-arm64-apple-darwin-codesigning.tar.gz\r\ne9aa566b1e79c467d7987b7c68fa608db788e6ddf89c4d90e524cd47b4faaf86  guix-build-ce7d94a492e6/output/arm64-apple-darwin/bitcoin-ce7d94a492e6-arm64-apple-darwin-unsigned.tar.gz\r\nbb428fc62a1230a55f49fa3b5c7ba8d588e8fed491357f890d5a6724a38b14e9  guix-build-ce7d94a492e6/output/arm64-apple-darwin/bitcoin-ce7d94a492e6-arm64-apple-darwin-unsigned.zip\r\n5ef4b75e94b2c8265fbc588bbb42467a84438af969fddac0ea61ced3e4113345  guix-build-ce7d94a492e6/output/dist-archive/bitcoin-ce7d94a492e6.tar.gz\r\n4f55d56a108c8f312a502cd5dfdf0840b091861a6d502df31caf4636a203697a  guix-build-ce7d94a492e6/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n66c5b1242c60e37098885a00e24efe19baee4afcd2e3d6407207523d8872f055  guix-build-ce7d94a492e6/output/powerpc64-linux-gnu/bitcoin-ce7d94a492e6-powerpc64-linux-gnu-debug.tar.gz\r\nd9dbbee7217544eda26e77158cd82caeaef2b40fb9fc7033323e7ffe64264109  guix-build-ce7d94a492e6/output/powerpc64-linux-gnu/bitcoin-ce7d94a492e6-powerpc64-linux-gnu.tar.gz\r\nd9b808cc5685c819abcebb4ace65f003ebc4bfedf3fca046b34de37994358782  guix-build-ce7d94a492e6/output/riscv64-linux-gnu/SHA256SUMS.part\r\neeeea470b1cf76515bfae14c779a3ea356d89f719d1fef1a81e8f0d6b04ab747  guix-build-ce7d94a492e6/output/riscv64-linux-gnu/bitcoin-ce7d94a492e6-riscv64-linux-gnu-debug.tar.gz\r\n9993da4eb51618b8bd25ec88cc576496720e5589315e9eba6f3ddab25f9c3e60  guix-build-ce7d94a492e6/output/riscv64-linux-gnu/bitcoin-ce7d94a492e6-riscv64-linux-gnu.tar.gz\r\n1b5a676580e0e79598d182f6ebbb05fb8aee2381edc3c09c042cae2600f448ab  guix-build-ce7d94a492e6/output/x86_64-apple-darwin/SHA256SUMS.part\r\n9152122d95a34d5df75305c6883c87707e7b09033fffd08e264d703ed177ef12  guix-build-ce7d94a492e6/output/x86_64-apple-darwin/bitcoin-ce7d94a492e6-x86_64-apple-darwin-codesigning.tar.gz\r\n2793f75730dbef6bdf12b5ed7135e22ed21178abff2926dee92843837d4ab544  guix-build-ce7d94a492e6/output/x86_64-apple-darwin/bitcoin-ce7d94a492e6-x86_64-apple-darwin-unsigned.tar.gz\r\ne89aafd7e4a330a41f470e8f0a91ea876fad7d19547b404600867413f1a8ccb7  guix-build-ce7d94a492e6/output/x86_64-apple-darwin/bitcoin-ce7d94a492e6-x86_64-apple-darwin-unsigned.zip\r\n955b27f881927a86da3c566357ad8ca68dbe17e9652bde8c482a57ceacba92cb  guix-build-ce7d94a492e6/output/x86_64-linux-gnu/SHA256SUMS.part\r\nfd012be97bdf5c75ac12ddef21526bfdb5e17ecc77cde9c34d832194b0dc3293  guix-build-ce7d94a492e6/output/x86_64-linux-gnu/bitcoin-ce7d94a492e6-x86_64-linux-gnu-debug.tar.gz\r\n0ecf7f80e9049369760d0e27fe6c026391ab25eae0f42336bef43e51a2621726  guix-build-ce7d94a492e6/output/x86_64-linux-gnu/bitcoin-ce7d94a492e6-x86_64-linux-gnu.tar.gz\r\n2e8085f5fecc246d841b0bf6f28ecd0684a6cee49252fc88c1019d7586c7b7a2  guix-build-ce7d94a492e6/output/x86_64-w64-mingw32/SHA256SUMS.part\r\nc60041e8137eda352557254c5f67fb83eeb97ecfec342ee528451bd44ee4523a  guix-build-ce7d94a492e6/output/x86_64-w64-mingw32/bitcoin-ce7d94a492e6-win64-codesigning.tar.gz\r\nb1be6b2f4de1c69c2e0e4de6dd97a4891ae9eb50d89435ef47247b5a187915a9  guix-build-ce7d94a492e6/output/x86_64-w64-mingw32/bitcoin-ce7d94a492e6-win64-debug.zip\r\nbfe143f41a20c537145c7044aca889b28efe19072b0150042a3bd865983b3d7e  guix-build-ce7d94a492e6/output/x86_64-w64-mingw32/bitcoin-ce7d94a492e6-win64-setup-unsigned.exe\r\n94a906b83d84db7b25f7e3cfdce2a2030243f2ee6cc70b1fc088459f0b2f382d  guix-build-ce7d94a492e6/output/x86_64-w64-mingw32/bitcoin-ce7d94a492e6-win64-unsigned.zip\r\n```\r\n\r\n</details>",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-02-05T16:04:00Z",
+      "updated_at": "2025-08-27T11:48:31Z",
+      "comments": 121,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31802",
+      "labels": [
+        "Build system"
+      ]
+    },
+    {
+      "number": 31800,
+      "title": "depends: Avoid using the `-ffile-prefix-map` compiler option",
+      "body": "This PR is similar to https://github.com/bitcoin/bitcoin/pull/31337 and applies analogous changes to all dependency packages.\r\n\r\nThe issue was [recently noticed](https://github.com/bitcoin/bitcoin/pull/31661#discussion_r1923896475) when `-ffile-prefix-map` was added to the `libevent` package, which is built in OSS-Fuzz.\r\n\r\nThis PR replaces `-ffile-prefix-map` in all packages for consistency.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/31770.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-02-05T14:56:12Z",
+      "updated_at": "2025-02-07T11:43:23Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31800",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31800.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [davidgumberg](https://github.com/bitcoin/bitcoin/pull/31800#issuecomment-2638037382), [theuni](https://github.com/bitcoin/bitcoin/pull/31800#pullrequestreview-2599895291) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31802](https://github.com/bitcoin/bitcoin/pull/31802) (Add bitcoin-{node,gui} to release binaries for IPC by Sjors)\n* [#31741](https://github.com/bitcoin/bitcoin/pull/31741) (multiprocess: Add libmultiprocess git subtree by ryanofsky)\n* [#30975](https://github.com/bitcoin/bitcoin/pull/30975) (ci: build multiprocess on most jobs by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-05T14:56:16Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "My Guix build:\r\n```\r\naarch64\r\n4ec7b4c22a31fa78161d7f826390e04a5ef50f04eba7c5e7eb5394166d613a16  guix-build-407062f2ac93/output/aarch64-linux-gnu/SHA256SUMS.part\r\n7577f1d0847ab472e60b1d6e14e28ed442c36db190d1c214d41013b296581447  guix-build-407062f2ac93/output/aarch64-linux-gnu/bitcoin-407062f2ac93-aarch64-linux-gnu-debug.tar.gz\r\n911518a3f02677a6a2ad0110c6b40b0e6f9789f30fa0f69229d39de54f565dfa  guix-build-407062f2ac93/output/aarch64-linux-gnu/bitcoin-407062f2ac93-aarch64-linux-gnu.tar.gz\r\n95858bf5b8445c87a8c1dabe8c313433898c2285cb4fb4e00ab034c6114d4881  guix-build-407062f2ac93/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n6cee8237469d7a38f5c57ed869fed46d238762bbe634c71cb4379cf4d04af07a  guix-build-407062f2ac93/output/arm-linux-gnueabihf/bitcoin-407062f2ac93-arm-linux-gnueabihf-debug.tar.gz\r\n140314842ec063b19df94963351c6d8ea381ad302a0a741ea1228ea55edf1607  guix-build-407062f2ac93/output/arm-linux-gnueabihf/bitcoin-407062f2ac93-arm-linux-gnueabihf.tar.gz\r\n3cf1a0b18c06b484dae9e2b32597b70d7d0e82f7ab7bd49419429f890c2c6166  guix-build-407062f2ac93/output/arm64-apple-darwin/SHA256SUMS.part\r\n48c1e3374c775eb8c352fb7c352dc993dcc0cb31df6d0bee9b4191122052b9cf  guix-build-407062f2ac93/output/arm64-apple-darwin/bitcoin-407062f2ac93-arm64-apple-darwin-unsigned.tar.gz\r\na92b2002b444309599edb2ce3e70978cebb7570deeee814ac4c123c0b17c981a  guix-build-407062f2ac93/output/arm64-apple-darwin/bitcoin-407062f2ac93-arm64-apple-darwin-unsigned.zip\r\n79623d028293a7bbe38c4ce6ed28e5844e6cb307318ed40a27b2fc407562f52b  guix-build-407062f2ac93/output/arm64-apple-darwin/bitcoin-407062f2ac93-arm64-apple-darwin.tar.gz\r\n7286cf2f60bcda77013968965eed78ad4e75ee3a2b1f37bbf997dd18f4a20d2c  guix-build-407062f2ac93/output/dist-archive/bitcoin-407062f2ac93.tar.gz\r\n0b3cf93084bc1b141949718271908ff2a03d617b3611465b730b626d1c5bbfb4  guix-build-407062f2ac93/output/powerpc64-linux-gnu/SHA256SUMS.part\r\naca234bdb7efea5345cdf565b128230dacefdbf07f691d965c27aac9c623a110  guix-build-407062f2ac93/output/powerpc64-linux-gnu/bitcoin-407062f2ac93-powerpc64-linux-gnu-debug.tar.gz\r\nbd1665d98c791e4c9867f39430122f8e530c64bd5e435cf088d83574051f8e28  guix-build-407062f2ac93/output/powerpc64-linux-gnu/bitcoin-407062f2ac93-powerpc64-linux-gnu.tar.gz\r\n41990f691e12f9f121ecd58f7860c9dad6f09d364dd5a11240dc9fa40e08d93b  guix-build-407062f2ac93/output/riscv64-linux-gnu/SHA256SUMS.part\r\n36c4a974ee41c102073ab0c3e565835756d45dff22b2fe13ef7f07675a7c428e  guix-build-407062f2ac93/output/riscv64-linux-gnu/bitcoin-407062f2ac93-riscv64-linux-gnu-debug.tar.gz\r\n7b24b2953a0b9ed12f7b16a2acb9b1b522e2e7122f9a417b7d5359219f0ee6c2  guix-build-407062f2ac93/output/riscv64-linux-gnu/bitcoin-407062f2ac93-riscv64-linux-gnu.tar.gz\r\nbe1090b8fd64a0fe35c291f11018538bab3129546e04c0cfa5092c5a0374f9d3  guix-build-407062f2ac93/output/x86_64-apple-darwin/SHA256SUMS.part\r\na870a16f6b480c5696f7557d11a4856bbf1d73d750fc0b431acc06a551eb3c03  guix-build-407062f2ac93/output/x86_64-apple-darwin/bitcoin-407062f2ac93-x86_64-apple-darwin-unsigned.tar.gz\r\n6cc34b8181f534a691ba604d0e5dea7f831ffd37d31bbe5e2e5bd31f9b6438c4  guix-build-407062f2ac93/output/x86_64-apple-darwin/bitcoin-407062f2ac93-x86_64-apple-darwin-unsigned.zip\r\n24a97148b6aa3a8dbeb6b43c07e2ad04ab590d70dbf90b860934721f20456588  guix-build-407062f2ac93/output/x86_64-apple-darwin/bitcoin-407062f2ac93-x86_64-apple-darwin.tar.gz\r\n57d440a300e042edde441e88260297d7c2543fd0fb750dc3fb95ff854f544367  guix-build-407062f2ac93/output/x86_64-linux-gnu/SHA256SUMS.part\r\ne4fc3e83481ce3628f0d880da7d3d87676f03c7ed731da4dba419d3bb084f07c  guix-build-407062f2ac93/output/x86_64-linux-gnu/bitcoin-407062f2ac93-x86_64-linux-gnu-debug.tar.gz\r\n2b02a234caf4d17d6e8fa35d2c79945923ddf3f1a736dad23c8852d05343dc87  guix-build-407062f2ac93/output/x86_64-linux-gnu/bitcoin-407062f2ac93-x86_64-linux-gnu.tar.gz\r\n38ecc4bd1603fb6249767218906a2c2fa16db4b1fdc47797c78a30ac113e5dfa  guix-build-407062f2ac93/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n35ce564f085cc93fe0533e14848a954ccbff3e583cba3a88713d7ffd2b2103f4  guix-build-407062f2ac93/output/x86_64-w64-mingw32/bitcoin-407062f2ac93-win64-debug.zip\r\nb4df22361b34d6d5c1a4f8f15917db04b0895c3d07fc1cf8fe9c76e2058a1637  guix-build-407062f2ac93/output/x86_64-w64-mingw32/bitcoin-407062f2ac93-win64-setup-unsigned.exe\r\n713c9e0b662851fefe262839362600d604b4bfbc9e0b7af72a360c3069be0d52  guix-build-407062f2ac93/output/x86_64-w64-mingw32/bitcoin-407062f2ac93-win64-unsigned.tar.gz\r\n251d115fce6ac930573264078f0c7d6b5b506e9185a418cffc9d358c9ed95602  guix-build-407062f2ac93/output/x86_64-w64-mingw32/bitcoin-407062f2ac93-win64.zip\r\n```\r\n\r\nUPD. Same hashes for `x86_64`.",
+          "created_at": "2025-02-05T17:53:14Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "Tested ACK https://github.com/bitcoin/bitcoin/pull/31800/commits/407062f2ac93624f350e9e8a4f641c882a2aaf2f. \r\n\r\nThe oss-fuzz coverage build failure described in #31770 that I am able to reproduce locally does not happen on this branch.\r\n\r\n\r\n<details> <summary> Steps to reproduce </summary>\r\n\r\n```bash\r\n# setup \r\ngit clone --depth 1 https://github.com/google/oss-fuzz.git\r\ngit clone https://github.com/bitcoin/bitcoin oss-fuzz/bitcoin\r\ngit clone --depth 1 https://github.com/bitcoin-core/qa-assets oss-fuzz/bitcoin/assets\r\ncd oss-fuzz\r\npython infra/helper.py build_image bitcoin-core\r\n\r\n# check out master and run fuzz coverage\r\ncd bitcoin && git switch master && cd ..\r\n\r\npython infra/helper.py build_fuzzers --sanitizer coverage bitcoin-core bitcoin/\r\npython infra/helper.py coverage bitcoin-core --fuzz-target psbt # fails \r\n\r\n# check out branch and run fuzz coverage \r\ncd bitcoin && git fetch origin pull/31800/head:31800 && git checkout 407062f2ac93624f350e9e8a4f641c882a2aaf2f && cd ..\r\n\r\npython infra/helper.py build_fuzzers --sanitizer coverage bitcoin-core bitcoin/\r\npython infra/helper.py coverage bitcoin-core --fuzz-target psbt # succeeds",
+          "created_at": "2025-02-05T21:15:20Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 31801,
+      "title": "lint: Qt exclusions are missing files",
+      "body": "The `tidy` job is meant to skip linting autogenerated Qt files:\n\nhttps://github.com/bitcoin/bitcoin/blob/b9c241804c0726737a0eb80f6f27e94ef341b42e/ci/test/03_test_script.sh#L173-L174\n\nhowever it is currently linting and include checking CMake generated files. i.e (https://cirrus-ci.com/task/5702771191578624?logs=ci#L3386):\n```bash\n[09:40:22.499] [ 20/666][2.6s] clang-tidy-19 -p=/ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu -quiet -load=/tidy-build/libbitcoin-tidy.so /ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/src/qt/bitcoinqt_autogen/EWIEGA46WW/qrc_bitcoin.cpp\n[09:46:45.492] [326/666][12.3s] clang-tidy-19 -p=/ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu -quiet -load=/tidy-build/libbitcoin-tidy.so /ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/src/qt/bitcoinqt_autogen/mocs_compilation.cpp\n[09:51:12.546] [527/666][26.7s] clang-tidy-19 -p=/ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu -quiet -load=/tidy-build/libbitcoin-tidy.so /ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/src/qt/bitcoinqt_autogen/EJRQKI7XPS/qrc_bitcoin_locale.cpp\n[10:00:58.530] (/ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/src/qt/bitcoinqt_autogen/mocs_compilation.cpp has correct #includes/fwd-decls)\n```",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-02-05T15:08:54Z",
+      "updated_at": "2025-02-21T15:57:47Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31801",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "I guess longer term this may be fixed by https://github.com/bitcoin/bitcoin/pull/31308 , but I haven't confirmed this.",
+          "created_at": "2025-02-05T15:39:13Z"
+        }
+      ]
+    },
+    {
+      "number": 31799,
+      "title": "Anticipation quantum attack ; post quantum security",
+      "body": "### Please describe the feature you'd like to see added.\n\nPost-quantum cryptocurrencies are an emerging field that aims to secure transactions and blockchains against attacks by quantum computers. The latter, thanks to their exponential computing power, could break the classic cryptographic systems used today (such as RSA, ECC and ECDSA) and compromise the security of blockchains.\n\nWhy post-quantum cryptos?\n\nBlockchains mainly use two cryptographic mechanisms vulnerable to quantum computers:\n\n    Digital signatures (ECDSA, Ed25519, RSA, etc.) – used to sign transactions.\n    Hash functions – used for mining and block creation.\n\nA sufficiently powerful quantum computer could:\n\n    Break private keys in record time via Shor's algorithm.\n    Finding collisions in hash functions via Grover's algorithm.\n\n What post-quantum solutions?\n\nTo make cryptocurrencies resistant to quantum attacks, several approaches are being developed:\nCryptography based on Euclidean networks (Lattice-based)\n\n Used in algorithms like CRYSTALS-Dilithium, Falcon and Kyber (selected by NIST for standardization).\n    Secure against known quantum attacks.\n\n Signatures based on hash functions\n\n    Example: XMSS (eXtended Merkle Signature Scheme) and SPHINCS+.\n    Based solely on hash functions, therefore more resistant to quantum attacks.\n\n3️⃣ Cryptography based on error correcting codes\n\n    Examples: McEliece (based on linear codes).\n    Very robust, but with very large public keys.\n\n4️⃣ Cryptography based on isogenies on elliptic curves\n\n    Example: SIKE (Supersingular Isogeny Key Encapsulation) (but recently broken by classic attacks).\n    Promising, but still needs improvement.\n\nWhich cryptos are already adopting these technologies?\n\nSome cryptocurrencies and projects are starting to integrate post-quantum solutions:\n\n    Bitcoin (via Taproot and Schnorr, but not yet post-quantum)\n    Ethereum (ongoing research on post-quantum signatures)\n    Quantum Resistant Ledger (QRL): Built from the ground up to resist quantum computers (uses XMSS).\n    Algorand: Active research on post-quantum signatures.\n    IOTA: Is based on signatures based on hash functions.\n\n🔮 What future for post-quantum cryptos?\n\n    NIST (National Institute of Standards and Technology) is currently finalizing post-quantum cryptography standards.\n    Adoption will be gradual, but necessary to ensure the sustainability of blockchains in the face of the evolution of quantum technologies.\n    There will need to be a smooth transition: migration of keys, updating of blockchain protocols, and compatibility with current systems.\n\n💡 Conclusion: Post-quantum cryptos are a necessity for the future security of blockchains.\n\n\n### Is your feature related to a problem, if so please describe it.\n\n_No response_\n\n### Describe the solution you'd like\n\nIt would therefore be necessary to add the maximum security to bitcoin.\n\n\nKeeping Bitcoin and other cryptocurrencies secure against quantum computers will require updating several critical elements of the protocol. Here's how it could be done:\n🚀 Updates needed to secure Bitcoin against quantum computing:\n1️⃣ Replace ECDSA with post-quantum signatures\n\n🔴 Problem: Bitcoin uses ECDSA (Elliptic Curve Digital Signature Algorithm) to sign transactions, but a quantum computer with Shor's algorithm could find the private key from the public key in minutes.\n✅ Solution: Adopt signature schemes resistant to quantum attacks, such as:\n\n    CRYSTALS-Dilithium 🏆 (chosen by NIST)\n    SPHINCS+ (based on hash functions, secure but slower)\n    Falcon (good compromise between security and performance)\n\n🛠️ Implementation: A soft fork or a BIP (Bitcoin Improvement Proposal) would be required to allow the use of new signatures in the Bitcoin protocol.\n2️⃣ Protect old Bitcoin addresses\n\n🔴 Problem: Many Bitcoin addresses already reveal their public key on the blockchain (example: P2PK and P2PKH addresses once used), which exposes them to a quantum attack.\n\nSolution:\n\nEncourage the use of SegWit and Taproot (which better hide public keys before use).\nMigrate funds from old addresses to more secure addresses before quantum computers become a real threat.\n\nStrengthen the hash functions used by Bitcoin\n\nProblem: Bitcoin uses SHA-256 for mining and RIPEMD-160 for addresses. Grover’s algorithm would allow a quantum computer to reduce the effort of breaking SHA-256 by a factor of √N (which is still very difficult, but theoretically possible in the long term).\nSolution:\n\nSwitch to SHA-3 or another post-quantum hash algorithm (such as those currently being evaluated by NIST).\nIncrease hash sizes for greater security.\n\nCreate post-quantum Bitcoin wallets\n\nProblem: Today, most wallets use keys generated by algorithms that are vulnerable to quantum attacks.\nSolution: Develop wallets integrating post-quantum signature schemes, while maintaining compatibility with current versions of Bitcoin.\nWhat is the future of Bitcoin in the face of quantum computers?\n\nIn ? years, quantum computers could be powerful enough to threaten current cryptography.\nSoft forks and hard forks will probably be necessary to add security without breaking the network.\nBitcoin could evolve gradually by testing these solutions on sidechains (example: RSK, Liquid).\n\nConclusion: Yes, we must add maximum security to Bitcoin now to prevent a malicious actor using a quantum computer from one day being able to steal BTC by recovering the private keys!\n\n### Describe any alternatives you've considered\n\n_No response_\n\n### Please leave any additional context\n\n_No response_",
+      "state": "closed",
+      "user": "JirA44",
+      "created_at": "2025-02-05T04:04:39Z",
+      "updated_at": "2025-05-15T06:23:47Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31799",
+      "labels": [
+        "Feature"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "Usually the issue tracker is used to track technical issues related to the Bitcoin Core code base.\n\nNetwork-wide consensus and/or P2P changes first need to be discussed with the greater ecosystem, for example https://groups.google.com/g/bitcoindev, or https://delvingbitcoin.org/. Also, they need a BIP to be implemented in Bitcoin Core and other software that connects to the bitcoin P2P network.\n\nIf you follow those pointers, you will find recent and active discussions around this topic.",
+          "created_at": "2025-02-05T09:14:20Z"
+        }
+      ]
+    },
+    {
+      "number": 31798,
+      "title": "signet /README.md",
+      "body": "MINER=\"./contrib/signet/miner\"\nGRIND=\"./build/src/bitcoin-util grind\"\n$MINER calibrate --grind-cmd=\"$GRIND\"\nnbits=1e00f403 for 25s average mining time\n\n\nCLI=\"./build/src/bitcoin-cli -conf=mysignet.conf\"\nADDR=$($CLI -signet getnewaddress)\nNBITS=1e00f403\n$MINER --cli=\"$CLI\" generate --grind-cmd=\"$GRIND\" --address=\"$ADDR\" --nbits=$NBITS  \n\n\nPSBT signing failed   \n\n\nHow to solve this problem PSBT signing failed",
+      "state": "closed",
+      "user": "lilin998",
+      "created_at": "2025-02-05T01:31:00Z",
+      "updated_at": "2025-02-05T13:29:04Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31798",
+      "labels": [
+        "Questions and Help"
+      ],
+      "comment_list": [
+        {
+          "user": "pinheadmz",
+          "body": "> PSBT signing failed\n\nThis happens when the wallet does not have the private key to sign valid signet blocks that satisfy the challenge",
+          "created_at": "2025-02-05T01:46:11Z"
+        },
+        {
+          "user": "lilin998",
+          "body": "> > PSBT 签名失败\n> \n> 当钱包没有私钥来签署满足挑战的有效签名块时，就会发生这种情况\n\nroot@iZt4n4iibil3u7hsxshmuwZ:~/bitcoin# bitcoin-cli -signet -conf=/root/bitcoin/mysignet.conf getwalletinfo\n{\n  \"walletname\": \"mysignet_wallet\",\n  \"walletversion\": 169900,\n  \"format\": \"sqlite\",\n  \"balance\": 0.00000000,\n  \"unconfirmed_balance\": 0.00000000,\n  \"immature_balance\": 0.00000000,\n  \"txcount\": 4,\n  \"keypoolsize\": 4000,\n  \"keypoolsize_hd_internal\": 3999,\n  \"paytxfee\": 0.00000000,\n  \"private_keys_enabled\": true,\n  \"avoid_reuse\": false,\n  \"scanning\": false,\n  \"descriptors\": true,\n  \"external_signer\": false,\n  \"blank\": false,\n  \"birthtime\": 1738510885,\n  \"lastprocessedblock\": {\n    \"hash\": \"000000bc32ca0657d0ebfa5d69283666aa227b9c09a242e70056fd0a7ca53c07\",\n    \"height\": 234030\n  }\n}\n\nroot@iZt4n4iibil3u7hsxshmuwZ:~/bitcoin# bitcoin-cli -signet -conf=/root/bitcoin/mysignet.conf getaddressinfo \"tb1q00rt2zgaer3hlgz298wn7ln8kw80hhdy5w45f5\"\n{\n  \"address\": \"tb1q00rt2zgaer3hlgz298wn7ln8kw80hhdy5w45f5\",\n  \"scriptPubKey\": \"00147bc6b5091dc8e37fa04a29dd3f7e67b38efbdda4\",\n  \"ismine\": true,\n  \"solvable\": true,\n  \"desc\": \"wpkh([64062dc8/84h/1h/0h/0/0]031569ecacef0f6433385512b351fd4ae67683361698d3262d3d8f75359020c043)#ef97sg7h\",\n  \"parent_desc\": \"wpkh([64062dc8/84h/1h/0h]tpubDCmxsiiB2Jezi7yTXSWhLcL6exdgnmBLJ7nh33us48zVysCgeUZf9MiqMAKH9YBjWYtKwNezE1PidBU3mRFvBMt8XRnfo5daokBvu5BMbuC/0/*)#tqvsevdc\",\n  \"iswatchonly\": false,\n  \"isscript\": false,\n  \"iswitness\": true,\n  \"witness_version\": 0,\n  \"witness_program\": \"7bc6b5091dc8e37fa04a29dd3f7e67b38efbdda4\",\n  \"pubkey\": \"031569ecacef0f6433385512b351fd4ae67683361698d3262d3d8f75359020c043\",\n  \"ischange\": false,\n  \"timestamp\": 1738510885,\n  \"hdkeypath\": \"m/84h/1h/0h/0/0\",\n  \"hdseedid\": \"0000000000000000000000000000000000000000\",\n  \"hdmasterfingerprint\": \"64062dc8\",\n  \"labels\": [\n    \"\"\n  ]\n}\n",
+          "created_at": "2025-02-05T01:53:41Z"
+        },
+        {
+          "user": "lilin998",
+          "body": "This seems to have a private key.",
+          "created_at": "2025-02-05T01:54:26Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "do you have the correct `signetchallenge` in `bitcoin.conf`?",
+          "created_at": "2025-02-05T01:55:47Z"
+        },
+        {
+          "user": "lilin998",
+          "body": "> 你有正确的`signetchallenge`吗`bitcoin.conf`？\n\n\n\n> do you have the correct `signetchallenge` in `bitcoin.conf`?\nserver=1\ndaemon=1\ntxindex=1\n\n[signet]\nrpcuser=myuser\nrpcpassword=mypassword\nrpcallowip=0.0.0.0/0\nrpcbind=127.0.0.1\nrpcport=38332\nsignet=1\n\n\n\n\n\n\n\n\n\n",
+          "created_at": "2025-02-05T01:56:22Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "What are you trying to accomplish? If you want to start a brand new signet chain you need to add `signetchallenge=...` in `bitcoin.conf` with a BIP325 challenge: https://github.com/bitcoin/bips/blob/master/bip-0325.mediawiki#specification",
+          "created_at": "2025-02-05T02:02:09Z"
+        },
+        {
+          "user": "lilin998",
+          "body": " \n\n\n> What are you trying to accomplish? If you want to start a brand new signet chain you need to add `signetchallenge=...` in `bitcoin.conf` with a BIP325 challenge: https://github.com/bitcoin/bips/blob/master/bip-0325.mediawiki#specification\n\nI want to dig up some sbtc test coins",
+          "created_at": "2025-02-05T02:04:19Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "You will not be able to generate blocks on the default signet chain because you do not have the correct private key. You can try one of the other methods listed here: https://github.com/bitcoin/bitcoin/blob/master/contrib/signet/README.md",
+          "created_at": "2025-02-05T02:06:00Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 7,
+    "issues": 3
+  }
+}

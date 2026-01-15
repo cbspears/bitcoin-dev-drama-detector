@@ -1,0 +1,633 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:32:54.474680+00:00",
+  "date": "2025-11-18",
+  "pull_requests": [
+    {
+      "number": 33908,
+      "title": "kernel: add context‑free block validation API (`btck_check_block_context_free`) with POW/Merkle flags",
+      "body": "This PR exposes Bitcoin Core’s context‑free block checks to library users via a new C API entry point, `btck_check_block_context_free`. \r\n\r\nCallers can validate a block’s structure (size/weight, coinbase rules, per‑tx context‑free checks) and optionally re‑run Proof‑of‑Work and Merkle‑root verification without touching chainstate, the block index, or the UTXO set. \r\n\r\nRationale\r\nClients embedding the kernel need a pure block sanity check without requiring node state or disk writes (candidate block validation, for example). This API offers that surface in a single call, with optional PoW/Merkle toggles to avoid redundant work when the header has already been validated or when Merkle verification is deferred.",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2025-11-18T23:37:30Z",
+      "updated_at": "2025-12-29T21:28:37Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33908",
+      "labels": [
+        "Validation",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33908.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Approach ACK | [yuvicc](https://github.com/bitcoin/bitcoin/pull/33908#pullrequestreview-3486594405) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33891](https://github.com/bitcoin/bitcoin/pull/33891) (kernel: Expose reusable `PrecomputedTransactionData` in script validation by joshdoman)\n* [#33856](https://github.com/bitcoin/bitcoin/pull/33856) (kernel, validation: Refactor ProcessNewBlockHeaders to return BlockValidationState by yuvicc)\n* [#33822](https://github.com/bitcoin/bitcoin/pull/33822) (kernel: Add block header support and validation by yuvicc)\n* [#33796](https://github.com/bitcoin/bitcoin/pull/33796) (kernel: Expose `CheckTransaction` consensus validation function by w0xlt)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- \"The returned consensus params is not owned and depends on the lifetime of the chain parameters.\" -> \"The returned consensus params are not owned and depend on the lifetime of the chain parameters.\" [subject \"consensus params\" is plural so verbs must be plural]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-11-18T23:37:37Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "Concept ACK, Approach NACK from my side.\r\n\r\nCurrently, `btck_check_block_context_free` requires a full `btck_Context*`, but it only uses`context->m_chainparams->GetConsensus()`. Library user will need to maintain a full context object just to perform context-free block validation checks which I think is not a good idea. Also, the function doesn't clearly communicate that only consensus params are needed and not full context. I think a better approach could be to expose opaque struct for consensus params (`btck_ConsensusParams`). This makes the API lighter-weight and more clearly expresses the actual behaviour. \r\nI've been working on a similar implementation to expose context free `checkblock` and made a [patch](https://github.com/bitcoin/bitcoin/compare/master...yuvicc:bitcoin:2025-11-expose_check_block_context_free_validation). \r\nThe wrapper and test_kernel also needs to be updated. \r\n\r\nThe use of bitflags for extensibility look good imo.",
+          "created_at": "2025-11-19T10:22:44Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "Both @w0xlt and @yuvicc, please don't introduce more [boolean trap](https://ariya.io/2011/08/hall-of-api-shame-boolean-trap)s.",
+          "created_at": "2025-11-19T11:10:15Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `ASan + LSan + UBSan + integer`: https://github.com/bitcoin/bitcoin/actions/runs/19520546781/job/55882840198</sub>\n<sub>LLM reason (✨ experimental): C++ compile error: overridden BlockChecked signature mismatches base (hides virtual with BlockValidationState vs BlockValidationStateView).</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-11-20T00:18:35Z"
+        },
+        {
+          "user": "w0xlt",
+          "body": "Thanks for the review @yuvicc and @purpleKarrot .\r\n\r\nGreat idea exposing the chain parameter class.\r\nI’ve updated the PR to follow this approach and split it into three commits for better readability and easier reviewing (and added @yuvicc as co-author).\r\nI also had to update `BlockValidationState` so the reference parameter works correctly.\r\nI kept `btck_BlockCheckFlags` to avoid unclear boolean parameters.",
+          "created_at": "2025-11-20T00:23:44Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-12-27T17:43:19Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "I think the most important question is this: Is there a valid use case for an invalid block?\r\nCould \"valid\" be an [invariant](https://en.wikipedia.org/wiki/Invariant_(mathematics)#Invariants_in_computer_science) of block, so that a block is guaranteed to be valid by construction?\r\n",
+          "created_at": "2025-12-29T21:28:33Z"
+        }
+      ]
+    },
+    {
+      "number": 33907,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "andradepsa",
+      "created_at": "2025-11-18T22:41:44Z",
+      "updated_at": "2025-11-18T22:42:13Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33907",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "\n♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous.\nGenerally, please focus on creating high-quality, original content that demonstrates a clear\nunderstanding of the project's requirements and goals.\n\n📝 Moderators: If this is spam, please replace the title with `.`, so that the thread does not appear in\nsearch results.\n",
+          "created_at": "2025-11-18T22:41:48Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "\nLLM spam detection (✨ experimental): SPAM. The submission contains no substantive description, rationale, or code—only boilerplate/template text and a vague promotional-sounding title—so it appears to be a placeholder or irrelevant promotional submission rather than a legitimate issue or PR.\n\n♻️ Automatically wiping, closing, and locking for now based on heuristics.\nGenerally, please focus on creating high-quality, original content that demonstrates a clear\nunderstanding of the project's requirements and goals.\n",
+          "created_at": "2025-11-18T22:41:53Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33907.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- ``` (end fence shown as ````) -> ``` [The code block in the README was closed with four backticks (````), which breaks standard Markdown code fencing; use three backticks to properly close the ```text block.]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-11-18T22:41:56Z"
+        }
+      ]
+    },
+    {
+      "number": 33906,
+      "title": "depends: Add patch for Windows11Style plugin",
+      "body": "This PR fixes https://github.com/bitcoin-core/gui/issues/906:\r\n\r\n<img width=\"561\" height=\"179\" alt=\"image\" src=\"https://github.com/user-attachments/assets/6bb6d12b-91a6-4659-b6eb-be64093ec86d\" />",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-11-18T22:38:03Z",
+      "updated_at": "2025-11-25T17:14:54Z",
+      "comments": 18,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33906",
+      "labels": [
+        "Windows",
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33906.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [waketraindev](https://github.com/bitcoin/bitcoin/pull/33906#issuecomment-3550854849), [fanquake](https://github.com/bitcoin/bitcoin/pull/33906#issuecomment-3576659216) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- Commonstyle -> CommonStyle [proper capitalization of the class/name for clarity and consistency]\n- layouted -> laid out [“layouted” is nonstandard; “laid out” is correct English and clearer]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-11-18T22:38:10Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "ACK 8558902e576e2c2d66f6083b66953dd6cc464de4\r\n\r\nTested on Windows 11 (Dark Theme) (wsl/depends cross build) x86_64-w64-mingw32 [Release config]\r\nTested on Windows 11 (Dark Theme) (guix build) x86_64-w64-mingw32\r\n\r\n<img width=\"781\" height=\"161\" alt=\"image\" src=\"https://github.com/user-attachments/assets/9400b604-86a5-4635-9fa5-07e21b80e32e\" />\r\n\r\n",
+          "created_at": "2025-11-19T05:19:52Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "My Guix build:\r\n```\r\naarch64\r\n15ff16a4958d217927fb68c99c0dcd19bf51595517c59aae8b442b3e1b4529e2  guix-build-8558902e576e/output/aarch64-linux-gnu/SHA256SUMS.part\r\ndb8080232c5216f0f9cb06ce7052fe81156f9dab6a15964be187f1186f24e47e  guix-build-8558902e576e/output/aarch64-linux-gnu/bitcoin-8558902e576e-aarch64-linux-gnu-debug.tar.gz\r\ne3c053d21dcab9234a1943af0e61a2c7c9270429238e0eb11fb0378378bcf87e  guix-build-8558902e576e/output/aarch64-linux-gnu/bitcoin-8558902e576e-aarch64-linux-gnu.tar.gz\r\n1194b7e6e382fb001d616da835c9761ee11f0dbd8af66edf607a32640979b733  guix-build-8558902e576e/output/arm-linux-gnueabihf/SHA256SUMS.part\r\nab5bdd0b000a80a6b6bdb1c0f3fb79bee56f7abf24df31ee298c37fbdc175c8c  guix-build-8558902e576e/output/arm-linux-gnueabihf/bitcoin-8558902e576e-arm-linux-gnueabihf-debug.tar.gz\r\nee144d6242f16c5a35721db8ce4630ac3449c93bd77042f78cf33ac56ba6269b  guix-build-8558902e576e/output/arm-linux-gnueabihf/bitcoin-8558902e576e-arm-linux-gnueabihf.tar.gz\r\n391aabaa846d250ee688a50b70197572135925467c0e8e82fdc65c0b87df1c46  guix-build-8558902e576e/output/arm64-apple-darwin/SHA256SUMS.part\r\ncf051aed651410ff322e8db6ee5680921cf46fed7a9134583c2ae9a9425bfd1b  guix-build-8558902e576e/output/arm64-apple-darwin/bitcoin-8558902e576e-arm64-apple-darwin-codesigning.tar.gz\r\nab8b8cb5b8a78f7f7b16189987a515c62190d1a8084090545b0ec2aaa087de27  guix-build-8558902e576e/output/arm64-apple-darwin/bitcoin-8558902e576e-arm64-apple-darwin-unsigned.tar.gz\r\n38bd598d81e3dfc4f2c95b64e48254e3e59fa1df8d2bffecb4a86a21bff8e5e8  guix-build-8558902e576e/output/arm64-apple-darwin/bitcoin-8558902e576e-arm64-apple-darwin-unsigned.zip\r\n6d741dc4705f40f8b75abb084e232a2918565a22b2d000587fb952d91c1d8637  guix-build-8558902e576e/output/dist-archive/bitcoin-8558902e576e.tar.gz\r\n256e197aaacdf80cc2211c039ff3cf8849f2bb3bbdc93ca40272a6405403a11f  guix-build-8558902e576e/output/powerpc64-linux-gnu/SHA256SUMS.part\r\na7cf9be7059a7e54e0e6d1afc773dfbad9c84cb4a00fc13176b2e4d2c50e0d26  guix-build-8558902e576e/output/powerpc64-linux-gnu/bitcoin-8558902e576e-powerpc64-linux-gnu-debug.tar.gz\r\n928705be4e1b11e5f6c73b1a73682a25eb750db9132d7da376a7b263b0a896e3  guix-build-8558902e576e/output/powerpc64-linux-gnu/bitcoin-8558902e576e-powerpc64-linux-gnu.tar.gz\r\n9d598132b77ce381b9afe5cf4a534c093cb2e42e3606eeae4214c4c824ed8050  guix-build-8558902e576e/output/riscv64-linux-gnu/SHA256SUMS.part\r\nab5ad1ea8ea2ca4893af2b4acde092201ea86045a56db4251d05dafa96a6a308  guix-build-8558902e576e/output/riscv64-linux-gnu/bitcoin-8558902e576e-riscv64-linux-gnu-debug.tar.gz\r\n685d8b9cf3283b3474b5fcf73794f5ad7d6e9b8c934e09943803bdd9ef260612  guix-build-8558902e576e/output/riscv64-linux-gnu/bitcoin-8558902e576e-riscv64-linux-gnu.tar.gz\r\nfecd398f3192f41ae284b7eaa6f5cb8f2b71adb52c04fa76aa3e3cc0adfd0c11  guix-build-8558902e576e/output/x86_64-apple-darwin/SHA256SUMS.part\r\n4bc6f845db5e40dbb8a5d4e930efecf5cbef7c23d1ee3067e3a1546dd3165e0d  guix-build-8558902e576e/output/x86_64-apple-darwin/bitcoin-8558902e576e-x86_64-apple-darwin-codesigning.tar.gz\r\nf17ea91b569df77a64d9a112a16c249bda84b474b5573fb270ab1c9cecb43a79  guix-build-8558902e576e/output/x86_64-apple-darwin/bitcoin-8558902e576e-x86_64-apple-darwin-unsigned.tar.gz\r\ne3c727048fe2148ed870b14ab0dafc06d5a31be158019027f88e0632c4476448  guix-build-8558902e576e/output/x86_64-apple-darwin/bitcoin-8558902e576e-x86_64-apple-darwin-unsigned.zip\r\nb2c436449a3eb45c3b8276414f540566fe87160d7760a550dc896987b55aa175  guix-build-8558902e576e/output/x86_64-linux-gnu/SHA256SUMS.part\r\ncdea44cd319f2d2a8888fc7f68c5b8d89d8baa63bc019d949c26c141021c5e43  guix-build-8558902e576e/output/x86_64-linux-gnu/bitcoin-8558902e576e-x86_64-linux-gnu-debug.tar.gz\r\n64dd0fa4fd0c08a9561b0aaaa5e8f1642d4f1ff475be43e3ebf9f94857175292  guix-build-8558902e576e/output/x86_64-linux-gnu/bitcoin-8558902e576e-x86_64-linux-gnu.tar.gz\r\nf37da8124a6392893fc7b18cfd72c616cac022eaed66725b1632b9e0011e1391  guix-build-8558902e576e/output/x86_64-w64-mingw32/SHA256SUMS.part\r\naa44003342fd3e4fb9d8c1693d12d31788626988cd9f47840e21afe9203deef0  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-codesigning.tar.gz\r\nad14fac93313dcaaba144f944cd0058ef1581bc582645d20f5c414a0db116e14  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-debug.zip\r\n3ae1c3daa2a7932e83a84b2ea1b9a8ebcc912fbfe2dfad9b98b3f38ce402f292  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-setup-unsigned.exe\r\n59f31a2c09aac36b3b666217443f311945199255a85f5c78751ae7d9936083a5  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-unsigned.zip\r\n```",
+          "created_at": "2025-11-19T07:49:33Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "```\r\nf37da8124a6392893fc7b18cfd72c616cac022eaed66725b1632b9e0011e1391  guix-build-8558902e576e/output/x86_64-w64-mingw32/SHA256SUMS.part\r\naa44003342fd3e4fb9d8c1693d12d31788626988cd9f47840e21afe9203deef0  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-codesigning.tar.gz\r\nad14fac93313dcaaba144f944cd0058ef1581bc582645d20f5c414a0db116e14  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-debug.zip\r\n3ae1c3daa2a7932e83a84b2ea1b9a8ebcc912fbfe2dfad9b98b3f38ce402f292  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-setup-unsigned.exe\r\n59f31a2c09aac36b3b666217443f311945199255a85f5c78751ae7d9936083a5  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-unsigned.zip\r\n```",
+          "created_at": "2025-11-19T10:58:24Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Can we just update Qt?",
+          "created_at": "2025-11-19T11:40:37Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Can we just update Qt?\r\n\r\nUpdating Qt would require raising the minimum GCC version for Windows cross-compilation to [13.1](https://doc.qt.io/qt-6.8/supported-platforms.html#windows). Are we comfortable with that?\r\n",
+          "created_at": "2025-11-19T11:45:13Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> minimum GCC version for Windows cross-compilation to [13.1](https://doc.qt.io/qt-6.8/supported-platforms.html#windows).\r\n\r\nHave you checked that it doesn't work with 12?  According to the documentation, Qt 6.7 (which we currently use) doesn't support any of our Linux compilers. i.e GCC 12+: https://doc.qt.io/archives/qt-6.7/supported-platforms.html#linux-x11, or macOS cross-compilation using Clang: https://doc.qt.io/archives/qt-6.7/supported-platforms.html#macos. So its not clear why we would need to bump things or can't use anyhting other than what Qt claims to support, but only for Windows?",
+          "created_at": "2025-11-19T12:32:22Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "For reference, this is what I get building master `x86_64-w64-mingw32-gcc (GCC)` 13-posix WSL/Depends build\r\n**without** this patch (issue: https://github.com/bitcoin-core/gui/issues/906)\r\n\r\n<img width=\"776\" height=\"158\" alt=\"image\" src=\"https://github.com/user-attachments/assets/8ad1ffec-4331-4439-b22e-df008eabc57e\" />\r\n\r\nThe amount inputbox/spinner is too small and inputed amount is not visible.",
+          "created_at": "2025-11-19T13:36:44Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> > minimum GCC version for Windows cross-compilation to [13.1](https://doc.qt.io/qt-6.8/supported-platforms.html#windows).\r\n> \r\n> Have you checked that it doesn't work with 12?\r\n\r\nThis [branch](https://github.com/hebasto/bitcoin/tree/251119-qt6.9) fails to cross-compile on Debian Bookworm with GCC 12.2.0:\r\n```\r\n/home/hebasto/bitcoin/depends/work/build/x86_64-w64-mingw32/qt/6.9.3-d5ebe8f681b/qtbase/src/3rdparty/pcre2/src/pcre2_compile.c: In function ‘pcre2_compile_16’:\r\n/home/hebasto/bitcoin/depends/work/build/x86_64-w64-mingw32/qt/6.9.3-d5ebe8f681b/qtbase/src/3rdparty/pcre2/src/pcre2_compile.c:11093:1: internal compiler error: in i386_pe_seh_unwind_emit, at config/i386/winnt.cc:1274\r\n```\r\n",
+          "created_at": "2025-11-19T18:47:35Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I'd say it is fine to bump the minimum required to 13 for win-cross compilation:\r\n\r\n```diff\r\ndiff --git a/doc/build-windows.md b/doc/build-windows.md\r\nindex ce822dd0dc..9d3ec9cd86 100644\r\n--- a/doc/build-windows.md\r\n+++ b/doc/build-windows.md\r\n@@ -15,6 +15,7 @@ Other options which may work, but which have not been extensively tested are (pl\r\n \r\n The instructions below work on Ubuntu and Debian. Make sure the distribution's `g++-mingw-w64-x86-64-posix`\r\n package meets the minimum required `g++` version specified in [dependencies.md](dependencies.md).\r\n+If compiling with the GUI (default in depends), at least g++ version 13 is required.\r\n \r\n Installing Windows Subsystem for Linux\r\n ---------------------------------------\r\n```\r\n\r\nBut no strong opinion. Either way is fine.",
+          "created_at": "2025-11-19T20:02:19Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Either way is fine.\n\nWe should also bear in mind that the fix for the original issue needs to be backported to 30.x.",
+          "created_at": "2025-11-19T20:09:13Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> This [branch](https://github.com/hebasto/bitcoin/tree/251119-qt6.9) fails to cross-compile on Debian Bookworm with GCC 12.2.0:\r\n\r\nThat's the same issue we work around in CMake, which is fixed by just turning off stack-clash-protection: https://github.com/fanquake/bitcoin/commit/26e809127d9fb4c30c8c1bc36f430920c392abaf. However it looks like there are other issues, possibly due to https://github.com/qt/qtbase/commit/d25d9f2c2673bc287590d9a83bd7ef1357d7021a#diff-4ae1a340d7e79a6402009cb635708b4950b1633f4bc850aba49ab592becee725. That commit is a bit confusing, because it says:\r\n> as of v13.1.0, MinGW supports most of the definitions in these headers.\r\n\r\nHowever there is no v13.1.0 of mingw-w64: https://www.mingw-w64.org/changelog/. The latest release is v13.0.0, and at the time of that commit, it was v11.0.1. So v13.1.0 seems to be in reference to the version of GCC, rather than the version of the headers used.",
+          "created_at": "2025-11-20T10:57:11Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> > as of v13.1.0, MinGW supports most of the definitions in these headers.\r\n> \r\n> However there is no v13.1.0 of mingw-w64: https://www.mingw-w64.org/changelog/. The latest release is v13.0.0, and at the time of that commit, it was v11.0.1. So v13.1.0 seems to be in reference to the version of GCC, rather than the version of the headers used.\r\n\r\nI assume they were referring to the GCC cross-compiler version, not mingw-w64 itself.",
+          "created_at": "2025-11-20T12:14:52Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Friendly ping @davidgumberg @hodlinator :)",
+          "created_at": "2025-11-20T17:15:24Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Concept ACK on applying the patch for now.",
+          "created_at": "2025-11-20T17:40:03Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Guix Build (x86_64):\r\n```bash\r\n6d741dc4705f40f8b75abb084e232a2918565a22b2d000587fb952d91c1d8637  guix-build-8558902e576e/output/dist-archive/bitcoin-8558902e576e.tar.gz\r\nf37da8124a6392893fc7b18cfd72c616cac022eaed66725b1632b9e0011e1391  guix-build-8558902e576e/output/x86_64-w64-mingw32/SHA256SUMS.part\r\naa44003342fd3e4fb9d8c1693d12d31788626988cd9f47840e21afe9203deef0  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-codesigning.tar.gz\r\nad14fac93313dcaaba144f944cd0058ef1581bc582645d20f5c414a0db116e14  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-debug.zip\r\n3ae1c3daa2a7932e83a84b2ea1b9a8ebcc912fbfe2dfad9b98b3f38ce402f292  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-setup-unsigned.exe\r\n59f31a2c09aac36b3b666217443f311945199255a85f5c78751ae7d9936083a5  guix-build-8558902e576e/output/x86_64-w64-mingw32/bitcoin-8558902e576e-win64-unsigned.zip\r\n```",
+          "created_at": "2025-11-25T17:04:45Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "ACK 8558902e576e2c2d66f6083b66953dd6cc464de4 - did not test on Windows.",
+          "created_at": "2025-11-25T17:06:23Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to `30.x` in #33609.",
+          "created_at": "2025-11-25T17:14:54Z"
+        }
+      ]
+    },
+    {
+      "number": 33905,
+      "title": "ci: Consistenly only cache on the default branch",
+      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/33685\r\n\r\nThe general idea for caches is to only save them on pushes to the default branch, because the cache is limited in size and time that the only benefit of the cache can be to speed up pull requests against the default branch.\r\n\r\nBackport pull requests to older branches don't benefit from caches, because usually they will be running into a cache miss anyway. Also, they would cause the cache size to overflow and lead to cache misses down the line.\r\n\r\nSo fix it by consistently applying cache saves only on the default branch.\r\n\r\nFor reference, the same is already done for the composite action in this repo: https://github.com/bitcoin/bitcoin/blob/2444488f6ad32dcbbed51a73cd4f59ff3a239e32/.github/actions/save-caches/action.yml#L15",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-11-18T18:23:26Z",
+      "updated_at": "2025-11-20T18:03:29Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33905",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33905.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/33905#pullrequestreview-3479795946), [willcl-ark](https://github.com/bitcoin/bitcoin/pull/33905#pullrequestreview-3481757071) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-18T18:23:33Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @willcl-ark @m3dwards ",
+          "created_at": "2025-11-19T09:33:05Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Yeah, I guess even if a pull is opened from a branched named equally to the default branch, the ref_name is rewritten to `<pr_number>/merge`, according to https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#github-context\r\n\r\nHowever, it can't hurt to check twice explicitly, so I'll leave as-is for now :sweat_smile: ",
+          "created_at": "2025-11-19T10:00:34Z"
+        }
+      ]
+    },
+    {
+      "number": 33904,
+      "title": "rest: add interface for gettxspendingprevout rpc",
+      "body": "This creates a REST interface for the `gettxspendingprevout` RPC, it also includes functional tests and updates to the REST docs\r\n\r\nThis is part of https://github.com/bitcoin/bitcoin/issues/33808 but would still need  [@sstone’s](https://github.com/sstone) PR https://github.com/bitcoin/bitcoin/pull/24539, but that can be left as a follow-up for when it is merged.\r\n\r\nIf it is prefered to open a PR after https://github.com/bitcoin/bitcoin/pull/24539 I can close this and reopen after its merged ",
+      "state": "open",
+      "user": "kevkevinpal",
+      "created_at": "2025-11-18T16:37:00Z",
+      "updated_at": "2025-12-17T16:59:18Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33904",
+      "labels": [
+        "RPC/REST/ZMQ",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33904.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34074](https://github.com/bitcoin/bitcoin/pull/34074) (A few followups after introducing `/rest/blockpart/` endpoint by romanz)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-18T16:37:10Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-12-17T16:59:18Z"
+        }
+      ]
+    },
+    {
+      "number": 33903,
+      "title": "ci: Remove redundant busybox option",
+      "body": "The option was fine, but now that there is a dedicated Alpine Linux task, which uses BusyBox, it seems redundant.\r\n(See: `ci/test/00_setup_env_native_alpine_musl.sh`)\r\n\r\nSo remove the `USE_BUSY_BOX` option, along with the `BINS_SCRATCH_DIR` env var.\r\n\r\nAlso includes two small ci-doc fixups.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-11-18T15:26:30Z",
+      "updated_at": "2025-11-25T16:39:31Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33903",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33903.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fanquake](https://github.com/bitcoin/bitcoin/pull/33903#pullrequestreview-3505228993) |\n| Concept ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/33903#issuecomment-3549740070) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33732](https://github.com/bitcoin/bitcoin/pull/33732) (ci: Call docker exec from Python script to fix word splitting by maflcko)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-18T15:26:40Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> The option was fine, but it never found an issue, IIRC.\r\n\r\nI’m not disputing this specific change, but that line of reasoning isn’t valid, as the absence of past errors does not imply their absence in the future. It seems as a form of [the appeal to ignorance fallacy](https://en.wikipedia.org/wiki/Argument_from_ignorance).",
+          "created_at": "2025-11-18T15:40:42Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Concept ACK",
+          "created_at": "2025-11-18T15:48:39Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > The option was fine, but it never found an issue, IIRC.\r\n> \r\n> I’m not disputing this specific change, but that line of reasoning isn’t valid, as the absence of past errors does not imply their absence in the future. It seems as a form of [the appeal to ignorance fallacy](https://en.wikipedia.org/wiki/Argument_from_ignorance).\r\n\r\nThx, removed the line from the pull description. It being redundant is the real reason, also put in the pull title. It not having found an issue is more a \"fun-fact\" I wanted to highlight.",
+          "created_at": "2025-11-18T16:05:34Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Concept ACK.",
+          "created_at": "2025-11-18T22:44:48Z"
+        }
+      ]
+    },
+    {
+      "number": 33902,
+      "title": "doc: Document compiler configuration for native depends packages",
+      "body": "Fixes: #33859\r\n\r\nPreviously one had to read the Makefile (and various *.mk configuration\r\nfiles) to see how to correctly override CC and CXX when building native\r\ndepends packages.\r\n\r\nDetail this in README.md to make it clearer.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2025-11-18T15:23:18Z",
+      "updated_at": "2025-12-21T15:26:51Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33902",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33902.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/33902#pullrequestreview-3482268948), [maflcko](https://github.com/bitcoin/bitcoin/pull/33902#issuecomment-3553588849), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/33902#pullrequestreview-3578180713) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33593](https://github.com/bitcoin/bitcoin/pull/33593) (guix: Use UCRT runtime for Windows release binaries by hebasto)\n* [#32162](https://github.com/bitcoin/bitcoin/pull/32162) (depends: Switch from multilib to platform-specific toolchains by hebasto)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-18T15:23:25Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "Forgot to say, very happy to drop the second commit if wanted.",
+          "created_at": "2025-11-18T15:27:42Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "re-ACK 7dd714ae71fd18eda82ab4b43d4cecc047b87a2d 🔔\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: re-ACK 7dd714ae71fd18eda82ab4b43d4cecc047b87a2d 🔔\r\nGdGC0CV1oagJPrWcSYTtdbnzJVbACdpgtwV3w0kHQgMB3ZEIhZNTp9Mr5d0DHvusR7eUHFQEauWPXPwpa0cUDw==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-11-19T16:20:31Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Could use `doc:` or `build:` prefix in title?",
+          "created_at": "2025-11-19T16:21:06Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "> See [#33902 (comment)](https://github.com/bitcoin/bitcoin/pull/33902#discussion_r2549756641).\r\n\r\nAs I describe [here](https://github.com/bitcoin/bitcoin/pull/33902#discussion_r2556778530) I have a commit which if `host_CC` is set, **and**** `CC` is unset, will set `CC` to `host_CC` (and similarly for `CXX` and friends).\r\n\r\nIn my opinion this would result in the expected behaviour:\r\n\r\n- If `{var}` is set, use that\r\n- If not check if `host_{var}` is set, and use that\r\n- Otherwise, fallback to a default\r\n\r\nI don't see a use-case where someone purposefully setting `host_{var}` would ever expect `{var}` to take precedence for host buildilng, so don't think having both set would work \"unexpectedly\"?\r\n\r\n@hebasto [notes](https://github.com/bitcoin/bitcoin/pull/33902#discussion_r2561967012) that these variables are apparently not supposed to be set by users though.\r\n\r\nIf that is the case, perhaps then instead of introducing more opinionated fallback heirarchies we should look at re-working how toolchains are defined more holistically? I don't see an obvious/clean approach not involving two sets of env vars though...",
+          "created_at": "2025-12-02T10:45:18Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> If that is the case, perhaps then instead of introducing more opinionated fallback heirarchies we should look at re-working how toolchains are defined more holistically? I don't see an obvious/clean approach not involving two sets of env vars though...\r\n\r\nI agree that the depends build subsystem should accept two sets of variables: one for host/target-specific tools and another for native tools.\r\n\r\nThe naming for the former is well established (`CC`, `CXX`, etc) and it makes no senses to use anything else, as this is what developers, integration workflows and testing frameworks (such as OSS-Fuzz) expect.\r\n\r\nFor the latter, many projects use the `$(tool)_FOR_BUILD` pattern, which we might also adopt.",
+          "created_at": "2025-12-02T20:46:12Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Previously one had to read the Makefile (and various *.mk configuration\r\n> files) to see how to correctly override CC and CXX when building native\r\n> depends packages.\r\n\r\nI also wanted to highlight the distinction between environment variables and Makefile variables. There should be no difference in behaviour between the two when supplied by the user, provided they are recognised by the build system. But that is not currently the case. See: https://github.com/bitcoin/bitcoin/pull/29963.",
+          "created_at": "2025-12-04T12:17:26Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> I'm a little confused about hebasto's comments [#33902 (comment)](https://github.com/bitcoin/bitcoin/pull/33902#discussion_r2561967012) and [#33902 (comment)](https://github.com/bitcoin/bitcoin/pull/33902#issuecomment-3603896660) which seem to say we should not recommend setting variables like `host_CC` and `host_CXX` because setting `CC` and `CXX` does the same thing and these are more standard.\r\n\r\nYes. That's my point.\r\n\r\n> Also fanquake's comment [#33902 (comment)](https://github.com/bitcoin/bitcoin/pull/33902#discussion_r2549756641) seems to say that setting CC/CXX works better than host_CC/host_CXX in practice? So maybe the readme should be updated to just drop the `host_` prefix entirely if the `host_` prefixed variables are less standard and don't work as well as the unprefixed variables.\r\n\r\nI'll support such changes once someone proposes them.",
+          "created_at": "2025-12-15T13:57:59Z"
+        }
+      ]
+    },
+    {
+      "number": 33900,
+      "title": "net: Decouple `CConnman::GetAddresses` from `CNode`",
+      "body": "Decouple `CConnman::GetAddresses` from `CNode` which was used only for getting network_key",
+      "state": "closed",
+      "user": "waketraindev",
+      "created_at": "2025-11-18T13:40:18Z",
+      "updated_at": "2025-11-19T22:43:47Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33900",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33900.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-18T13:40:26Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "it probably makes sense to check if those refactors are in line with the Net Split WG (ref https://achow101.com/ircmeetings/2025/bitcoin-core-dev.2025-11-13_16_00.log.html and the coredev meeting notes).\r\n\r\nOtherwise, this may be touched again soon after.",
+          "created_at": "2025-11-18T14:13:47Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "> it probably makes sense to check if those refactors are in line with the Net Split WG (ref https://achow101.com/ircmeetings/2025/bitcoin-core-dev.2025-11-13_16_00.log.html and the coredev meeting notes).\r\n> \r\n> Otherwise, this may be touched again soon after.\r\n\r\n\r\n\r\n> it probably makes sense to check if those refactors are in line with the Net Split WG (ref https://achow101.com/ircmeetings/2025/bitcoin-core-dev.2025-11-13_16_00.log.html and the coredev meeting notes).\r\n> \r\n> Otherwise, this may be touched again soon after.\r\n\r\nThey should be \"in line\" looking over @theuni's `net_processing_no_cnode*` branches nothing seems to conflict.\r\n\r\nIf there are any concerns or things I might've missed, let me know.\r\n\r\n```cpp\r\nstd::vector<CAddress> CConnman::GetAddresses(NodeId id, size_t max_addresses, size_t max_pct)\r\n{\r\n    std::shared_ptr<CNode> requestor;\r\n    {\r\n    LOCK(m_nodes_mutex);\r\n        auto it = std::find_if(m_nodes.begin(), m_nodes.end(), [&id](const auto& node) { return node->GetId() == id; });\r\n        requestor = *it;\r\n    }\r\n    return GetAddresses(*requestor, max_addresses, max_pct);\r\n}\r\n\r\nstd::vector<CAddress> CConnman::GetAddresses(CNode& requestor, size_t max_addresses, size_t max_pct)\r\n{\r\n",
+          "created_at": "2025-11-18T15:10:41Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "@theuni is this refactor okay with you?",
+          "created_at": "2025-11-18T15:15:43Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "Closed. Going to let Net Split WG handle this one :) thanks for the comments.",
+          "created_at": "2025-11-19T22:43:35Z"
+        }
+      ]
+    },
+    {
+      "number": 33896,
+      "title": "clang-format: Set InsertNewlineAtEOF: true",
+      "body": "Now that the minimum supported clang version is 17, the `InsertNewlineAtEOF` setting can be set to `true` in the clang-format file. (https://releases.llvm.org/16.0.0/tools/clang/docs/ClangFormatStyleOptions.html#insertnewlineateof)\r\n\r\nThis is in line with the already existing newline linter. Can be tested via:\r\n\r\n```\r\ntruncate --size=-1 src/init.cpp\r\ngit diff\r\n\r\n# Should fail:\r\ncargo run --manifest-path ./test/lint/test_runner/Cargo.toml -- --lint=trailing_newline\r\n\r\n# Restore newline:\r\ngit diff -U0 | ./contrib/devtools/clang-format-diff.py -p1 -i -v\r\n```",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-11-18T07:49:21Z",
+      "updated_at": "2025-11-20T08:18:46Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33896",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33896.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hodlinator](https://github.com/bitcoin/bitcoin/pull/33896#pullrequestreview-3476584168), [stickies-v](https://github.com/bitcoin/bitcoin/pull/33896#pullrequestreview-3477255388), [hebasto](https://github.com/bitcoin/bitcoin/pull/33896#pullrequestreview-3477293559), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33896#issuecomment-3547477029), [janb84](https://github.com/bitcoin/bitcoin/pull/33896#pullrequestreview-3477661462), [achow101](https://github.com/bitcoin/bitcoin/pull/33896#issuecomment-3555168238) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-18T07:49:27Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK fa1bf6818f0910f997e5235a197ff51f2e18780d",
+          "created_at": "2025-11-18T12:41:09Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK fa1bf6818f0910f997e5235a197ff51f2e18780d",
+          "created_at": "2025-11-20T00:17:29Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33901,
+      "title": "29.x depends: fallback server missing capnp downloads",
+      "body": "https://github.com/bitcoin/bitcoin/actions/runs/19464722758/job/55696959090#step:9:2030:\n```bash\nFetching capnproto-c++-1.2.0.tar.gz from https://capnproto.org/\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n  0    15    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\ncurl: (22) The requested URL returned error: 500\nWarning: Problem : HTTP error. Will retry in 1 seconds. 3 retries left.\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n  0    15    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\ncurl: (22) The requested URL returned error: 500\nWarning: Problem : HTTP error. Will retry in 2 seconds. 2 retries left.\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n  0    15    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\ncurl: (22) The requested URL returned error: 500\nWarning: Problem : HTTP error. Will retry in 4 seconds. 1 retries left.\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n  0    15    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\ncurl: (22) The requested URL returned error: 500\nFetching capnproto-c++-1.2.0.tar.gz from https://bitcoincore.org/depends-sources\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n  0   146    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\ncurl: (22) The requested URL returned error: 404\nmake: *** [funcs.mk:304: /home/admin/actions-runner/_work/_temp/depends/sources/download-stamps/.stamp_fetched-native_capnp-capnproto-cxx-1.2.0.tar.gz.hash] Error 22\nmake: Leaving directory '/home/admin/actions-runner/_work/_temp/depends'\nError: Process completed with exit code 2.\n```",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-11-18T14:44:04Z",
+      "updated_at": "2025-12-11T19:10:42Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33901",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "achow101",
+          "body": "Backport #33580?\n\nWe can also upload the tarball.",
+          "created_at": "2025-11-18T19:35:05Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "This is now fixed.",
+          "created_at": "2025-12-11T19:10:39Z"
+        }
+      ]
+    },
+    {
+      "number": 33899,
+      "title": "Block template memory management (for IPC clients)",
+      "body": "## Background\n\nEach time we send an IPC client a new `BlockTemplate`, via `createNewBlock` or `waitNext` on the Mining interface, libmultiprocess ensures that we hold on to its encapsulated `CBlockTemplate`. It's just as if our own code has a shared pointer to it.\n\nWe let go of it when either the client calls the `destroy` method or they disconnect (cc @ryanofsky ??).\n\nThe `CBlockTemplate` in turn contains a `CBlock` which contains pointers to individual transactions. Those transactions were in the mempool at the time the template was created, so initially there's barely any memory overhead. But as time goes by the mempool changes and the template keeps holding on to them.\n\nThis is an important behavior, because at any time the client may call `submitSolution()`. That method only takes the `nVersion`, `nTime`, `nonce` and a coinbase transaction as arguments, so it's up to us to reconstruct the block and broadcast it to our peers.\n\nAdditionally, in scenarios where a miner proposes blocks to the pool, such as pool may request some or all of the transactions for inspection.\n\nAt some point however we need to let go of `CBlockTemplate` references, because otherwise the node runs out of memory.\n\nI think we should leave it up to the client to decide which templates they want us to hold on to. That's because there isn't an obvious best way to do this. For example, we might be sending the client many new templates that build on the same prevhash but have more fees. They may decide to rate limit how many to forward downstream to the miner. Or a miner proxy might do such rate limiting. Mining equipment also needs some time to switch work, so it might send us a solution to a slightly older template.\n\nIn sv2-tp so far I implemented a fairly simple heuristic: 10 seconds after the tip changes, wipe all templates that refer to the previous tip. Additionally it limits the frequency of new templates to once every `-sv2interval` seconds (default 30), though I'm considering dropping that rate limiting in https://github.com/stratum-mining/sv2-tp/issues/60.\n\nThe work-in-progress SRI implementation in https://github.com/stratum-mining/sv2-apps/pull/59 currently wipes templates as soon as the tip updates and has no rate limiting other than by fee delta.\n\n## Memory management implementation\n\nThere are probably different ways we can go about memory management here.\n\nThe most straightforward approach is probably to track the additional memory footprint and bound it to `-maxtemplatepoolsize`. If we default that to 50MB it should be plenty for the block template manager proposed in https://github.com/bitcoin/bitcoin/issues/33758, when it's not used for mining.\n\nThe node could refuse to make new templates when it gets to 80% full and automatically drop the oldest template if it crosses 100%. \n\n## Memory management interface\n\n`createNewBlock` and `waitNext` could throw an exception or return null if the template memory is full. Both are a bit tricky to handle, so maybe they need an additional response status argument to communicate the situation.\n\nWe could also add an additional method to obtain how much memory is used and available. That would allow the Template Provider to pre-empt situations where we refuse to provide it new templates, and worse, where we start dropping them unilaterally.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-18T12:46:17Z",
+      "updated_at": "2026-01-14T15:16:51Z",
+      "comments": 18,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33899",
+      "labels": [
+        "Mining",
+        "interfaces"
+      ],
+      "comment_list": [
+        {
+          "user": "Sjors",
+          "body": "cc @ryanofsky, @plebhash",
+          "created_at": "2025-11-18T12:46:50Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "> so maybe they need an additional response status argument to communicate the situation.\n\nindeed this would be essential to make sure we know why `waitNext` failed and what we need to do about it (drop old template instead of assuming something went bad)",
+          "created_at": "2025-11-18T18:57:35Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> The node could refuse to make new templates when it gets to 80% full and automatically drop the oldest template if it crosses 100%.\n\nMakes sense. The way I imagined it working is just that there would be some some configurable limit on how many much memory could be used by block template, and a createNewBlock or waitNext call exceeded that limit they could just throw an exception.\n\nIt shouldn't be necessary to modify the capnp interface to do this since cap'n proto provides a built in [OVERLOADED](https://github.com/capnproto/capnproto/blob/e2881d1d8179c097558718dda4ca9139ea0e1d28/c%2B%2B/src/kj/exception.h#L51-L57) exception that seems pretty appropriate for this case.\n\nAutomatically dropping the oldest templates would also be possible. I'm not sure it would be worth additional complexity on the client and server sides, but you would know better.",
+          "created_at": "2025-11-18T21:55:36Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "we ran some numbers\n\non client side, we're keeping track of:\n- header: 80 bytes\n- coinbase tx: ~150 bytes (empirically observed)\n- merkle path: worst case ~600 bytes\n\nassuming a rather extreme scenario:\n- max block time ever observed: ~2h\n- ever-increasing mempool leading to ~1 template/s\n\nthis stay below ~10MB of RAM consumption\n\nthis could only be extrapolated if we went into even more extreme scenario of mempool changes leading to sub-second template times, which actually motivated me to introduce some kind of rate-limiting mechanism similar to what @Sjors has on `sv2-tp`\n\n(it's extremely unlikely that mempool would sustain sub-second changes for over 2h, but there's other motivations for rate-limiting as well)\n\nwe briefly considered introducing some constant to start dropping old templates after such limit, but after this analysis I started to feel that's not really necessary, since worst case <10MB of RAM consumption is something we're pretty ok to live with\n\non the server side however, you'd have to keep all txdata as well, so you could easily get into several GB territory on a worst case analysis... so this kind of safety mechanism is probably necessary! and as a consequence, the client will eventually need to start dropping templates when we observe a [`Overloaded`](https://docs.rs/capnp/latest/capnp/enum.ErrorKind.html#variant.Overloaded) error coming from `waitNext` requests",
+          "created_at": "2025-11-18T22:46:28Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@plebhash indeed I'm not worried about client-side memory, it's the node that could get into memory trouble if there's a long block interval with lots of mempool churn.\n\n> it's extremely unlikely that mempool would sustain sub-second changes for over 2h\n\nIn the context of templates we only care about about the top of the mempool. For the mempool as a whole there can be dozens of transactions per second, see e.g. #28592.\n\n@ryanofsky how would the node go about tracking the memory footprint of clients? Does libmultiprocess track which templates the client still references and is that something we can access?\n\nOr do we need to collect shared pointers to each template we handed out, and drop them as soon as `use_count() == 1`?\n\nWe'd also want to occasionally measure the non-mempool memory footprint of each template and track the total somewhere.",
+          "created_at": "2025-11-19T09:03:41Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "we're discussing this on a Sv2 call and @GitGab19 pointed out that whatever default value is set for `-maxtemplatepoolsize` should be a reasonable number\n\nthe main concern is having values that are too low, which would make templates be discarded too soon\n\nwe're not sure what the ideal value should be, but just writing this to bring awareness to this",
+          "created_at": "2025-11-19T15:43:03Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> [@ryanofsky](https://github.com/ryanofsky) how would the node go about tracking the memory footprint of clients? \n\nThe way I imagined this working is that `MinerImpl` class would have an `size_t m_block_templates_size` member, which the `BlockTemplateImpl` constructor would increment and the destructor would decrement. Then `createNewBlock` and `waitNext` calls could check this and throw an overloaded exception before they do anything if the the size exceeds some cap.\n\nBut I guess a problem with this approach is it does not take into account the fact that transaction references are shared pointers and multiple blocks might not take up very much space if they have a lot of transactions in common. It would be nice if we could ignore this problem and just treat all transactions as unique, but if not, the basic approach here would still be valid. We would just need to replace `size_t` with a more complicated data structure that's aware of transaction counts (like `map<CTransaction*, long>`) and update this in the `BlockTemplateImpl` constructor and destructor.\n\n> Does libmultiprocess track which templates the client still references and is that something we can access?\n\nI believe cap'nproto has a list of objects but don't think it exposes a way to iterate over them. If we do need a list like this, for example to implement your \"automatically drop the oldest template\" idea, we could get one by giving `MinerImpl` a `std::set<BlockTemplateImp*> m_templates` member and adding/removing templates from the set in the `BlockTemplateImpl` constructor/destructor.\n\nI'm not sure if we actually need this list though, and actually want to automatically drop older blocks. If we can get away with simply not creating new blocks when a limit has been reached instead of trying to automatically delete existing blocks, that would seem simpler for both the client and the server.\n\n\n",
+          "created_at": "2025-11-19T17:43:44Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> It would be nice if we could ignore this problem and just treat all transactions as unique\n\nIt might be simplest thing to implement and we can improve it later. But for some rough numbers: 4MB per template, one per second for two hours, would be counted as 28GB, even if the actual footprint is a fraction of that. \n\nMaintaining a `map<CTransactionRef, long>)` the way you suggest makes sense. It's also very easy to calculate the memory footprint of that, and seems more efficient than looping over templates (and tracking which transactions are unique). ",
+          "created_at": "2025-11-19T18:08:42Z"
+        },
+        {
+          "user": "TheBlueMatt",
+          "body": "There was a long back-and-forth in the IRC meeting today on this topic, seemingly there's some very differing thoughts on high-level design for the block template IPC. IMO it makes sense to schedule a live call to discuss this so that we end up on the same page rather than going in circles in text-based communication.",
+          "created_at": "2025-11-20T16:27:52Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "My takeaway from IRC meeting ([log](https://achow101.com/ircmeetings/2025/bitcoin-core-dev.2025-11-20_16_02.log.html)) is that Matt broadly wants core to be more opinionated and make more decisions on behalf of clients, while Sjors is trying to provide a more unopinionated interface. I think there is actually not much tension between these two things because we could implement everything Matt wants without changing the interface. The IRC discussion just looked to me like a debate about which options should exist in the [`BlockWaitOptions`](https://github.com/bitcoin/bitcoin/blob/6b2d17b13220ea69c33b8cab41fe059ff758874c/src/node/types.h#L69-L88) struct vs `bitcoin.conf`, and how aggressive the `createNewBlock` and `waitNext` methods should be about returning `OVERLOADED` to clients.\n\nI think we all want the default `BlockWaitOptions` to be responsive and provide updates quickly without overloading the node, and we should focus on achieving this before spending much time debating which knobs should exist and where they should live.",
+          "created_at": "2025-11-20T18:33:53Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> We would just need to replace `size_t` with a more complicated data structure that's aware of transaction counts (like `map<CTransaction*, long>`) and update this in the `BlockTemplateImpl` constructor and destructor.\n\nI implemented this part in #33922.",
+          "created_at": "2025-11-21T15:40:05Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "we are getting reports of out-of-memory crashes on https://github.com/stratum-mining/sv2-apps/pull/59#issuecomment-3568252007\n\ninitially I suspected there could be thread-related issues similar to what I reported on https://github.com/bitcoin/bitcoin/issues/33923, but it turns out it was the VPS running out of it's 2GB available RAM, which only happened after long (12h+) running sessions\n\nso I leveraged [`psrecord`](https://github.com/astrofrog/psrecord) to observe how Bitcoin Core (a14e7b9dee9145920f93eab0254ce92942bd1e5e from `30.x` branch) was consuming RAM across time (connected to `mainnet` for high mempool activity, for about ~1h to have enough chain tip updates)\n\nthis is RAM consumption of Bitcoin Core with the Rust code from https://github.com/stratum-mining/sv2-apps/pull/59 (more specifically SRI Pool at https://github.com/stratum-mining/sv2-apps/pull/59/commits/57576e083e82fb5acd5dbad75e8b4de7158a3d61) connected to it:\n\n<img width=\"640\" height=\"480\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/452a8246-9fdb-490c-b1d1-57a51ebb7c92\" />\n\nthere's a clear upwards trend in RAM consumption, which made me wonder if we were doing something wrong on the Rust code\n\nso then I ran it alongside [`sv2-tp`](https://github.com/stratum-mining/sv2-tp) for a comparison:\n\n<img width=\"640\" height=\"480\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/edf8fbf0-c05e-43ad-8883-ba76fb43138b\" />\n\nwhich shows a similar upwards trend that never gets throttled down\n\n---\n\nI don't know whether the root cause for this is related to template memory management, but there's a chance it is, so I'm reporting it here rather than opening a new issue",
+          "created_at": "2025-11-24T03:19:42Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "I'm planning to make similar plots for #33922 (without CPU and ideally with marks to indicate where blocks were found).\n\nIf you're measuring the process memory instead of only the template memory (which #33922 enables), you'll want to hold the mempool itself constant. E.g. by picking some value for `-maxmempool` and waiting for it to fill before starting the measurement. You also want to set `-dbcache` to its minimum, because that's also accuring ",
+          "created_at": "2025-11-24T10:20:08Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@plebhash it looks like you found a real bug. Because `BlockTemplate::createNewBlock` doesn't have a context param, it looks like its destroy method is not invoked until sv2-tp disconnects. So the node keeps holding on to templates even though the Template Provider already pruned them.\n\nI'll open a PR to fix that. \n\n---\n\nUpdate: this was due to an unrelated bug in sv2-tp, see  https://github.com/bitcoin/bitcoin/issues/33940 and https://github.com/stratum-mining/sv2-tp/pull/66.",
+          "created_at": "2025-11-24T12:20:18Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "that's good to know!\n\nbut do we have to explicitly call `destroy` or is it sufficient to drop the reference from memory on the client side?\n\nfrom my understanding of capnp, I believe it should be sufficient to drop it from memory, but on the other hand there must be a reason for `destroy` to exist?",
+          "created_at": "2025-11-24T12:25:17Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@plebhash IIUC libmultiprocess does this automatically, but only `sv2-tp` uses that library. So it probably depends on how the rust capnp library is implemented. It might be worth testing how that library behaves out of the box, with and without the fix here. Just look for the `IPC server destroy` messages on the Bitcoin Core side (preferably tested against master).",
+          "created_at": "2025-11-24T13:25:18Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I created a new issue to track the memory leak in #33940 so this discussion can stay focused higher level issues, but thanks for finding & reporting that",
+          "created_at": "2025-11-24T14:13:23Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "during some IRL discussions with @ismaelsadeeq and @Shourya742 we brainstormed some potential alternative approach to this\n\ninstead of trying to establish boundaries on how much memory would be consumed with templates, we could simply start from the assumption that any economically rational implementation always aims to be hashing on whatever is the latest (and therefore most profitable) template\n\nwhile the most conservative approach would try to keep as many templates as possible in memory (because there could always be a solution for any of them), this feels a bit unrealistic, because there's no point in hashing an old and outdated template while there's more profitable ones already available\n\nof course, we would need to keep some safety boundaries (perhaps as a time window, or a reasonably sized template buffer/queue) so in case some solution is found exactly at the same time as the latest template is being updated across the mining stack, such block can still be propagated",
+          "created_at": "2025-12-05T08:03:28Z"
+        }
+      ]
+    },
+    {
+      "number": 33898,
+      "title": "depends: fallback server missing Qt downloads",
+      "body": "Looks like `https://code.qt.io` is down / having issues. None of the files needed from that site are available from the fallback server:\n```bash\nChecksum missing or mismatched for qt source. Forcing re-download.\nFetching qtbase-everywhere-src-6.7.3.tar.xz from https://download.qt.io/archive/qt/6.7/6.7.3/submodules\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100   281  100   281    0     0    306      0 --:--:-- --:--:-- --:--:--   306\n100 47.1M  100 47.1M    0     0  4687k      0  0:00:10  0:00:10 --:--:-- 7798k\n/bitcoin/depends/work/download/qt-6.7.3/qtbase-everywhere-src-6.7.3.tar.xz.temp: OK\nFetching qttranslations-everywhere-src-6.7.3.tar.xz from https://download.qt.io/archive/qt/6.7/6.7.3/submodules\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100   289  100   289    0     0    284      0  0:00:01  0:00:01 --:--:--   285\n100 1511k  100 1511k    0     0   622k      0  0:00:02  0:00:02 --:--:-- 1430k\n/bitcoin/depends/work/download/qt-6.7.3/qttranslations-everywhere-src-6.7.3.tar.xz.temp: OK\nFetching qttools-everywhere-src-6.7.3.tar.xz from https://download.qt.io/archive/qt/6.7/6.7.3/submodules\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100   282  100   282    0     0    336      0 --:--:-- --:--:-- --:--:--   336\n100 8811k  100 8811k    0     0  2715k      0  0:00:03  0:00:03 --:--:-- 3864k\n/bitcoin/depends/work/download/qt-6.7.3/qttools-everywhere-src-6.7.3.tar.xz.temp: OK\nFetching CMakeLists.txt?h=6.7.3 from https://code.qt.io/cgit/qt/qt5.git/plain\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n  0     0    0     0    0     0      0      0 --:--:--  0:00:30 --:--:--     0\ncurl: (28) Failed to connect to code.qt.io port 443 after 30002 ms: Timeout was reached\nWarning: Problem : timeout. Will retry in 1 seconds. 3 retries left.\n  0     0    0     0    0     0      0      0 --:--:--  0:00:30 --:--:--     0\ncurl: (28) Failed to connect to code.qt.io port 443 after 30006 ms: Timeout was reached\nWarning: Problem : timeout. Will retry in 2 seconds. 2 retries left.\n  0     0    0     0    0     0      0      0 --:--:--  0:00:30 --:--:--     0\ncurl: (28) Failed to connect to code.qt.io port 443 after 30005 ms: Timeout was reached\nWarning: Problem : timeout. Will retry in 4 seconds. 1 retries left.\n  0     0    0     0    0     0      0      0 --:--:--  0:00:30 --:--:--     0\ncurl: (28) Failed to connect to code.qt.io port 443 after 30004 ms: Timeout was reached\nFetching CMakeLists.txt?h=6.7.3 from https://bitcoincore.org/depends-sources\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n  0   146    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\ncurl: (22) The requested URL returned error: 404\nmake[1]: *** [funcs.mk:346: /bitcoin/depends/sources/download-stamps/.stamp_fetched-qt-qtbase-everywhere-src-6.7.3.tar.xz.hash] Error 22\nmake[1]: Leaving directory '/bitcoin/depends'\nmake: *** [Makefile:276: download-linux] Error 2\nmake: Leaving directory '/bitcoin/depends'\n```",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-11-18T10:40:43Z",
+      "updated_at": "2025-11-25T12:23:03Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33898",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "They are cgit requests, so likely the server is just dos'd by llm bots",
+          "created_at": "2025-11-18T11:19:17Z"
+        },
+        {
+          "user": "achow101",
+          "body": "The file is located at https://bitcoincore.org/depends-sources/CMakeLists.txt-6.7.3\n\nNot sure how to have download figure that out.",
+          "created_at": "2025-11-18T20:10:49Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @hebasto ",
+          "created_at": "2025-11-19T09:34:46Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "I forced fallback downloads using the following patch:\n```diff\n--- a/depends/funcs.mk\n+++ b/depends/funcs.mk\n@@ -36,8 +36,7 @@ define fetch_file_inner\n endef\n \n define fetch_file\n-    ( $(call fetch_file_inner,$(1),$(2),$(3),$(4),$(5)) || \\\n-      $(call fetch_file_inner,$(1),$(FALLBACK_DOWNLOAD_PATH),$(4),$(4),$(5)))\n+      $(call fetch_file_inner,$(1),$(FALLBACK_DOWNLOAD_PATH),$(4),$(4),$(5))\n endef\n \n # Shell script to create a source tarball in $(1)_source from local directory\n```\n\nEverything appears to work as expected:\n```\n$ gmake -C depends qt_fetched\ngmake: Entering directory '/home/hebasto/dev/bitcoin/depends'\nFetching qtbase-everywhere-src-6.7.3.tar.xz from https://bitcoincore.org/depends-sources\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100 47.1M  100 47.1M    0     0  2753k      0  0:00:17  0:00:17 --:--:-- 3259k\n/home/hebasto/dev/bitcoin/depends/work/download/qt-6.7.3/qtbase-everywhere-src-6.7.3.tar.xz.temp: OK\nFetching qttranslations-everywhere-src-6.7.3.tar.xz from https://bitcoincore.org/depends-sources\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100 1511k  100 1511k    0     0   829k      0  0:00:01  0:00:01 --:--:--  829k\n/home/hebasto/dev/bitcoin/depends/work/download/qt-6.7.3/qttranslations-everywhere-src-6.7.3.tar.xz.temp: OK\nFetching qttools-everywhere-src-6.7.3.tar.xz from https://bitcoincore.org/depends-sources\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100 8811k  100 8811k    0     0  1109k      0  0:00:07  0:00:07 --:--:-- 1706k\n/home/hebasto/dev/bitcoin/depends/work/download/qt-6.7.3/qttools-everywhere-src-6.7.3.tar.xz.temp: OK\nFetching CMakeLists.txt-6.7.3 from https://bitcoincore.org/depends-sources\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100  4041  100  4041    0     0   5121      0 --:--:-- --:--:-- --:--:--  5121\n/home/hebasto/dev/bitcoin/depends/work/download/qt-6.7.3/CMakeLists.txt-6.7.3.temp: OK\nFetching ECMOptionalAddSubdirectory.cmake-6.7.3 from https://bitcoincore.org/depends-sources\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100  3029  100  3029    0     0   3741      0 --:--:-- --:--:-- --:--:--  3739\n/home/hebasto/dev/bitcoin/depends/work/download/qt-6.7.3/ECMOptionalAddSubdirectory.cmake-6.7.3.temp: OK\nFetching QtTopLevelHelpers.cmake-6.7.3 from https://bitcoincore.org/depends-sources\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100 21633  100 21633    0     0  22979      0 --:--:-- --:--:-- --:--:-- 22964\n/home/hebasto/dev/bitcoin/depends/work/download/qt-6.7.3/QtTopLevelHelpers.cmake-6.7.3.temp: OK\ngmake: Leaving directory '/home/hebasto/dev/bitcoin/depends'\n$ gmake -C depends qt_extracted\ngmake: Entering directory '/home/hebasto/dev/bitcoin/depends'\nExtracting qt...\n/home/hebasto/dev/bitcoin/depends/sources/qtbase-everywhere-src-6.7.3.tar.xz: OK\n/home/hebasto/dev/bitcoin/depends/sources/qttranslations-everywhere-src-6.7.3.tar.xz: OK\n/home/hebasto/dev/bitcoin/depends/sources/qttools-everywhere-src-6.7.3.tar.xz: OK\n/home/hebasto/dev/bitcoin/depends/sources/CMakeLists.txt-6.7.3: OK\n/home/hebasto/dev/bitcoin/depends/sources/ECMOptionalAddSubdirectory.cmake-6.7.3: OK\n/home/hebasto/dev/bitcoin/depends/sources/QtTopLevelHelpers.cmake-6.7.3: OK\ngmake: Leaving directory '/home/hebasto/dev/bitcoin/depends'\n```\n",
+          "created_at": "2025-11-20T16:54:20Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Seems like `https://code.qt.io` also doesn't work with (some?) VPN providers, so we should probably move away from using that.",
+          "created_at": "2025-11-20T16:57:36Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Seems like `https://code.qt.io` also doesn't work with (some?) VPN providers, so we should probably move away from using that.\n\nI can see two options:\n1. Switch to https://raw.githubusercontent.com/qt/qt5.\n2. Treat the three files as patches.",
+          "created_at": "2025-11-20T17:04:20Z"
+        }
+      ]
+    },
+    {
+      "number": 33897,
+      "title": "rfc: virtio-vsock for RPC and IPC",
+      "body": "> virtio-vsock provides a way for applications running on a guest VM and the host system to communicate with each other using the standard socket interface (`socket`, `connect`, `bind`, `listen`, `accept`). It defines a new socket address family (`AF_VSOCK`) and uses a (context id, port) pair of integers for identifying processes. The host system always has 2 as its context id while each guest VM is assigned a unique context id on startup.\n\nhttps://chromium.googlesource.com/chromiumos/platform2/+/9e91613d2da1b3d6cfb1c77681444e688ce99cf4/vm_tools/docs/vsock.md\n\nIt was first suggested in https://github.com/bitcoin/bitcoin/issues/32802#issuecomment-3000963484:\n\n>> I'm dockerizing Sjors 's Stratum V2 sidecar (`bitcoin-mine`) such that it's able to reach a Bitcoin Core node running on the host.\n\n>> My host is macOS, and Docker is Linux, which means they don't have a shared kernel and their Unix socket descriptors don't match.\n\n> It shouldn't be too hard to support `AF_VSOCK` (virtio sockets) for communication between vm host and guest processes. These should be more secure and more performant than TCP sockets.\n\nPerhaps it's useful for RPC too.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-18T10:11:59Z",
+      "updated_at": "2025-11-19T08:47:39Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33897",
+      "labels": [
+        "Brainstorming",
+        "interfaces"
+      ],
+      "comment_list": [
+        {
+          "user": "ryanofsky",
+          "body": "It should be pretty easy to support vsock if we want that. I think it would only require a change to the [`ipc::ParseAddress`](https://github.com/bitcoin/bitcoin/blob/2444488f6ad32dcbbed51a73cd4f59ff3a239e32/src/ipc/process.cpp#L71-L98) function and updates to documentation and tests.\n\nTCP support could also be added by modifying the `ParseAddress` function, but I'd be wary of doing that since it would not really be safe without authentication (https://github.com/bitcoin/bitcoin/issues/32802#issuecomment-3000963484).\n\nI'm not sure if vsock support would actually be helpful for docker on mac. It would depend on whether docker for mac exposes any vsock options. I believe some hypervisors like qemu do, and others like virtualbox just don't.\n\n\n\n",
+          "created_at": "2025-11-18T21:47:24Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> it would not really be safe without authentication \n\nAnd encryption, since we can't use SSL.",
+          "created_at": "2025-11-19T08:47:39Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 9,
+    "issues": 4
+  }
+}

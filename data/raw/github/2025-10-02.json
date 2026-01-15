@@ -1,0 +1,350 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:20:30.151485+00:00",
+  "date": "2025-10-02",
+  "pull_requests": [
+    {
+      "number": 33528,
+      "title": "wallet: don't consider unconfirmed TRUC coins with ancestors",
+      "body": "Addresses https://github.com/bitcoin/bitcoin/issues/33368#issuecomment-3319935660\r\n\r\nThere is not an explicit check that the to-be-created wallet transaction would be within the {TRUC, normal} ancestor limits. This means that the wallet may create a transaction that violates these limits, but fail to broadcast it in `CommitTransaction`.\r\n\r\nThis appears to be expected behavior for the normal ancestor limits (and any other situation in which the wallet creates a tx that was rejected by mempool) and AFAIK the transaction will be rebroadcast at some point after the ancestors confirm.\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/test/functional/wallet_basic.py#L502-L506\r\n\r\nIt's a bit complex to address this for the normal ancestor limit, and probably unrealistic for the wallet to check all possible mempool policies in coin selection, but it's quite trivial for TRUC: just skip any unconfirmed UTXOs that have any ancestors. I think it would be much more helpful to the user to say there are insufficient funds.",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2025-10-02T22:10:02Z",
+      "updated_at": "2025-12-11T18:21:06Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33528",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33528.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/33528#issuecomment-3554911366), [rkrux](https://github.com/bitcoin/bitcoin/pull/33528#pullrequestreview-3500321052), [monlovesmango](https://github.com/bitcoin/bitcoin/pull/33528#issuecomment-3571717964) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-02T22:10:06Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Is this going to be backported to `30.x`?",
+          "created_at": "2025-10-03T15:55:03Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> Is this going to be backported to 30.x?\r\n\r\nI think that'd be best so that the behavior is consistent from v30 onwards. But I don't think this should hold up the release.",
+          "created_at": "2025-10-03T17:04:05Z"
+        },
+        {
+          "user": "monlovesmango",
+          "body": "Wow so on top of it @glozow :)\r\n\r\nA couple things.\r\n\r\nWhen I went back to test the commands I pasted in https://github.com/bitcoin/bitcoin/issues/33368#issuecomment-3319935660 I found that it was still failing silently despite the functional test failing appropriately. I was able to tweak the functional test a bit and get it to also mimic the silent failing behavior in this branch:\r\n https://github.com/monlovesmango/bitcoin/tree/pr33528-functional-test-tweak\r\nI am still trying to figure out the root cause for why it no longer throws an exception when using `send` instead of `sendall` for the second tx, but wanted report back since you might have a much better idea of what is going on.\r\n\r\nThe other thing is that another scenario I had identified and was waiting report to see if first scenario was even an issue was when tx1 has more than one output and wallet tries to send more than one child there is also a silent failure. Seems like this could be fixed by checking that parent doesn't already have a child already? Below is the commands for testing this scenario based on v30 Testing Guide setup.\r\n\r\n```bash\r\nTRUC_address1=$(bcli30 getnewaddress)\r\nTRUC_address2=$(bcli30 getnewaddress)\r\ntx=$(bcli30 -named send outputs='{\"'$TRUC_address1'\": 1, \"'$TRUC_address2'\": 2}' fee_rate=25 version=3)\r\nTRUC_address3=$(bcli30 getnewaddress)\r\nTRUC_address4=$(bcli30 getnewaddress)\r\ntx2=$(bcli30 -named send outputs='{\"'$TRUC_address3'\": 0.5}' options='{\"inputs\":[{\"txid\":\"'$(echo $tx|jq -r \".txid\")'\",\"vout\":0}]}' fee_rate=25 version=3)\r\ntx3=$(bcli30 -named send outputs='{\"'$TRUC_address4'\": 0.5}' options='{\"inputs\":[{\"txid\":\"'$(echo $tx|jq -r \".txid\")'\",\"vout\":1}]}' fee_rate=25 version=3)\r\nbcli30 getrawtransaction  $(echo $tx2|jq -r \".txid\") 1\r\nbcli30 getrawtransaction  $(echo $tx3|jq -r \".txid\") 1\r\n```",
+          "created_at": "2025-10-07T17:21:19Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> When I went back to test the commands I pasted in https://github.com/bitcoin/bitcoin/issues/33368#issuecomment-3319935660 I found that it was still failing silently despite the functional test failing appropriately.\r\n\r\nNice! This PR is limiting the UTXOs that show up when doing automatic coin selection, and thus errors with \"insufficient funds\" when it can't find enough UTXOs for the tx. In your test/commands, you're pre-selecting those inputs using `send`.\r\n\r\nBtw, when I was testing `send` commands on regtest, I found that sometimes I accidentally succeeded because the wallet had other confirmed UTXOs to spend. You can sanity check that you're indeed failing silently using `with self.nodes[0].assert_debug_log([\"Transaction cannot be broadcast immediately\"])`.\r\n\r\nI think it would be reasonable to stop this transaction from being created and throw a \"invalid parameters\" error, telling the user they selected inputs that can't be spent due to policy. Similar to here:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/b510893d00760083ac36948747aa6ebd84656192/src/wallet/rpc/spend.cpp#L1511-L1516",
+          "created_at": "2025-10-08T18:00:55Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK dcd42d6d8f160ae8bc12c152099a6e6473658e30",
+          "created_at": "2025-11-19T22:39:11Z"
+        },
+        {
+          "user": "monlovesmango",
+          "body": "ACK dcd42d6d8f160ae8bc12c152099a6e6473658e30\r\n\r\nIt makes sense to ensure selected coins do not have more than 1 unconfirmed ancestor to prevent selecting coins that would create a package with size greater than 2.",
+          "created_at": "2025-11-24T16:36:56Z"
+        },
+        {
+          "user": "monlovesmango",
+          "body": "> I think it would be reasonable to stop this transaction from being created and throw a \"invalid parameters\" error, telling the user they selected inputs that can't be spent due to policy.\r\n\r\n@glozow I created 2 commits that build off of this pr's branch in an attempt to address this here:\r\nhttps://github.com/monlovesmango/bitcoin/tree/pr33528-add-invalid-parameters-error\r\n\r\nAny feedback is greatly appreciated. Feel free to take anything you think is useful. If you don't think its appropriate for this PR do you think opening a separate PR be ok?\r\n\r\nThe changes in this branch will address https://github.com/bitcoin/bitcoin/issues/33368#issuecomment-3319935660 (this PR as is technically doesn't address this) and https://github.com/bitcoin/bitcoin/pull/33528#issuecomment-3377833421.",
+          "created_at": "2025-11-24T23:38:54Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Locally I could not run the merge script against this PR:\r\n```bash\r\nfatal: ambiguous argument 'refs/heads/pull/33528/merge': unknown revision or path not in the working tree.\r\nUse '--' to separate paths from revisions, like this:\r\n'git <command> [<revision>...] -- [<file>...]'\r\nERROR: Cannot find merge of pull request bitcoin/bitcoin#33528 on git@github.com:bitcoin/bitcoin.\r\n```\r\nOpen/closed to re-run CI, and it seems to have the same issue.",
+          "created_at": "2025-12-03T11:40:11Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Open/closed to re-run CI, and it seems to have the same issue.\r\n\r\nIs it fixed now?",
+          "created_at": "2025-12-03T19:58:35Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to `30.x` in #33997. ",
+          "created_at": "2025-12-04T10:03:54Z"
+        }
+      ]
+    },
+    {
+      "number": 33527,
+      "title": ".",
+      "body": "patches\r\n",
+      "state": "closed",
+      "user": "ujok777",
+      "created_at": "2025-10-02T18:30:29Z",
+      "updated_at": "2025-10-02T18:32:36Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33527",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-10-02T18:30:34Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33527.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-02T18:30:36Z"
+        }
+      ]
+    },
+    {
+      "number": 33525,
+      "title": ".",
+      "body": "faster fixes and tools \r\n",
+      "state": "closed",
+      "user": "timkon99",
+      "created_at": "2025-10-02T17:14:28Z",
+      "updated_at": "2025-10-02T17:15:47Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33525",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-10-02T17:14:32Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33525.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-02T17:14:35Z"
+        }
+      ]
+    },
+    {
+      "number": 33523,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "gikol876934",
+      "created_at": "2025-10-02T16:57:22Z",
+      "updated_at": "2025-10-02T16:59:06Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33523",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33523.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- etc.df -> etc. [\".df\" appears to be a typo; use \"etc.\" to indicate \"and so on\" (e.g., \"# .cirrus.yml, etc.\")]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-10-02T16:57:27Z"
+        }
+      ]
+    },
+    {
+      "number": 33522,
+      "title": "guix: use LIEF 0.17.1",
+      "body": "Update LIEF in Guix & the CI to 0.17.1: https://lief.re/doc/stable/changelog.html#october-25th-2025.\r\n\r\nGuix Build:\r\n```bash\r\n64adb8b9b944ef3de68dbe0d8baa45f688b0d3fa0914448ac331a5339575d697  guix-build-98a6d95a0a0a/output/aarch64-linux-gnu/SHA256SUMS.part\r\n704f85c222bfb6bd80f2253d5b9892451f932162377c1ecf7288457ad6c15aba  guix-build-98a6d95a0a0a/output/aarch64-linux-gnu/bitcoin-98a6d95a0a0a-aarch64-linux-gnu-debug.tar.gz\r\n6ab1b8070f3c7addeaee76780cdba27b7ff4c65f6b6fc53402e3863cb94abf77  guix-build-98a6d95a0a0a/output/aarch64-linux-gnu/bitcoin-98a6d95a0a0a-aarch64-linux-gnu.tar.gz\r\n5a8a30b6ea069f61d2f1373217a654f0f8883cd0c291d92837c85259e9552317  guix-build-98a6d95a0a0a/output/arm-linux-gnueabihf/SHA256SUMS.part\r\ncc771236cbd4a013e27a30ea215ea153bbb919862356358431c7aff3789ed745  guix-build-98a6d95a0a0a/output/arm-linux-gnueabihf/bitcoin-98a6d95a0a0a-arm-linux-gnueabihf-debug.tar.gz\r\n1cc32c3d361dc3fd53241c9a5749b27640186310cc74f1646f7c39f2326f4d6b  guix-build-98a6d95a0a0a/output/arm-linux-gnueabihf/bitcoin-98a6d95a0a0a-arm-linux-gnueabihf.tar.gz\r\n765ad83372fde56601c69d582da0e88e6b957e03738c2349a586dc69472a8e80  guix-build-98a6d95a0a0a/output/arm64-apple-darwin/SHA256SUMS.part\r\n4f60db487fa6b53e4876878be0849a207b1a4ccfc31a49a0a2b12c275f15d5db  guix-build-98a6d95a0a0a/output/arm64-apple-darwin/bitcoin-98a6d95a0a0a-arm64-apple-darwin-codesigning.tar.gz\r\n274cd2843ae6518c9ebc4d82e6f1e9038c1057fb923125cc484b88502f0653cc  guix-build-98a6d95a0a0a/output/arm64-apple-darwin/bitcoin-98a6d95a0a0a-arm64-apple-darwin-unsigned.tar.gz\r\nf83f12bb83cbdac89dd5d82ed9888f382506f24e0c5c5d8afaa69ac002a7820c  guix-build-98a6d95a0a0a/output/arm64-apple-darwin/bitcoin-98a6d95a0a0a-arm64-apple-darwin-unsigned.zip\r\n29c30dfc1192cafb34313921aa9329c77358914b1ab5ea6c572afeeb3a0cf791  guix-build-98a6d95a0a0a/output/dist-archive/bitcoin-98a6d95a0a0a.tar.gz\r\nd8b3d18093607cf7e54557d6701b612aea320b12f4c5750278ea8e9df98e84e8  guix-build-98a6d95a0a0a/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n5cafe7a3232a25721bbd6e137327e8885cbc2dde0ad31149210be35ee63940c3  guix-build-98a6d95a0a0a/output/powerpc64-linux-gnu/bitcoin-98a6d95a0a0a-powerpc64-linux-gnu-debug.tar.gz\r\n02adb5302d4ec684e68a18de50f86c7ad7209953c293813b2366eb237290556a  guix-build-98a6d95a0a0a/output/powerpc64-linux-gnu/bitcoin-98a6d95a0a0a-powerpc64-linux-gnu.tar.gz\r\nd1d8a3a48f244095c94c03d541bea04a424b9b419fd46f924309d5a3960a4b9b  guix-build-98a6d95a0a0a/output/riscv64-linux-gnu/SHA256SUMS.part\r\nb94bb2d5ac5cc4d4e39086185d6195caba061a2a2cd783bcefadde3686f011de  guix-build-98a6d95a0a0a/output/riscv64-linux-gnu/bitcoin-98a6d95a0a0a-riscv64-linux-gnu-debug.tar.gz\r\nb372f4fab761e8a2fd3bcf65a53ca3780ba31295fe4e06118ed6c4157cf3b79f  guix-build-98a6d95a0a0a/output/riscv64-linux-gnu/bitcoin-98a6d95a0a0a-riscv64-linux-gnu.tar.gz\r\nb13b8cda5240d0b77acc41c1d313d8935af419179f6e960f574a402812efd73f  guix-build-98a6d95a0a0a/output/x86_64-apple-darwin/SHA256SUMS.part\r\nf093b5db8aefa0d2f5fa9121fdf61679cd3abe0709c888e260f0193c6377ba27  guix-build-98a6d95a0a0a/output/x86_64-apple-darwin/bitcoin-98a6d95a0a0a-x86_64-apple-darwin-codesigning.tar.gz\r\n7cf5b518b4bf11da7f865c72d356869d338054ac450e3d67c8e557d1055b556f  guix-build-98a6d95a0a0a/output/x86_64-apple-darwin/bitcoin-98a6d95a0a0a-x86_64-apple-darwin-unsigned.tar.gz\r\n69e9d0e2b75439ba687bc387002cf9b8d9e634dd1d99d74c0d2105853751214a  guix-build-98a6d95a0a0a/output/x86_64-apple-darwin/bitcoin-98a6d95a0a0a-x86_64-apple-darwin-unsigned.zip\r\n80d12585a20c593c25b389be03abf62c4a7aa64f82a192250e0d7134b8d42ee2  guix-build-98a6d95a0a0a/output/x86_64-linux-gnu/SHA256SUMS.part\r\n18d84260035542953cba39299a6f6a022ff8a652739f9fd4207f0ca8bdeed703  guix-build-98a6d95a0a0a/output/x86_64-linux-gnu/bitcoin-98a6d95a0a0a-x86_64-linux-gnu-debug.tar.gz\r\n32c5fff612ea33ce9b3a79641ba6e228713b6fe546dd1db7c4580b0798282466  guix-build-98a6d95a0a0a/output/x86_64-linux-gnu/bitcoin-98a6d95a0a0a-x86_64-linux-gnu.tar.gz\r\nf1a8d8d8c8271c7c462ff1150c47986a9b55adc701037a178eb065242e3be90f  guix-build-98a6d95a0a0a/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n1959bd2e96784c71f53750a40bc0e2f90c7fe05d3bf3b4090e22b4830763ac00  guix-build-98a6d95a0a0a/output/x86_64-w64-mingw32/bitcoin-98a6d95a0a0a-win64-codesigning.tar.gz\r\n4f299e92122829810d9e75901d689682455a2500329483381524115ef4dc8c99  guix-build-98a6d95a0a0a/output/x86_64-w64-mingw32/bitcoin-98a6d95a0a0a-win64-debug.zip\r\na6864c11dadcdbc91fabec44f6c3fc17928df7c65ee8360254e4a530ce4ba344  guix-build-98a6d95a0a0a/output/x86_64-w64-mingw32/bitcoin-98a6d95a0a0a-win64-setup-unsigned.exe\r\ne5628bbed9444fe1d490688fd993ce65d9af67d584f5371fef0f92f1cc2375ed  guix-build-98a6d95a0a0a/output/x86_64-w64-mingw32/bitcoin-98a6d95a0a0a-win64-unsigned.zip\r\n```",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2025-10-02T15:57:55Z",
+      "updated_at": "2026-01-14T17:16:14Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33522",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33522.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-02T15:58:00Z"
+        },
+        {
+          "user": "janb84",
+          "body": "This works for my guix build \r\n\r\n<details><summary>Guix Build Output</summary>\r\n\r\n**Host architecture:** `aarch64`\r\n**Commit:** `0123c5f56c20`\r\n\r\n```shell\r\n f83387eefc9384d17a6986dc5390f2f45cc30391af559dbb0dfa7975e3bab6c1  guix-build-0123c5f56c20/output/aarch64-linux-gnu/SHA256SUMS.part\r\n 336c4f647e5318d34119580377f7bb957fe4cc2009160712f14b04f5d6876386  guix-build-0123c5f56c20/output/aarch64-linux-gnu/bitcoin-0123c5f56c20-aarch64-linux-gnu-debug.tar.gz\r\n 8f6d8197eec76f8bf20ad936dde15e06cfa5b6911092637982ae9f8c5dd93730  guix-build-0123c5f56c20/output/aarch64-linux-gnu/bitcoin-0123c5f56c20-aarch64-linux-gnu.tar.gz\r\n 5605c92e1346948f63ef0ecc09508b58ac89b57b661ff58aa0f6962817ab3e6d  guix-build-0123c5f56c20/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n c86d9258a2519868899dbf75bbbc5d4336a12dadeed9f79e1948e8a0d6e68dcd  guix-build-0123c5f56c20/output/arm-linux-gnueabihf/bitcoin-0123c5f56c20-arm-linux-gnueabihf-debug.tar.gz\r\n 2369b55f28fd3c9db990796c1540afd2acd3f5a157b12153bcc896432028b212  guix-build-0123c5f56c20/output/arm-linux-gnueabihf/bitcoin-0123c5f56c20-arm-linux-gnueabihf.tar.gz\r\n 0a4de960ad114661bdc71faaacfc0e7bfb594465b5904c1ab4aba4354331776e  guix-build-0123c5f56c20/output/arm64-apple-darwin/SHA256SUMS.part\r\n 76dabdc770be5ae0b75344202dd781c26cf9115ed4abc69abf816f31de10e593  guix-build-0123c5f56c20/output/arm64-apple-darwin/bitcoin-0123c5f56c20-arm64-apple-darwin-codesigning.tar.gz\r\n b0776606da2d4a75a6533709cfb1c23dc502cc90cf92763136284461816daeda  guix-build-0123c5f56c20/output/arm64-apple-darwin/bitcoin-0123c5f56c20-arm64-apple-darwin-unsigned.tar.gz\r\n a5530924ac5e25172fa55b4f2467d43d0fc5b84306eef29344817164ab759dc5  guix-build-0123c5f56c20/output/arm64-apple-darwin/bitcoin-0123c5f56c20-arm64-apple-darwin-unsigned.zip\r\n 43bb29d4abaa8f167cbbebe10ed035f3aaf90438cfd177e581d17b4cb402e29f  guix-build-0123c5f56c20/output/dist-archive/bitcoin-0123c5f56c20.tar.gz\r\n 6e1401fac4062a9ff90634fdbae0f895ee1f8f87a779122a1f4a079e59de8ef7  guix-build-0123c5f56c20/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n d0a81e59ed9020075d530332c8ec274fd0c03dc5e0259b32c82ff69e989aef5c  guix-build-0123c5f56c20/output/powerpc64-linux-gnu/bitcoin-0123c5f56c20-powerpc64-linux-gnu-debug.tar.gz\r\n 1524d9a971a039abcb23b4d85a6b2bf9156307825f7bf3d22ed974915d7c4a8a  guix-build-0123c5f56c20/output/powerpc64-linux-gnu/bitcoin-0123c5f56c20-powerpc64-linux-gnu.tar.gz\r\n e42a87d62ed0bd70e8349e2e393e49ef8482bd783899ce6e2bfd1d07f5b42ebf  guix-build-0123c5f56c20/output/riscv64-linux-gnu/SHA256SUMS.part\r\n 265d2d38885a0e9f81843359cd20dd77f06fe0b1195ace26e5cc3e99e5f96d7b  guix-build-0123c5f56c20/output/riscv64-linux-gnu/bitcoin-0123c5f56c20-riscv64-linux-gnu-debug.tar.gz\r\n e521c214f294b48623eac64b2b741e0a8f0e13bad8427e4e7dfae6983763872d  guix-build-0123c5f56c20/output/riscv64-linux-gnu/bitcoin-0123c5f56c20-riscv64-linux-gnu.tar.gz\r\n ea2ef9859ef3f195ae75470e8dd891f92277efafce51b2fd39ac7f3394baf50a  guix-build-0123c5f56c20/output/x86_64-apple-darwin/SHA256SUMS.part\r\n 2a5c3121570160c83c5d73278714b966cd5259bbb87e0202f11347b01757de4c  guix-build-0123c5f56c20/output/x86_64-apple-darwin/bitcoin-0123c5f56c20-x86_64-apple-darwin-codesigning.tar.gz\r\n dbff6ceb495f8a0d57e852036bb61dded7bf9923664b1947c4ca3e786b6bd655  guix-build-0123c5f56c20/output/x86_64-apple-darwin/bitcoin-0123c5f56c20-x86_64-apple-darwin-unsigned.tar.gz\r\n d607087f3a2dbe36e69e64389c1032fd848f1d78c90ee614c2fa18080edf1eda  guix-build-0123c5f56c20/output/x86_64-apple-darwin/bitcoin-0123c5f56c20-x86_64-apple-darwin-unsigned.zip\r\n 1a9eb49e09ff105f8aeb5d660aa7e93585c305527ffc382bc5a5820a02c80e4b  guix-build-0123c5f56c20/output/x86_64-linux-gnu/SHA256SUMS.part\r\n 2e75b3573fb0e3f93a972fc62ac2a8e783aeee3ab0358f63abd371280b180be1  guix-build-0123c5f56c20/output/x86_64-linux-gnu/bitcoin-0123c5f56c20-x86_64-linux-gnu-debug.tar.gz\r\n cd5dce2de56f9739019d04ff2361c3fc52ddd2ca13f020cc50e23fcc7b3ebe92  guix-build-0123c5f56c20/output/x86_64-linux-gnu/bitcoin-0123c5f56c20-x86_64-linux-gnu.tar.gz\r\n a47d2033156be5ff1e1aeba1406685a2f82ea5b10ea085e66667ac7db5e87a0a  guix-build-0123c5f56c20/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n 851a7e608507c5c0db7d9d9a7189aae62624eb7e65c3b0de60cccdbe1e422a40  guix-build-0123c5f56c20/output/x86_64-w64-mingw32/bitcoin-0123c5f56c20-win64-codesigning.tar.gz\r\n e0e922ac6f6d62e9622e2e8241d487c370e3587177dbfa442e8231075c66659d  guix-build-0123c5f56c20/output/x86_64-w64-mingw32/bitcoin-0123c5f56c20-win64-debug.zip\r\n eaadc3fafd5fee285063ec7ef2eb35acdef51c5340120cf05909b1339829b59b  guix-build-0123c5f56c20/output/x86_64-w64-mingw32/bitcoin-0123c5f56c20-win64-setup-unsigned.exe\r\n 015914432fbafda4852591948fc08a018aebcd81c7f01325128b7adeaad6956b  guix-build-0123c5f56c20/output/x86_64-w64-mingw32/bitcoin-0123c5f56c20-win64-unsigned.zip\r\n```\r\n</details>",
+          "created_at": "2025-10-03T11:36:02Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--9cd9c72976c961c55c7acef8f6ba82cd-->\n### Guix builds (on x86_64) [untrusted test-only build, possibly unsafe, not for production use]\n\n| File | commit 1ed00a0d39d5190d8ad88a0dd705a09b56d987aa<br>(master) | commit 618d962b66afb9d4965d5b2585656bcd57f0fb30<br>(pull/33522/merge) |\n|--|--|--|\n| *-aarch64-linux-gnu-debug.tar.gz | [`f652d2b4a99c10fb...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-aarch64-linux-gnu-debug.tar.gz) | [`92e2aa3c5c718127...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-aarch64-linux-gnu-debug.tar.gz) |\n| *-aarch64-linux-gnu.tar.gz | [`7253b1b45c4bf927...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-aarch64-linux-gnu.tar.gz) | [`819cb2e6f9d680f4...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-aarch64-linux-gnu.tar.gz) |\n| *-arm-linux-gnueabihf-debug.tar.gz | [`b08d65cf393432fb...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-arm-linux-gnueabihf-debug.tar.gz) | [`77bdf855b8dacf39...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-arm-linux-gnueabihf-debug.tar.gz) |\n| *-arm-linux-gnueabihf.tar.gz | [`cfa2f37406a6c21b...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-arm-linux-gnueabihf.tar.gz) | [`5a86f7a1cde00caf...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-arm-linux-gnueabihf.tar.gz) |\n| *-arm64-apple-darwin-codesigning.tar.gz | [`b6c460fff7359f92...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-arm64-apple-darwin-codesigning.tar.gz) | [`e322123457d87064...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-arm64-apple-darwin-codesigning.tar.gz) |\n| *-arm64-apple-darwin-unsigned.tar.gz | [`fa81438a0c0cabc7...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-arm64-apple-darwin-unsigned.tar.gz) | [`b09553d0160e6cc9...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-arm64-apple-darwin-unsigned.tar.gz) |\n| *-arm64-apple-darwin-unsigned.zip | [`97cc6c32dbf0c773...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-arm64-apple-darwin-unsigned.zip) | [`7d8de19798e8879a...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-arm64-apple-darwin-unsigned.zip) |\n| *-powerpc64-linux-gnu-debug.tar.gz | [`e16d19a46cb63056...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-powerpc64-linux-gnu-debug.tar.gz) | [`995ac7709d4523dc...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-powerpc64-linux-gnu-debug.tar.gz) |\n| *-powerpc64-linux-gnu.tar.gz | [`2e3ed0f5ab2668ae...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-powerpc64-linux-gnu.tar.gz) | [`b15d591236fd4dde...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-powerpc64-linux-gnu.tar.gz) |\n| *-riscv64-linux-gnu-debug.tar.gz | [`3d7ff75c715f9615...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-riscv64-linux-gnu-debug.tar.gz) | [`53e0f598bf4a004f...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-riscv64-linux-gnu-debug.tar.gz) |\n| *-riscv64-linux-gnu.tar.gz | [`f62f501d74e3c1a7...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-riscv64-linux-gnu.tar.gz) | [`b3626eb225b7b371...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-riscv64-linux-gnu.tar.gz) |\n| *-x86_64-apple-darwin-codesigning.tar.gz | [`aa36886ca35c784d...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-x86_64-apple-darwin-codesigning.tar.gz) | [`04674cda6d163c64...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-x86_64-apple-darwin-codesigning.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.tar.gz | [`5f45d902ade8dc16...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-x86_64-apple-darwin-unsigned.tar.gz) | [`e41eb24f91076221...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-x86_64-apple-darwin-unsigned.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.zip | [`440b818e04a2473f...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-x86_64-apple-darwin-unsigned.zip) | [`01c3cfbcfc7e3331...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-x86_64-apple-darwin-unsigned.zip) |\n| *-x86_64-linux-gnu-debug.tar.gz | [`f985717d80ea092f...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-x86_64-linux-gnu-debug.tar.gz) | [`88b9b4ba2fae0955...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-x86_64-linux-gnu-debug.tar.gz) |\n| *-x86_64-linux-gnu.tar.gz | [`dd12f58006398e14...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5-x86_64-linux-gnu.tar.gz) | [`f59541d57cdcd38c...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af-x86_64-linux-gnu.tar.gz) |\n| *.tar.gz | [`8b784dc973055ded...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/bitcoin-1ed00a0d39d5.tar.gz) | [`8f88f881fcb8e471...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/bitcoin-618d962b66af.tar.gz) |\n| SHA256SUMS.part | [`81b44c26d551a6b9...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/SHA256SUMS.part) | [`48d0718c003c3a27...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/SHA256SUMS.part) |\n| guix_build.log | [`fb9c62457b4c62fd...`](https://drahtbot.space/guix/monotree/1ed00a0d39d5190d8ad88a0dd705a09b56d987aa/guix_build.log) | [`3095d0700ccb5de3...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/guix_build.log) |\n| guix_build.log.diff |  | [`4d264aa5b71bf334...`](https://drahtbot.space/guix/monotree/618d962b66afb9d4965d5b2585656bcd57f0fb30/guix_build.log.diff) |\n\n",
+          "created_at": "2025-10-04T14:32:32Z"
+        }
+      ]
+    },
+    {
+      "number": 33520,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "marciak121",
+      "created_at": "2025-10-02T15:56:14Z",
+      "updated_at": "2025-10-02T16:59:12Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33520",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33520.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- size_ requerst -> size_request [misspelled \"requerst\" should be \"request\" and the space after the underscore breaks the token]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-10-02T15:56:19Z"
+        }
+      ]
+    },
+    {
+      "number": 33519,
+      "title": "Update libmultiprocess subtree in 30.x branch",
+      "body": "Includes:\r\n\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/207\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/208\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/211\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/201\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/213\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/214\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/221\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/220\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/222\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/224\r\n\r\nCorresponding to #32641 and #33518 in master.\r\n\r\nThe changes can be verified by running `test/lint/git-subtree-check.sh src/ipc/libmultiprocess` as described in [developer notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#subtrees) and [lint instructions](https://github.com/bitcoin/bitcoin/tree/master/test/lint#git-subtree-checksh)\r\n\r\nThey can also be verified by checking `src/ipc/libmultiprocess/` contents are the same in master. (See also #33439).",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-10-02T10:40:57Z",
+      "updated_at": "2025-10-16T08:56:55Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33519",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33519.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [theuni](https://github.com/bitcoin/bitcoin/pull/33519#pullrequestreview-3341726802), [Sjors](https://github.com/bitcoin/bitcoin/pull/33519#issuecomment-3409387866) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-02T10:41:03Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "<!-- begin push-2 -->\r\nUpdated 8c0c0bf1b078bc931965418ef9b28d176d57db0d -> ae63cc4bf2d25a5b7ce9d166aa288431e8ca16a7 ([`pr/subtree-6-v30.1`](https://github.com/ryanofsky/bitcoin/commits/pr/subtree-6-v30.1) -> [`pr/subtree-6-v30.2`](https://github.com/ryanofsky/bitcoin/commits/pr/subtree-6-v30.2), [compare](https://github.com/ryanofsky/bitcoin/compare/pr/subtree-6-v30.1..pr/subtree-6-v30.2))<!-- end --> adding https://github.com/bitcoin-core/libmultiprocess/pull/222 and https://github.com/bitcoin-core/libmultiprocess/pull/224 to fix CI errors and typos\r\n",
+          "created_at": "2025-10-07T14:23:41Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @Sjors @theuni ",
+          "created_at": "2025-10-14T16:32:51Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Since it missed the 30.0 cut-off, should we wait a bit longer?",
+          "created_at": "2025-10-14T16:34:51Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> should we wait a bit longer?\r\n\r\nFor anything in particular? There are backports that are blocked on this, so it seems more useful to pull this now, and unblock them. It can always be pulled again later if there is a reason to do so.",
+          "created_at": "2025-10-15T15:13:05Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK ae63cc4bf2d25a5b7ce9d166aa288431e8ca16a7",
+          "created_at": "2025-10-16T06:34:29Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Added to `30.x` rel notes in #33609.",
+          "created_at": "2025-10-16T08:56:55Z"
+        }
+      ]
+    },
+    {
+      "number": 33518,
+      "title": "Update libmultiprocess subtree to support reduced logging",
+      "body": "Includes:\r\n\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/213\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/214\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/221\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/220\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/222\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/224\r\n\r\nThe change https://github.com/bitcoin-core/libmultiprocess/pull/220 is needed to support #33517 and fix poor performance in some cases caused by slow logging.\r\n\r\nThe changes can be verified by running `test/lint/git-subtree-check.sh src/ipc/libmultiprocess` as described in [developer notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#subtrees) and [lint instructions](https://github.com/bitcoin/bitcoin/tree/master/test/lint#git-subtree-checksh)",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-10-02T10:32:39Z",
+      "updated_at": "2025-10-10T07:15:10Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33518",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33518.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/33518#issuecomment-3377368922), [theuni](https://github.com/bitcoin/bitcoin/pull/33518#pullrequestreview-3311068924) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-02T10:32:44Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Looks like the tsan CI failed?\r\n\r\nhttps://github.com/bitcoin/bitcoin/actions/runs/18190498400/job/51784277326?pr=33518#step:9:5885\r\n\r\n```\r\nSUMMARY: ThreadSanitizer: data race (/home/admin/actions-runner/_work/_temp/build/src/ipc/libmultiprocess/test/mptest+0x6ee095) (BuildId: 0a10180b43648715b83845ce52ff1702609db59d) in kj::Refcounted::disposeImpl(void*) const",
+          "created_at": "2025-10-02T10:54:53Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> Looks like the tsan CI failed?\r\n\r\nAlso happens in the 30.x PR (https://github.com/bitcoin/bitcoin/actions/runs/18190672725/job/51784809732?pr=33519) so interesting that it doesn't happen with -fsanitize=thread job in libmultiprocess repository (https://github.com/bitcoin-core/libmultiprocess/actions/runs/18190339842/job/51783802159). Will debug.",
+          "created_at": "2025-10-02T11:43:03Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I think the nix config is not using an instrumented libcpp, which could be a reason for the difference? C.f. `USE_INSTRUMENTED_LIBCPP=\"Thread\"`.",
+          "created_at": "2025-10-02T12:02:23Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> I think the nix config is not using an instrumented libcpp, which could be a reason for the difference?\r\n\r\nYes, that was the reason! Enabling \"-DLLVM_USE_SANITIZER=Thread\" for libcxx in nix lets me reproduce this. Will make a PR updating the CI job and fixing the bug, once I figure out what the bug is\r\n\r\nEDIT: This turned out not to be true. Building libc++ with -DLLVM_USE_SANITIZER=Thread did trigger tsan errors related to use of stdout, but these are not the same errors happening here. The tsan errors happening here show up when building cap'n proto with -fsanitize=thread and are just caused by a test bug introduced in https://github.com/bitcoin-core/libmultiprocess/pull/214",
+          "created_at": "2025-10-02T13:35:28Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Note: This PR (and also #33519) is blocked on https://github.com/bitcoin-core/libmultiprocess/pull/222 to fix CI errors here. If that PR is reviewed and merged, this PR can be updated to include it and taken out of draft state.\r\n\r\nhttps://github.com/bitcoin-core/libmultiprocess/pull/224 would also be nice to include here as it fixes the LLM linter typos pointed out above.",
+          "created_at": "2025-10-03T21:35:38Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "<!-- begin push-2 -->\r\nUpdated 0e3fd1142c45f8feced5a4cfff3ed654e450310f -> 2e24e1c7331105ab141b3d734c19a2ccf857c293 ([`pr/subtree-6.1`](https://github.com/ryanofsky/bitcoin/commits/pr/subtree-6.1) -> [`pr/subtree-6.2`](https://github.com/ryanofsky/bitcoin/commits/pr/subtree-6.2), [compare](https://github.com/ryanofsky/bitcoin/compare/pr/subtree-6.1..pr/subtree-6.2))<!-- end --> adding https://github.com/bitcoin-core/libmultiprocess/pull/222 to fix CI errors\r\n\r\n<!-- begin push-3 -->\r\nUpdated 2e24e1c7331105ab141b3d734c19a2ccf857c293 -> eda91b07fd9f2a6af3c31659d51f51aacf8989c4 ([`pr/subtree-6.2`](https://github.com/ryanofsky/bitcoin/commits/pr/subtree-6.2) -> [`pr/subtree-6.3`](https://github.com/ryanofsky/bitcoin/commits/pr/subtree-6.3), [compare](https://github.com/ryanofsky/bitcoin/compare/pr/subtree-6.2..pr/subtree-6.3))<!-- end --> adding https://github.com/bitcoin-core/libmultiprocess/pull/224 to fix typos reported by Drahtbot",
+          "created_at": "2025-10-07T14:20:09Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "utACK eda91b07fd9f2a6af3c31659d51f51aacf8989c4\r\n\r\nJust checked the subtree update validity. Will do some testing with #33517 and https://github.com/Sjors/sv2-tp/pull/34.",
+          "created_at": "2025-10-07T15:11:17Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33526,
+      "title": ".",
+      "body": "",
+      "state": "closed",
+      "user": "timkon99",
+      "created_at": "2025-10-02T17:14:55Z",
+      "updated_at": "2025-10-03T17:00:58Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33526",
+      "labels": []
+    },
+    {
+      "number": 33524,
+      "title": ".",
+      "body": "crash on win11",
+      "state": "closed",
+      "user": "gikol876934",
+      "created_at": "2025-10-02T16:59:56Z",
+      "updated_at": "2025-10-03T17:00:49Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33524",
+      "labels": []
+    },
+    {
+      "number": 33521,
+      "title": ".",
+      "body": "crashes on windows 7",
+      "state": "closed",
+      "user": "marciak121",
+      "created_at": "2025-10-02T15:57:46Z",
+      "updated_at": "2025-10-03T17:00:26Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33521",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "marciak121",
+          "body": "finished",
+          "created_at": "2025-10-02T15:57:51Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 8,
+    "issues": 3
+  }
+}

@@ -21,9 +21,14 @@ import requests
 from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 from typing import Optional, List, Dict
+from dotenv import load_dotenv
+
+# Load environment variables from project root
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(project_root, '.env'))
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 
 from scrapers.utils import logger, save_raw_data, calculate_basic_drama_signals
 from scrapers.fetch_irc import IRCScraper
@@ -377,9 +382,247 @@ def fetch_historical_mailing_list(start_date: datetime, end_date: datetime) -> N
     logger.info(f"Mailing list historical fetch complete: {processed} days processed")
 
 
+class HistoricalGitHubScraper:
+    """Fetch historical GitHub data using the Search API."""
+
+    BASE_URL = "https://api.github.com"
+    REPOS = ["bitcoin/bitcoin", "bitcoin/bips"]
+
+    def __init__(self, token: str = None):
+        self.token = token or os.getenv('GITHUB_TOKEN')
+        self.session = requests.Session()
+        self.session.headers.update({
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'BitcoinDramaDetector/1.0'
+        })
+        if self.token:
+            self.session.headers['Authorization'] = f'token {self.token}'
+            logger.info("GitHub token configured for historical fetch")
+        else:
+            logger.warning("No GitHub token - rate limits will be very strict for Search API")
+
+        self.request_delay = 2.0  # Search API has stricter rate limits
+        self.last_request_time = 0
+
+    def _rate_limit(self):
+        """Enforce rate limiting between requests."""
+        elapsed = time.time() - self.last_request_time
+        if elapsed < self.request_delay:
+            time.sleep(self.request_delay - elapsed)
+        self.last_request_time = time.time()
+
+    def _request(self, endpoint: str, params: dict = None, max_retries: int = 3) -> Optional[dict]:
+        """Make a request to the GitHub API with retry logic."""
+        self._rate_limit()
+        url = f"{self.BASE_URL}{endpoint}"
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.session.get(url, params=params)
+
+                # Check rate limits
+                remaining = int(response.headers.get('X-RateLimit-Remaining', 0))
+                reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
+
+                if remaining < 5:
+                    wait_time = max(reset_time - time.time(), 60)
+                    logger.warning(f"Rate limit low ({remaining}). Waiting {wait_time:.0f}s")
+                    time.sleep(wait_time)
+
+                if response.status_code == 403 and 'rate limit' in response.text.lower():
+                    wait_time = max(reset_time - time.time(), 60)
+                    logger.error(f"Rate limited. Waiting {wait_time:.0f}s")
+                    time.sleep(wait_time)
+                    continue
+
+                if response.status_code in (502, 503, 504):
+                    if attempt < max_retries:
+                        wait_time = (2 ** attempt) * 5
+                        logger.warning(f"Server error {response.status_code}. Retrying in {wait_time}s")
+                        time.sleep(wait_time)
+                        continue
+
+                if response.status_code == 422:
+                    logger.warning(f"Validation error: {response.text}")
+                    return None
+
+                response.raise_for_status()
+                return response.json()
+
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 5
+                    logger.warning(f"Request error: {e}. Retrying in {wait_time}s")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Request failed after {max_retries} retries: {e}")
+                    return None
+
+        return None
+
+    def search_issues_for_date(self, repo: str, date: datetime, item_type: str = 'pr') -> List[dict]:
+        """
+        Search for PRs or issues created on a specific date.
+
+        Args:
+            repo: Repository (e.g., 'bitcoin/bitcoin')
+            date: The date to search for
+            item_type: 'pr' or 'issue'
+
+        Returns:
+            List of items found
+        """
+        date_str = date.strftime('%Y-%m-%d')
+        type_filter = 'pr' if item_type == 'pr' else 'issue'
+
+        # Search query: repo:bitcoin/bitcoin is:pr created:2025-06-15
+        query = f"repo:{repo} is:{type_filter} created:{date_str}"
+
+        params = {
+            'q': query,
+            'sort': 'created',
+            'order': 'desc',
+            'per_page': 100
+        }
+
+        result = self._request('/search/issues', params)
+        if result and 'items' in result:
+            return result['items']
+        return []
+
+    def fetch_item_details(self, item: dict, repo: str) -> dict:
+        """Fetch additional details for a PR or issue."""
+        number = item.get('number')
+        is_pr = 'pull_request' in item
+
+        # Basic info from search result
+        details = {
+            'number': number,
+            'title': item.get('title', ''),
+            'body': item.get('body', '') or '',
+            'state': item.get('state', ''),
+            'user': item.get('user', {}).get('login', ''),
+            'created_at': item.get('created_at', ''),
+            'updated_at': item.get('updated_at', ''),
+            'comments': item.get('comments', 0),
+            'url': item.get('html_url', ''),
+            'labels': [l.get('name', '') for l in item.get('labels', [])]
+        }
+
+        # Fetch comments if there are any (limit to reduce API calls)
+        if details['comments'] > 0 and details['comments'] <= 20:
+            comments_url = f"/repos/{repo}/issues/{number}/comments"
+            comments_data = self._request(comments_url, {'per_page': 20})
+            if comments_data:
+                details['comment_list'] = [
+                    {
+                        'user': c.get('user', {}).get('login', ''),
+                        'body': c.get('body', '') or '',
+                        'created_at': c.get('created_at', '')
+                    }
+                    for c in comments_data[:20]
+                ]
+
+        return details
+
+    def fetch_date(self, date: datetime, repo: str = "bitcoin/bitcoin") -> dict:
+        """
+        Fetch all GitHub activity for a specific date.
+
+        Args:
+            date: The date to fetch
+            repo: Repository to fetch from
+
+        Returns:
+            Structured data for that date
+        """
+        date_str = date.strftime('%Y-%m-%d')
+        logger.info(f"Searching GitHub {repo} for {date_str}...")
+
+        # Search for PRs
+        prs_raw = self.search_issues_for_date(repo, date, 'pr')
+        logger.info(f"  Found {len(prs_raw)} PRs")
+
+        # Search for issues
+        issues_raw = self.search_issues_for_date(repo, date, 'issue')
+        logger.info(f"  Found {len(issues_raw)} issues")
+
+        # Fetch details for each (limit to avoid rate limits)
+        pull_requests = []
+        for pr in prs_raw[:30]:  # Limit to 30 PRs per day
+            details = self.fetch_item_details(pr, repo)
+            pull_requests.append(details)
+
+        issues = []
+        for issue in issues_raw[:30]:  # Limit to 30 issues per day
+            details = self.fetch_item_details(issue, repo)
+            issues.append(details)
+
+        return {
+            'source': 'github',
+            'repository': repo,
+            'fetched_at': datetime.now(timezone.utc).isoformat(),
+            'date': date_str,
+            'pull_requests': pull_requests,
+            'issues': issues,
+            'summary': {
+                'pull_requests': len(pull_requests),
+                'issues': len(issues)
+            }
+        }
+
+
+def fetch_historical_github(start_date: datetime, end_date: datetime, repo: str = "bitcoin/bitcoin") -> None:
+    """Fetch historical GitHub data for a date range."""
+    scraper = HistoricalGitHubScraper()
+    current_date = start_date
+
+    total_days = (end_date - start_date).days + 1
+    processed = 0
+
+    # Determine output directory based on repo
+    if repo == "bitcoin/bips":
+        source_name = "bips"
+    else:
+        source_name = "github"
+
+    while current_date <= end_date:
+        date_str = current_date.strftime('%Y-%m-%d')
+        output_path = f"data/raw/{source_name}/{date_str}.json"
+
+        # Check if we already have this file with real data
+        if os.path.exists(output_path):
+            try:
+                with open(output_path, 'r', encoding='utf-8') as f:
+                    existing = json.load(f)
+                    pr_count = len(existing.get('pull_requests', []))
+                    issue_count = len(existing.get('issues', []))
+                    if pr_count > 0 or issue_count > 0:
+                        logger.info(f"GitHub {date_str}: Already has data ({pr_count} PRs, {issue_count} issues), skipping")
+                        current_date += timedelta(days=1)
+                        processed += 1
+                        continue
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        logger.info(f"GitHub [{processed+1}/{total_days}] Fetching {date_str}...")
+
+        data = scraper.fetch_date(current_date, repo)
+        save_raw_data(data, source_name, date_str)
+
+        pr_count = data.get('summary', {}).get('pull_requests', 0)
+        issue_count = data.get('summary', {}).get('issues', 0)
+        logger.info(f"  -> {pr_count} PRs, {issue_count} issues")
+
+        current_date += timedelta(days=1)
+        processed += 1
+
+    logger.info(f"GitHub historical fetch complete: {processed} days processed")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Fetch historical data for Bitcoin Dev Drama Detector')
-    parser.add_argument('--source', type=str, choices=['irc', 'mailing_list', 'all'],
+    parser.add_argument('--source', type=str, choices=['irc', 'mailing_list', 'github', 'bips', 'all'],
                         default='all', help='Which source to fetch')
     parser.add_argument('--start', type=str, required=True,
                         help='Start date (YYYY-MM-DD)')
@@ -405,6 +648,14 @@ def main():
     if args.source in ['mailing_list', 'all']:
         print("\n[ML] Fetching mailing list archives...\n")
         fetch_historical_mailing_list(start_date, end_date)
+
+    if args.source in ['github', 'all']:
+        print("\n[GH] Fetching GitHub (bitcoin/bitcoin) history...\n")
+        fetch_historical_github(start_date, end_date, repo="bitcoin/bitcoin")
+
+    if args.source in ['bips', 'all']:
+        print("\n[BIPs] Fetching GitHub (bitcoin/bips) history...\n")
+        fetch_historical_github(start_date, end_date, repo="bitcoin/bips")
 
     print("\nHistorical fetch complete!")
 

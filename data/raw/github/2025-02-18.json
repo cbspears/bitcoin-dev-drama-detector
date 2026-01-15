@@ -1,0 +1,462 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:18:33.041655+00:00",
+  "date": "2025-02-18",
+  "pull_requests": [
+    {
+      "number": 31901,
+      "title": "contrib: Add deterministic-unittest-coverage",
+      "body": "The `contrib/devtools/test_deterministic_coverage.sh` script is problematic:\r\n\r\n* It is written in bash. This can lead to issues when running with the ancient bash version shipped by macOS by default, or can lead to other compatibility issues, such as https://github.com/bitcoin/bitcoin/pull/31588#discussion_r1946784827. Also, pipefail isn't set, so IO errors may be silently ignored.\r\n* It is based on gcov. This can lead to issues, such as https://github.com/bitcoin/bitcoin/pull/31588#pullrequestreview-2602169248 (possibly due to prefix-map), or https://github.com/bitcoin/bitcoin/pull/31588#issuecomment-2646395385 (gcovr processing error), or https://github.com/bitcoin/bitcoin/pull/31588#pullrequestreview-2605954001 (gcovr assertion error).\r\n* The script is severely outdated, with the last update to `NON_DETERMINISTIC_TESTS` being in the prior decade.\r\n\r\nInstead of patching around all issues one-by-one, just provide a fresh rewrite, based on the recently added `deterministic-fuzz-coverage` tool based on clang, llvm-cov, and llvm-profdata. (Initial feedback indicates that this is a more promising attempt: https://github.com/bitcoin/bitcoin/pull/31588#issuecomment-2649356408 and https://github.com/bitcoin/bitcoin/pull/31588#issuecomment-2649354598).\r\n\r\nThe new tool also sets `RANDOM_CTX_SEED=21` as suggested by hodlinator in https://github.com/bitcoin/bitcoin/pull/31588#issuecomment-2650784726.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-02-18T20:30:25Z",
+      "updated_at": "2025-03-15T09:03:53Z",
+      "comments": 16,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31901",
+      "labels": [
+        "Scripts and tools"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31901.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hodlinator](https://github.com/bitcoin/bitcoin/pull/31901#pullrequestreview-2640424818), [brunoerg](https://github.com/bitcoin/bitcoin/pull/31901#pullrequestreview-2644436422), [dergoegge](https://github.com/bitcoin/bitcoin/pull/31901#pullrequestreview-2644695039) |\n| Concept ACK | [theStack](https://github.com/bitcoin/bitcoin/pull/31901#pullrequestreview-2633053901), [janb84](https://github.com/bitcoin/bitcoin/pull/31901#pullrequestreview-2648277252), [Prabhat1308](https://github.com/bitcoin/bitcoin/pull/31901#issuecomment-2692265876) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n",
+          "created_at": "2025-02-18T20:30:29Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "Concept ACK",
+          "created_at": "2025-02-19T10:10:41Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "\r\n\r\n> `cargo run --manifest-path ./contrib/devtools/deterministic-unittest-coverage/Cargo.toml -- $PWD/build util_tests `\r\n> Hacky WIP pro-determinism patch resulting in pass\r\n\r\nThx, pushed a different fix/hack for this. I tested it on `util_string_tests`.",
+          "created_at": "2025-02-25T09:12:27Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> All of them returned \"The coverage was not deterministic between runs.\". I noticed that the reason is basically locks and crypto functions as expected.\r\n\r\nI'd say that non-determinism shouldn't be expected, though fixing them can be done in a follow-up. If you want to check a deterministic test case you can try `util_string_tests` or `util_tests`.",
+          "created_at": "2025-02-26T13:16:47Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> If you want to check a deterministic test case you can try util_string_tests or util_tests.\r\n\r\nBoth returned \"The coverage was not deterministic between runs.\". One of the differences:\r\n```sh\r\n /Users/brunogarcia/projects/bitcoin-core-dev/src/crypto/sha512.h:\r\n     1|       |// Copyright (c) 2014-2022 The Bitcoin Core developers\r\n@@ -138933,7 +138933,7 @@\r\n    62|      0|}\r\n    63|       |\r\n    64|       |inline int64_t GetPerformanceCounter() noexcept\r\n-   65|    958|{\r\n+   65|    966|{\r\n    66|       |    // Read the hardware time stamp counter when available.\r\n    67|       |    // See https://en.wikipedia.org/wiki/Time_Stamp_Counter for more information.\r\n    68|       |#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))\r\n@@ -138948,9 +138948,9 @@\r\n    77|       |    return (r2 << 32) | r1;\r\n    78|       |#else\r\n    79|       |    // Fall back to using standard library clock (usually microsecond or nanosecond precision)\r\n-   80|    958|    return std::chrono::high_resolution_clock::now().time_since_epoch().count();\r\n-   81|    958|#endif\r\n-   82|    958|}\r\n+   80|    966|    return std::chrono::high_resolution_clock::now().time_since_epoch().count();\r\n+   81|    966|#endif\r\n+   82|    966|}\r\n    83|       |\r\n    84|       |#ifdef HAVE_GETCPUID\r\n    85|       |bool g_rdrand_supported = false;\r\n@@ -139185,22 +139185,22 @@\r\n   314|       |    // Hash loop\r\n   315|      2|    unsigned char buffer[64];\r\n   316|      2|    const auto stop{SteadyClock::now() + dur};\r\n-  317|    780|    do {\r\n-  318|   780k|        for (int i = 0; i < 1000; ++i) {\r\n-                                                ^780k\r\n+  317|    788|    do {\r\n+  318|   788k|        for (int i = 0; i < 1000; ++i) {\r\n+                                                ^788k\r\n   ------------------\r\n-  |  Branch (318:25): [True: 780k, False: 780]\r\n+  |  Branch (318:25): [True: 788k, False: 788]\r\n   ------------------\r\n-  319|   780k|            inner_hasher.Finalize(buffer);\r\n-  320|   780k|            inner_hasher.Reset();\r\n-  321|   780k|            inner_hasher.Write(buffer, sizeof(buffer));\r\n-  322|   780k|        }\r\n+  319|   788k|            inner_hasher.Finalize(buffer);\r\n+  320|   788k|            inner_hasher.Reset();\r\n+  321|   788k|            inner_hasher.Write(buffer, sizeof(buffer));\r\n+  322|   788k|        }\r\n   323|       |        // Benchmark operation and feed it into outer hasher.\r\n-  324|    780|        int64_t perf = GetPerformanceCounter();\r\n-  325|    780|        hasher.Write((const unsigned char*)&perf, sizeof(perf));\r\n-  326|    780|    } while (SteadyClock::now() < stop);\r\n+  324|    788|        int64_t perf = GetPerformanceCounter();\r\n+  325|    788|        hasher.Write((const unsigned char*)&perf, sizeof(perf));\r\n+  326|    788|    } while (SteadyClock::now() < stop);\r\n   ------------------\r\n-  |  Branch (326:14): [True: 778, False: 2]\r\n+  |  Branch (326:14): [True: 786, False: 2]\r\n   ------------------\r\n   327|       |\r\n   328|       |    // Produce output from inner state and feed it to outer hasher.\r\n```",
+          "created_at": "2025-02-26T13:21:00Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Both returned \"The coverage was not deterministic between runs.\". One of the differences:\r\n\r\nThe last commit is supposed to fix that and it seemingly did for hodlinator and myself. Are you sure you compiled the right commit? Though, even if it persists, my recommendation would be to address it in a follow-up. The goal here is mostly to add the contrib script itself.",
+          "created_at": "2025-02-26T13:31:23Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> The last commit is supposed to fix that and it seemingly did for hodlinator and myself. Are you sure you compiled the right commit? Though, even if it persists, my recommendation would be to address it in a follow-up. The goal here is mostly to add the contrib script itself.\r\n\r\nYes, I just verified it is the right commit, I re-built it again and I'm getting the same. Anyway, I'm fine with the script, we can address it in a follow-up.",
+          "created_at": "2025-02-26T13:45:53Z"
+        },
+        {
+          "user": "Prabhat1308",
+          "body": "Concept ACK [`fa99c3b`](https://github.com/bitcoin/bitcoin/pull/31901/commits/fa99c3b544b631cfe34d52fb5e71636aedb1b423)\r\nFully agree with removing the outdated bash script.\r\n\r\nI have only checked the `deterministic-unittest-coverage` and not the `deterministic-fuzz-coverage` on MacOS 15.3.1 with clang 19 . It has been giving me some flaky results . On the first run both `util_string_tests` or `util_tests` were giving me result as deterministic coverage. \r\n\r\n<details>\r\n\r\n<summary>First run</summary>\r\n\r\n<img width=\"1035\" alt=\"Screenshot 2025-03-01 at 7 58 12 PM\" src=\"https://github.com/user-attachments/assets/5d0d6e85-c478-4377-a71c-e12f8942cd04\" />\r\n\r\n</details>\r\n\r\nI ran them again and they started giving non-deterministic coverage. No change was made between the runs.\r\n<details>\r\n\r\n<summary>Second run</summary>\r\n\r\n<img width=\"1055\" alt=\"Screenshot 2025-03-01 at 7 59 38 PM\" src=\"https://github.com/user-attachments/assets/3e7db7ab-07c7-4dd5-8632-8d94ecf337cd\" />\r\n<img width=\"1046\" alt=\"Screenshot 2025-03-01 at 8 00 04 PM\" src=\"https://github.com/user-attachments/assets/83f63e15-b191-4e30-8ffe-c52d76360a89\" />\r\n</details>\r\n",
+          "created_at": "2025-03-01T14:46:38Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Anything left to do here?\r\n\r\nThe goal here is to add the contrib tool, not to fix all non-determinism in all tests. Especially, if they happen only on macOS, I can't really fix it myself anyway, since I don't have macOS. Ideally this is done in a follow-up.\r\n\r\nThere are three acks, two of which indicate to have tested the changes.",
+          "created_at": "2025-03-12T15:26:54Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "@brunoerg @janb84 @Prabhat1308 I expect all of you were running into the issue on macOS? I probably can't fix it myself, but I'd investigate whether the last commit is working:\r\n\r\n* Is your result different with or without the last commit?\r\n* Does `ResetCoverageCounters` work?\r\n* What is the coverage result for `src/test/util/setup_common.cpp`, especially `g_rng_temp_path_init`? (You can find it in `fuzz_det_cov.show.{run_id}.txt`)",
+          "created_at": "2025-03-13T08:12:07Z"
+        },
+        {
+          "user": "janb84",
+          "body": "> @brunoerg @janb84 @Prabhat1308 I expect all of you were running into the issue on macOS? I probably can't fix it myself, but I'd investigate whether the last commit is working:\r\n> \r\n> * Is your result different with or without the last commit?\r\n> * Does `ResetCoverageCounters` work?\r\n> * What is the coverage result for `src/test/util/setup_common.cpp`, especially `g_rng_temp_path_init`? (You can find it in `fuzz_det_cov.show.{run_id}.txt`)\r\n\r\nIn checking this issue I discovered that due to the change in [31161](https://github.com/bitcoin/bitcoin/pull/31161) the tooling is broken. (the path has changed from `src/test/` to `/bin` ) ",
+          "created_at": "2025-03-13T10:24:54Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I discovered that due to the change in [31161](https://github.com/bitcoin/bitcoin/pull/31161) the tooling is broken. (the path has changed from `src/test/` to `/bin` )\r\n\r\nShould be trivial to fix up. I am happy to review a tiny pull to fix the silent merge conflict here.",
+          "created_at": "2025-03-13T10:27:27Z"
+        },
+        {
+          "user": "janb84",
+          "body": "Fix created in https://github.com/bitcoin/bitcoin/pull/32055",
+          "created_at": "2025-03-13T11:16:33Z"
+        },
+        {
+          "user": "janb84",
+          "body": "> > @brunoerg @janb84 @Prabhat1308 I expect all of you were running into the issue on macOS? I probably can't fix it myself, but I'd investigate whether the last commit is working:\r\n> > \r\n> > * Is your result different with or without the last commit?\r\n> > * Does `ResetCoverageCounters` work?\r\n> > * What is the coverage result for `src/test/util/setup_common.cpp`, especially `g_rng_temp_path_init`? (You can find it in `fuzz_det_cov.show.{run_id}.txt`)\r\n> \r\n> In checking this issue I discovered that due to the change in [31161](https://github.com/bitcoin/bitcoin/pull/31161) the tooling is broken. (the path has changed from `src/test/` to `/bin` )\r\n\r\nThe trouble is in this code/macro (`test/util/coverage.ccp`)\r\n```\r\n#if defined(__clang__) && defined(__linux__)\r\nextern \"C\" void __llvm_profile_reset_counters(void) __attribute__((weak));\r\nextern \"C\" void __gcov_reset(void) __attribute__((weak));\r\n\r\nvoid ResetCoverageCounters()\r\n{\r\n    if (__llvm_profile_reset_counters) {\r\n        __llvm_profile_reset_counters();\r\n    }\r\n\r\n    if (__gcov_reset) {\r\n        __gcov_reset();\r\n    }\r\n}\r\n#else\r\nvoid ResetCoverageCounters() {}\r\n#endif\r\n```\r\n\r\n__linux__ is undefined, therefor it falls in the else branch. When changing the macro to the following:\r\n```\r\n#if defined(__clang__)  && (defined(__linux__) || defined(__APPLE__)) \r\n```\r\nThe test will report as deterministic.\r\n\r\nWord of caution, i'm running in a nix-shell on a mac. So would like to see someone on pure mac env. confirm that this is the issue ",
+          "created_at": "2025-03-13T15:35:09Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> Word of caution, i'm running in a nix-shell on a mac. So would like to see someone on pure mac env. confirm that this is the issue\r\n\r\nConfirmed. I still have the issue on master but I just tested with the following diff and seems to work:\r\n\r\n```diff\r\ndiff --git a/src/test/util/coverage.cpp b/src/test/util/coverage.cpp\r\nindex bbf068a6fa..ac0fb00e36 100644\r\n--- a/src/test/util/coverage.cpp\r\n+++ b/src/test/util/coverage.cpp\r\n@@ -4,7 +4,7 @@\r\n\r\n #include <test/util/coverage.h>\r\n\r\n-#if defined(__clang__) && defined(__linux__)\r\n+#if defined(__clang__)\r\n extern \"C\" void __llvm_profile_reset_counters(void) __attribute__((weak));\r\n extern \"C\" void __gcov_reset(void) __attribute__((weak));\r\n```\r\n\r\n```\r\n➜  bitcoin-core-dev git:(master) ✗ RUST_BACKTRACE=1 cargo run --manifest-path ./contrib/devtools/deterministic-unittest-coverage/Cargo.toml -- $PWD/build util_string_tests\r\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s\r\n     Running `contrib/devtools/deterministic-unittest-coverage/target/debug/deterministic-unittest-coverage /Users/brunogarcia/projects/bitcoin-core-dev/build_31901 util_string_tests`\r\nRunning 1 test case...\r\n\r\n*** No errors detected\r\nRunning 1 test case...\r\n\r\n*** No errors detected\r\nThe coverage was deterministic across two runs.\r\n➜  bitcoin-core-dev git:(master) ✗ RUST_BACKTRACE=1 cargo run --manifest-path ./contrib/devtools/deterministic-unittest-coverage/Cargo.toml -- $PWD/build util_string_tests\r\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s\r\n     Running `contrib/devtools/deterministic-unittest-coverage/target/debug/deterministic-unittest-coverage /Users/brunogarcia/projects/bitcoin-core-dev/build_31901 util_string_tests`\r\nRunning 1 test case...\r\n\r\n*** No errors detected\r\nRunning 1 test case...\r\n\r\n*** No errors detected\r\nThe coverage was deterministic across two runs.\r\n```",
+          "created_at": "2025-03-13T16:00:26Z"
+        },
+        {
+          "user": "Prabhat1308",
+          "body": ">  Word of caution, i'm running in a nix-shell on a mac. So would like to see someone on pure mac env. confirm that this is the issue\r\n\r\nApplied this change and I get deterministic results on all runs\r\n```\r\n#if defined(__clang__)  && (defined(__linux__) || defined(__APPLE__)) \r\n```\r\n<img width=\"1512\" alt=\"Screenshot 2025-03-13 at 9 31 40 PM\" src=\"https://github.com/user-attachments/assets/fb622440-8634-47ba-b21a-54fc567803df\" />\r\n\r\nI tested on the latest master branch with following commands .\r\n\r\n```\r\ncmake -B build -DCMAKE_C_COMPILER=\"$(brew --prefix llvm)/bin/clang\" \\ \r\n   -DCMAKE_CXX_COMPILER=\"$(brew --prefix llvm)/bin/clang++\" \\\r\n   -DCMAKE_C_FLAGS=\"-fprofile-instr-generate -fcoverage-mapping\" \\\r\n   -DCMAKE_CXX_FLAGS=\"-fprofile-instr-generate -fcoverage-mapping\"\r\n\r\ncmake --build build -j$(sysctl -n hw.ncpu) \r\nRUST_BACKTRACE=1 cargo run --manifest-path ./contrib/devtools/deterministic-unittest-coverage/Cargo.toml -- $PWD/build util_tests  \r\n```\r\n\r\nAlso with the same change suggested by @janb84 . I get deterministic results on fuzz-coverage too.\r\nRunning commands\r\n```\r\nRUST_BACKTRACE=1 cargo run --manifest-path ./contrib/devtools/deterministic-fuzz-coverage/Cargo.toml -- $PWD/build $PWD/qa-assets/fuzz_corpora process_message\r\n```\r\n\r\nwithout change \r\n```\r\n@@ -331406,7 +331406,7 @@\r\n    60|       |     *\r\n    61|       |     * Called on a background thread. Only called for the active chainstate.\r\n    62|       |     */\r\n-   63|    158|    virtual void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) {}\r\n+   63|    166|    virtual void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) {}\r\n    64|       |    /**\r\n    65|       |     * Notifies listeners any time the block chain tip changes, synchronously.\r\n    66|       |     */\r\n@@ -331458,14 +331458,14 @@\r\n   112|       |     *\r\n   113|       |     * Called on a background thread.\r\n   114|       |     */\r\n-  115|    183|    virtual void MempoolTransactionsRemovedForBlock(const std::vector<RemovedMempoolTransactionInfo>& txs_removed_for_block, unsigned int nBlockHeight) {}\r\n+  115|    191|    virtual void MempoolTransactionsRemovedForBlock(const std::vector<RemovedMempoolTransactionInfo>& txs_removed_for_block, unsigned int nBlockHeight) {}\r\n   116|       |    /**\r\n   117|       |     * Notifies listeners of a block being connected.\r\n   118|       |     * Provides a vector of transactions evicted from the mempool as a result.\r\n   119|       |     *\r\n   120|       |     * Called on a background thread.\r\n   121|       |     */\r\n-  122|    162|    virtual void BlockConnected(ChainstateRole role, const std::shared_ptr<const CBlock> &block, const CBlockIndex *pindex) {}\r\n+  122|    169|    virtual void BlockConnected(ChainstateRole role, const std::shared_ptr<const CBlock> &block, const CBlockIndex *pindex) {}\r\n   123|       |    /**\r\n   124|       |     * Notifies listeners of a block being disconnected\r\n   125|       |     * Provides the block that was disconnected.\r\n\r\nThe coverage was not deterministic between runs.\r\nThe fuzz target input was /Users/prabhatverma/projects/bitcoin/qa-assets/fuzz_corpora/process_message/00023ad97f6f03d0899bfa81d8ff7d095d8b4ee9.\r\nExiting.\r\n```\r\n\r\nwith the change \r\n```\r\nCheck if using libFuzzer ...\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\nprocess_message: succeeded against 1 files in 0s.\r\n# exited manually \r\n```\r\n\r\n",
+          "created_at": "2025-03-13T16:05:57Z"
+        }
+      ]
+    },
+    {
+      "number": 31900,
+      "title": "Fix field name styling in `submitpackage` RPC results",
+      "body": "Previously, the `submitpackage` RPC call returned a response key named `package_msg`, which is inconsistent with the other field names that are using `-` as a delimiter. Here, we align the style of `package-msg`.\r\n\r\ncc @glozow @instagibbs ",
+      "state": "closed",
+      "user": "tnull",
+      "created_at": "2025-02-18T19:40:05Z",
+      "updated_at": "2025-02-19T15:46:06Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31900",
+      "labels": [
+        "RPC/REST/ZMQ",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31900.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [stickies-v](https://github.com/bitcoin/bitcoin/pull/31900#pullrequestreview-2626465092) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31385](https://github.com/bitcoin/bitcoin/pull/31385) (package validation: relax the package-not-child-with-unconfirmed-parents rule by glozow)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-18T19:40:08Z"
+        },
+        {
+          "user": "tnull",
+          "body": "> lgtm, though I've heard we don't like hyphens, so perhaps go in the other direction and change all the other ones to `_`?\r\n\r\nHmm, sure, happy to change if that would be preferable, mostly went this way as I saw other examples using `-` (e.g., `p2sh-segwit` in `decodescript` result, `bit125-replaceable` in the wallet RPCs, etc), but I now realize there are also many (more?) that use `_`. This makes me wonder if we are really positive it's worth breaking the current API, if neither of the options (`-` or `_`) is consistently used across the RPC API? I guess in the `submitpackage` case it's a tad more awkward as both variants are used in a single RPC response?",
+          "created_at": "2025-02-18T20:13:10Z"
+        },
+        {
+          "user": "glozow",
+          "body": "I want to say this changed over time... I can't find the thread where I was convinced, but here's chat GPT's argument for why underscores are better than hyphens in JSON:\r\n\r\n1. Consistency with JavaScript & JSON standards – JSON keys are commonly accessed in JavaScript, and using hyphens (some-key) requires bracket notation (obj[\"some-key\"]) instead of the simpler dot notation (obj.some_key).\r\n2. Better compatibility – Many programming languages (Python, JavaScript, etc.) use underscores for variable and property names, making underscore-separated keys more natural to work with.\r\n3. Avoids potential parsing issues – Some parsers and serialization libraries may misinterpret hyphens as minus signs, leading to unexpected issues.\"\r\n\r\nfwiw, if we think of pre-29 as the last chance to be liberal with changing API, I do think unifying it within `submitpackage` makes sense (for context, this is a continuation of the convo from https://github.com/spesmilo/electrum-protocol/issues/4#issuecomment-2665116596).",
+          "created_at": "2025-02-18T20:30:39Z"
+        },
+        {
+          "user": "tnull",
+          "body": "Alright, I now updated this PR to adjust all `submitpackage` result field names that previously used dash-case. As it seemed a bit odd to have some of the same fields (`effective-feerate`, `effective-includes`) with different styling as part of `testmempoolaccept`, I now also added a commit aligning the fields there, too, but please let me know if I should simply drop that commit if we wouldn't want to break that RPC API as well.\r\n\r\n> fwiw, if we think of pre-29 as the last chance to be liberal with changing API, I do think unifying it within `submitpackage` makes sense (for context, this is a continuation of the convo from [spesmilo/electrum-protocol#4 (comment)](https://github.com/spesmilo/electrum-protocol/issues/4#issuecomment-2665116596)).\r\n\r\nAlright, good to know. It might be noteworthy that there are other projects that directly forward Core's JSON (e.g. the Esplora implementations over at https://github.com/mempool/electrs/pull/105 and https://github.com/Blockstream/electrs/pull/119) that would also be affected by the API breakage (and for clients it might also be a bit annoying as they surely can't know with version of Core a particular Esplora server is running under the hood, but I guess they'd need to figure something out, or just use the newer version asap?). That said, I agree that if this should get fixed/aligned, now might be the last chance to do so (also given that said downstream projects haven't fully finished deploying `submitpackage` support yet).",
+          "created_at": "2025-02-19T13:36:25Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "`submitpackage` is marked as experimental and unstable, so changing that is fine imo. That does not hold for `testmempoolaccept`, so if we make changes to fields you'll have to add a `-deprecatedrpc` option. I don't think breaking a stable API just for stylistic purposes is worth it, so I would postpone that until we need another breaking change.\r\n\r\nWould be good to add release notes to document the `submitpackage` breaking changes.",
+          "created_at": "2025-02-19T14:29:57Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> Alright, good to know. It might be noteworthy that there are other projects that directly forward Core's JSON (e.g. the Esplora implementations over at https://github.com/mempool/electrs/pull/105 and https://github.com/Blockstream/electrs/pull/119) that would also be affected by the API breakage\r\n\r\nAh right, I forgot about that. And https://github.com/spesmilo/electrumx/pull/288 and https://github.com/spesmilo/electrum-protocol/pull/1. I think this would inconvenience a few people.\r\n\r\nOk... even though it's marked as experimental, I think it's too late to break `submitpackage` purely for style reasons. Fwiw I did think this was worthwhile before (and I pinged @tnull after seeing [comment](https://github.com/spesmilo/electrum-protocol/issues/4#issuecomment-2665116596)), but I'm leaning towards nack now. My apologies!",
+          "created_at": "2025-02-19T15:17:47Z"
+        },
+        {
+          "user": "tnull",
+          "body": "> Ok... even though it's marked as experimental, I think it's too late to break `submitpackage` purely for style reasons. Fwiw I did think this was worthwhile before (and I pinged @tnull after seeing [comment](https://github.com/spesmilo/electrum-protocol/issues/4#issuecomment-2665116596)), but I'm leaning towards nack now. My apologies!\r\n\r\nAlright, no worries! Going ahead and closing this.",
+          "created_at": "2025-02-19T15:43:28Z"
+        }
+      ]
+    },
+    {
+      "number": 31899,
+      "title": "cmake: Exclude generated sources from translation",
+      "body": "This PR fixes an error encountered when building the `translate` target:\r\n```\r\n$ gmake -j $(nproc) -C depends MULTIPROCESS=1\r\n$ cmake -G \"Unix Makefiles\" --preset dev-mode --toolchain depends/x86_64-pc-linux-gnu/toolchain.cmake -DWITH_USDT=OFF\r\n$ cmake --build build_dev_mode -t translate\r\ngmake[3]: *** No rule to make target 'src/test/ipc_test.capnp.c++', needed by 'src/qt/CMakeFiles/translate'. Stop.\r\ngmake[2]: *** [CMakeFiles/Makefile2:1646: src/qt/CMakeFiles/translate.dir/all] Error 2\r\ngmake[1]: *** [CMakeFiles/Makefile2:1653: src/qt/CMakeFiles/translate.dir/rule] Error 2\r\ngmake: *** [Makefile:699: translate] Error 2\r\n```\r\n\r\nThe previous [attempt](https://github.com/bitcoin/bitcoin/commit/864386a7444fb5cf16613956ce8bf335f51b67d5) to address this issue worked only with Ninja generators and has been reverted.\r\n\r\nEssentially, this PR modifies the `translate` target so that it ignores generated sources rather than attempting to update them.\r\n\r\nAt present, multiprocess-specific sources do not contain any translatable strings. Nonetheless, it is prudent to maintain a general approach.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-02-18T17:22:11Z",
+      "updated_at": "2025-02-20T11:26:30Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31899",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31899.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/31899#pullrequestreview-2627041699), [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/31899#pullrequestreview-2627202385) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-02-18T17:22:15Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> This PR fixes an error encountered when building the `translate` target...\r\n\r\nThe issue was reported offline by @pablomartin4btc.",
+          "created_at": "2025-02-18T17:22:58Z"
+        }
+      ]
+    },
+    {
+      "number": 31897,
+      "title": "mining: drop unused  -nFees and sigops from CBlockTemplate",
+      "body": "For the coinbase `vTxFees` used a dummy value of -nFees.\r\n\r\nSimilarly the first `vTxSigOpsCost` entry was calculated from\r\nthe dummy coinbase transaction.\r\n\r\nThis was introduced in #2115, but the values were never returned by the RPC or used in a test.\r\n\r\nDrop 'm and add code comments to prevent confusion.\r\n\r\nThis PR also adds test coverage for the `fees` and `sigops` fields in `getblocktemplate`, so it closes #32053.",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-02-18T15:35:24Z",
+      "updated_at": "2025-03-25T12:42:51Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31897",
+      "labels": [
+        "Mining"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31897.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [ismaelsadeeq](https://github.com/bitcoin/bitcoin/pull/31897#issuecomment-2740221944), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/31897#pullrequestreview-2711035936), [glozow](https://github.com/bitcoin/bitcoin/pull/31897#pullrequestreview-2713564288) |\n| Concept NACK | [luke-jr](https://github.com/bitcoin/bitcoin/pull/31897#issuecomment-2683554828) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-02-18T15:35:28Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Concept ACK\r\nWill ack after https://github.com/bitcoin/bitcoin/pull/31897#pullrequestreview-2624259635",
+          "created_at": "2025-02-18T17:11:43Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> maybe instead of changing from non-zero dummy values to zero dummy values, it could make sense to drop dummy values entirely\r\n\r\nI think it's more intuitive for `block.vtx` and these two vectors to have the same length.\r\n\r\n> Also if clients of IPC interface just need total fees and sigops\r\n\r\nAgreed, but at this point I haven't seen a need for it yet. Conversely though, I'm also not convinced yet that we should drop them.",
+          "created_at": "2025-02-18T17:19:51Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "ACK d1cc874d1f87a654aa2da50dbcf850b84517e938\r\n\r\n> I think it's more intuitive for block.vtx and these two vectors to have the same length.\r\n\r\nNo strong opinion but I tend to prefer @ryanofsky  diff because it is precise. Since the coinbase transaction does not have fees, we should not simply add 0 for the size of `vTxFees` to match `vtx` .\r\n\r\nThey are two different list with different meaning\r\n`vtx` is the list of transactions in the block, while `vTxFees` is the list of fees for each transaction in the block which should exclude the coinbase.\r\n\r\nFor `vTxSigOpsCost` I agree it should match `vtx` and 0 is okay because eventually there will be coinbase but we should clearly indicate the 0 there is  dummy.\r\n\r\n\r\nThis is also similar to what was done in https://github.com/bitcoin/bitcoin/pull/31384/commits/777434a2cd14841e35ce39d7a6f51131e6a41de2 to improve precision of the block assembler.",
+          "created_at": "2025-02-18T19:14:25Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "`block.vtx` contains a dummy coinbase, `vTxFees` and `vTxSigOpsCost` contain dummy fees and dummy sigop costs for the coinbase. That seems more straight forward to me than having `vTxFees` be shorter and then having to document why these things have different lengths.\r\n\r\n> Since the coinbase transaction does not have fees\r\n\r\nThat's almost a philosophical question, because miners can (and sometimes accidentally did) claim less fees than allowed. In a way such a coinbase has negative fees, which is perhaps why the original code did that.\r\n\r\nPerhaps the most rigorous solution is to add `std::optional<CAmount> fee` to `CTransaction`, but that would have implications all over the codebase, so I'd rather not go on that adventure.",
+          "created_at": "2025-02-19T08:15:15Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "> block.vtx contains a dummy coinbase, vTxFees and vTxSigOpsCost contain dummy fees and dummy sigop cost\r\n\r\nGood point.\r\n\r\n> That seems more straight forward to me than having vTxFees be shorter and then having to document why these things have different lengths.\r\n\r\n\r\nWe don't have to document that `vTxFees` is just a vector of fees paid in the block.\r\n\r\nNote: This is an unblocking comment.\r\n\r\nThis PR is an immediate win because we don't have to perform checks like we do in https://github.com/bitcoin/bitcoin/pull/31283/files#diff-0ef8ae12c6e9ef2accc78537f42612b3267e8a7c45dc7e9eb998f797e79f2e95R1018-R1028, should this PR come before #31283?",
+          "created_at": "2025-02-19T18:25:39Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> This PR is an immediate win because we don't have to perform checks like we do in\r\n\r\nNo this PR doesn't change anything there. It's just that people suggested using `-vTxFees[]` directly there instead of doing the calculation. This PR removes that temptation (and makes it easier to get rid of `vTxFees` entirely at some point).",
+          "created_at": "2025-02-20T10:26:13Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Rebased and dropped coinbase from `vTxFees` and `vTxSigOpsCost`.",
+          "created_at": "2025-02-21T08:15:54Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "Concept NACK, just makes the code less straightforward and forces re-calculation later if needed. Harmless to leave it, and make use  (eg, in #31283 and other feature I haven't PR'd yet)",
+          "created_at": "2025-02-25T23:57:53Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> forces re-calculation later if needed\r\n\r\nIt wouldn't. We can introduce `total_fees` and set it in the same place where we now set this dummy value.\r\n\r\nThe recalculation in #31283 is done in order to avoid relying on this code. I considered adding `total_fees` for that PR, but it doesn't seem useful because I intend to replace that code when cluster mempool comes around.\r\n\r\n> other feature I haven't PR'd yet\r\n\r\nThat would justify a `total_fees` field. I'm happy to refactor `waitNext()` after said PR is merged, if that happens before the cluster mempool changes.\r\n\r\nIn either scenario I have no need for `-vTxFees[0]`.",
+          "created_at": "2025-02-26T14:12:05Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Rebased and switched the order of commits, so it's more clear this PR doesn't change behavior. The first commit adds a test.",
+          "created_at": "2025-03-13T10:13:23Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "re-ACK 226d81f8b708ea1c3a39ec58446e291fe7440fdd \r\n \r\nLatest change added functional test coverage for the `sigops` and `fee` field of txs returned from `getblocktemplate` RPC",
+          "created_at": "2025-03-20T12:04:11Z"
+        }
+      ]
+    },
+    {
+      "number": 31896,
+      "title": "refactor: Remove redundant and confusing calls to IsArgSet",
+      "body": "`IsArgSet` is problematic:\r\n\r\n* It returns whether an arg has been set, even if it has been negated. `IsArgSet` is sometimes used to check for a truthy value, which is wrong, but usually harmless. Cleanup of those cases may or may not be done in a follow-up.\r\n* In most other cases, calling it is redundant, because the immediately following `Get*Arg` calls can already return an `std::optional` nullopt value to indicate an unset arg.\r\n\r\nSo relieve both issues by removing all `IsArgSet` that are redundant.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-02-18T15:25:45Z",
+      "updated_at": "2025-03-27T13:36:53Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31896",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31896.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/31896#pullrequestreview-2714365858), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/31896#pullrequestreview-2714427001) |\n| Concept ACK | [yancyribbens](https://github.com/bitcoin/bitcoin/pull/31896#issuecomment-2667306138), [jonatack](https://github.com/bitcoin/bitcoin/pull/31896#pullrequestreview-2711259714) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32138](https://github.com/bitcoin/bitcoin/pull/32138) (wallet, rpc: remove settxfee and paytxfee by polespinasa)\n* [#29278](https://github.com/bitcoin/bitcoin/pull/29278) (Wallet:  Add `maxfeerate` wallet startup option by ismaelsadeeq)\n* [#25722](https://github.com/bitcoin/bitcoin/pull/25722) (refactor: Use util::Result class for wallet loading by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-18T15:25:48Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "> It is confusing, because the provided fallback is dead code. So it would be better to just call GetArg without a fallback.\r\n\r\nI'm not 100% sure when reading the commit what is meant by dead code.  Is it that the arg `-blockmintxfee` is a no longer used switch here?  I ask because I notice some other calls to GetArg with fallbacks such as:\r\n\r\n```\r\nsrc/init.cpp:879:    if (args.IsArgSet(\"-upnp\")) {\r\n```",
+          "created_at": "2025-02-18T22:34:00Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Looks like a worthwhile refactor.  Better than an LLM could do ;)",
+          "created_at": "2025-02-18T22:37:12Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> > It is confusing, because the provided fallback is dead code. So it would be better to just call GetArg without a fallback.\r\n> \r\n> I'm not 100% sure when reading the commit what is meant by dead code.\r\n\r\nIt is just saying the fallback argument is unused. For example in:\r\n\r\n```c++\r\n   if (gArgs.IsArgSet(\"-color\")) {\r\n   {\r\n        const std::string color{gArgs.GetArg(\"-color\", DEFAULT_COLOR_SETTING)};\r\n        ...\r\n   }\r\n```\r\n\r\nThe `DEFAULT_COLOR_SETTING` argument is unused, and any fallback value that is passed would be ignored because `IsArgSet` returned true.",
+          "created_at": "2025-02-18T23:40:10Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Concept ACK https://github.com/bitcoin/bitcoin/pull/31896/commits/fa3fb3c23fae287b161112b9b04cf0937a1051c6",
+          "created_at": "2025-02-19T01:37:19Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Concept ACK",
+          "created_at": "2025-02-22T17:48:42Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> What about the `IsArgSet` ones followed by `GetPathArg`?\r\n\r\nNot sure what you mean, but `GetPathArg` does not return `std::optional<_>`, so I don't think the changes that are done here are applicable to it. There may or may not be cleanups related to `GetPathArg`, but my recommendation would be to create a separate, unrelated and independent issue or pull request to discuss or propse changes.",
+          "created_at": "2025-02-25T08:10:22Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "@ryanofsky Want to take another look?",
+          "created_at": "2025-03-21T07:25:42Z"
+        }
+      ]
+    },
+    {
+      "number": 31895,
+      "title": "doc: Improve `dependencies.md`",
+      "body": "Small improvements to the `dependencies.md` documentation as a follow-up for #31634.\r\n\r\n**Linux Kernel** does not need to be in the dependencies as it is not required for cross-compiling from other systems, and users building on Linux should not expect they can build using any EOL kernel, see: https://github.com/bitcoin/bitcoin/pull/31634#discussion_r1957123270\r\n\r\n**Runtime dependencies** can be in a separate table to improve readability. See: https://github.com/bitcoin/bitcoin/pull/31634#issuecomment-2589412550\r\n\r\n**Version used** is redundant as the depends package definition is already linked in the table and can thus be removed, see: https://github.com/bitcoin/bitcoin/pull/31895#discussion_r2063356972",
+      "state": "closed",
+      "user": "NicolaLS",
+      "created_at": "2025-02-18T13:29:23Z",
+      "updated_at": "2025-05-15T15:58:40Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31895",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31895.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/31895#issuecomment-2884160071), [hebasto](https://github.com/bitcoin/bitcoin/pull/31895#pullrequestreview-2844135431), [jonatack](https://github.com/bitcoin/bitcoin/pull/31895#pullrequestreview-2844215334) |\n| Stale ACK | [hodlinator](https://github.com/bitcoin/bitcoin/pull/31895#pullrequestreview-2825304323) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32128](https://github.com/bitcoin/bitcoin/pull/32128) (Draft: CCoinMap Experiments by martinus)\n* [#31802](https://github.com/bitcoin/bitcoin/pull/31802) (Add bitcoin-{node,gui} to release binaries for IPC by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-02-18T13:29:26Z"
+        },
+        {
+          "user": "NicolaLS",
+          "body": "[Preview](https://github.com/NicolaLS/bitcoin/blob/doc-followup/doc/dependencies.md)",
+          "created_at": "2025-02-18T14:14:49Z"
+        },
+        {
+          "user": "NicolaLS",
+          "body": "> ACK [f3d2e9a](https://github.com/bitcoin/bitcoin/commit/f3d2e9acbf3d9407101290ca86f014e82344cfce)\r\n> #### Concept\r\n> \r\n> Separates build and runtime dependencies into separate tables which makes more sense.\r\n> #### Nits\r\n> \r\n>     * Slight preference of using `### Build` over `**Build:**`, but it's subjective.\r\n> \r\n>     * Maybe [32bdc7d](https://github.com/bitcoin/bitcoin/commit/32bdc7dc47bcd67458bc8f687fcf8659ec3f0b1e) could also include a link to https://git.savannah.gnu.org/cgit/guix.git/tree/gnu/packages/cmake.scm?id=53396a22afc04536ddf75d8f82ad2eafa5082725#n169 in the commit message, since it's a bit opaque otherwise?\r\n\r\nThanks. Fixed both nits, I also think headlines are better. ",
+          "created_at": "2025-04-08T15:39:38Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "ACK 4b6171982a20d736b2c627ab9b7ea788b06af457",
+          "created_at": "2025-04-25T23:01:51Z"
+        },
+        {
+          "user": "NicolaLS",
+          "body": "Rebased and dropped the two commits that bumped sqlite/zmq in favor of removing the \"Version used\" column from the tables entirely (see cb623692a6089c39560a637a2bf064d54aebb4d4). (Also updated the PR description)\r\n\r\nThis commit also removed _\"Version Used\" refers to the release binaries._ not sure if this should get replaced with something else ? (not necessary imo.)",
+          "created_at": "2025-05-07T18:05:08Z"
+        },
+        {
+          "user": "NicolaLS",
+          "body": "Squashed and reworded commits.",
+          "created_at": "2025-05-15T13:35:53Z"
+        },
+        {
+          "user": "NicolaLS",
+          "body": "(fixed typo in commit message)",
+          "created_at": "2025-05-15T14:09:43Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK e62423d6f1514b022155edb5bc930cecc4236731 🛄\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: lgtm ACK e62423d6f1514b022155edb5bc930cecc4236731 🛄\r\nN/8vnAtKiknzcPjLx34qQXyWw6WJR2IMUqKEaXbtLLNH3EKd5p9Dl4+O+mFpfYxiJ6PAt6UHjD6BQ98pJvBgCg==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-05-15T15:02:21Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 31898,
+      "title": "cmake: (release) version handling is broken",
+      "body": "Create a test tag: `v99.99`\nCheckout `v99.99` and perform a guix build:`./contrib/guix/guix-build`.\nTake the dist-archive tarball: `/bitcoin/guix-build-99.99/output/dist-archive/bitcoin-99.99.tar.gz` and perform a build:\n```bash\ntar xf bitcoin-99.99.tar.gz\ncd bitcoin-99.99\ncmake -B build\ncmake --build build\n# ./build/src/bitcoind --version \nBitcoin Core daemon version v28.99.0-g43e287b3ff5f0d223b0911b6ef90054ce5eb69d2\n```",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-02-18T15:52:44Z",
+      "updated_at": "2025-11-20T19:47:16Z",
+      "comments": 24,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31898",
+      "labels": [
+        "Build system"
+      ]
+    },
+    {
+      "number": 31894,
+      "title": "qa: timeout in StopHTTPServer()",
+      "body": "Ran into a CI timeout in *feature_assumeutxo.py* on Windows: https://github.com/hodlinator/bitcoin/actions/runs/13371466603/job/37340702068#step:12:123\n\nIn the combined log we see the following, \"Restarting node to stop at height\" is [referring to node 1](https://github.com/bitcoin/bitcoin/blob/790c509a4796ec47be2275d86b35370ff25a599a/test/functional/feature_assumeutxo.py#L586)):\n```\ntest  ...T14:10:53.420000Z TestFramework (INFO): Restarting node to stop at height 359\ntest  ...T14:10:53.420000Z TestFramework.node1 (DEBUG): Stopping node\nnode1 ...T14:10:53.420155Z (mocktime...) [http] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:306] [http_request_cb] [http] Received a POST request for / from 127.0.0.1:56740\nnode1 ...T14:10:53.420240Z (mocktime...) [httpworker.8] [D:\\a\\bitcoin\\bitcoin\\src\\rpc\\request.cpp:241] [parse] [rpc] ThreadRPCServer method=gettxout user=__cookie__\nnode1 ...T14:10:53.421024Z (mocktime...) [http] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:306] [http_request_cb] [http] Received a POST request for / from 127.0.0.1:56740\nnode1 ...T14:10:53.421114Z (mocktime...) [httpworker.11] [D:\\a\\bitcoin\\bitcoin\\src\\rpc\\request.cpp:241] [parse] [rpc] ThreadRPCServer method=stop user=__cookie__\nnode1 ...T14:10:53.421203Z (mocktime...) [init] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:508] [InterruptHTTPServer] [http] Interrupting HTTP server\nnode1 ...T14:10:53.421251Z (mocktime...) [init] [D:\\a\\bitcoin\\bitcoin\\src\\httprpc.cpp:382] [InterruptHTTPRPC] [rpc] Interrupting HTTP RPC server\nnode1 ...T14:10:53.421280Z (mocktime...) [init] [D:\\a\\bitcoin\\bitcoin\\src\\rpc\\server.cpp:291] [operator ()] [rpc] Interrupting RPC\nnode1 ...T14:10:53.421320Z (mocktime...) [init] [D:\\a\\bitcoin\\bitcoin\\src\\init.cpp:287] [Shutdown] Shutdown: In progress...\nnode1 ...T14:10:53.421345Z (mocktime...) [shutoff] [D:\\a\\bitcoin\\bitcoin\\src\\httprpc.cpp:387] [StopHTTPRPC] [rpc] Stopping HTTP RPC server\nnode1 ...T14:10:53.422054Z (mocktime...) [addcon] [D:\\a\\bitcoin\\bitcoin\\src\\util\\thread.cpp:22] [TraceThread] addcon thread exit \nnode1 ...T14:10:53.422540Z (mocktime...) [shutoff] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:770] [UnregisterHTTPHandler] [http] Unregistering HTTP handler for / (exactmatch 1) \nnode1 ...T14:10:53.422641Z (mocktime...) [shutoff] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:770] [UnregisterHTTPHandler] [http] Unregistering HTTP handler for /wallet/ (exactmatch 0) \nnode1 ...T14:10:53.422674Z (mocktime...) [shutoff] [D:\\a\\bitcoin\\bitcoin\\src\\rpc\\server.cpp:303] [operator ()] [rpc] Stopping RPC\nnode1 ...T14:10:53.422847Z (mocktime...) [shutoff] [D:\\a\\bitcoin\\bitcoin\\src\\rpc\\server.cpp:306] [operator ()] [rpc] RPC stopped.\nnode1 ...T14:10:53.422879Z (mocktime...) [shutoff] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:520] [StopHTTPServer] [http] Stopping HTTP server\nnode1 ...T14:10:53.422945Z (mocktime...) [shutoff] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:522] [StopHTTPServer] [http] Waiting for HTTP worker threads to exit\nnode1 ...T14:10:53.423118Z (mocktime...) [shutoff] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:536] [StopHTTPServer] [http] Waiting for 1 connections to stop HTTP server\nnode1 ...T14:10:53.423164Z (mocktime...) [http] [D:\\a\\bitcoin\\bitcoin\\src\\httpserver.cpp:355] [ThreadHTTP] [http] Exited http event loop\nnode1 ...T14:10:53.440186Z (mocktime...) [net] [D:\\a\\bitcoin\\bitcoin\\src\\util\\thread.cpp:22] [TraceThread] net thread exit\nnode1 ...T14:10:53.652881Z (mocktime...) [msghand] [D:\\a\\bitcoin\\bitcoin\\src\\util\\thread.cpp:22] [TraceThread] msghand thread exit\n...\nnode1 ...T14:11:32.925206Z (mocktime...) [scheduler] [D:\\a\\bitcoin\\bitcoin\\src\\net.cpp:2428] [StartExtraBlockRelayPeers] [net] enabling extra block-relay-only peers\n...\nnode1 ...T14:25:47.935847Z (mocktime...) [scheduler] [D:\\a\\bitcoin\\bitcoin\\src\\net.cpp:2391] [DumpAddresses] [net] Flushed 0 addresses to peers.dat  1ms\n...\nnode1 ...T14:40:47.947785Z (mocktime...) [scheduler] [D:\\a\\bitcoin\\bitcoin\\src\\net.cpp:2391] [DumpAddresses] [net] Flushed 0 addresses to peers.dat  1ms\n...\ntest  ...T14:50:53.446000Z TestFramework (ERROR): JSONRPC error\n\n    Traceback (most recent call last):\n      File \"D:\\a\\bitcoin\\bitcoin\\build\\test\\functional\\test_framework\\authproxy.py\", line 164, in _get_response\n        http_response = self.__conn.getresponse()\n...\n      File \"C:\\hostedtoolcache\\windows\\Python\\3.13.2\\x64\\Lib\\socket.py\", line 719, in readinto\n        return self._sock.recv_into(b)\n               ~~~~~~~~~~~~~~~~~~~~^^^\n    TimeoutError: timed out\n    During handling of the above exception, another exception occurred:\n    Traceback (most recent call last):\n      File \"D:\\a\\bitcoin\\bitcoin\\build\\test\\functional\\test_framework\\test_framework.py\", line 135, in main\n        self.run_test()\n        ~~~~~~~~~~~~~^^\n      File \"D:\\a\\bitcoin\\bitcoin\\build\\test\\functional\\feature_assumeutxo.py\", line 587, in run_test\n        self.restart_node(1, extra_args=[\n        ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^\n            f\"-stopatheight={PAUSE_HEIGHT}\", *self.extra_args[1]])\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n...\n      File \"D:\\a\\bitcoin\\bitcoin\\build\\test\\functional\\test_framework\\test_node.py\", line 395, in stop_node\n        self.stop(wait=wait)\n        ~~~~~~~~~^^^^^^^^^^^\n...\n      File \"D:\\a\\bitcoin\\bitcoin\\build\\test\\functional\\test_framework\\authproxy.py\", line 106, in _request\n        return self._get_response()\n               ~~~~~~~~~~~~~~~~~~^^\n      File \"D:\\a\\bitcoin\\bitcoin\\build\\test\\functional\\test_framework\\authproxy.py\", line 166, in _get_response\n        raise JSONRPCException({\n...\n    test_framework.authproxy.JSONRPCException: 'stop' RPC took longer than 2400.000000 seconds. Consider using larger timeout for calls that take longer to return. (-344)\n```\nNote how it takes:\n- ~40 seconds to go from receiving stop-RPC to \"enabling extra block-relay-only peers\"\n- Additional *14 minutes* to reach \"Flushed 0 addresses to peers.dat\"\n- Additional *15 minutes* for the second one\n- Additional *10 minutes* until we reach the JSONRPC error/timeout.\n\nIt would be good to have log output describing what the node is doing, it obviously started shutting down, and is maybe still flushing some state to disk?\n\nAlso, I wonder if bitcoind might have terminated the TCP/HTTP connection before responding to the `stop`-RPC (maybe `gettxout`-RPC being called right before it is a factor)?\n\nIncluded in the log, but seems unrelated as it's another node:\n```\nnode0 stderr Error: A fatal internal error occurred, see debug.log for details: Assumeutxo data not found for the given blockhash '7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a'.\n```",
+      "state": "open",
+      "user": "hodlinator",
+      "created_at": "2025-02-18T10:49:20Z",
+      "updated_at": "2025-02-24T11:01:17Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31894",
+      "labels": [
+        "RPC/REST/ZMQ",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "hodlinator",
+          "body": "@pinheadmz since you are working on the HTTP rewrite... have you noticed anything fishy regarding whether the stop-RPC will actually always get the response sent off back to the client or not?\n\nCurrent stop-RPC implementation implies it should always work:\nhttps://github.com/bitcoin/bitcoin/blob/790c509a4796ec47be2275d86b35370ff25a599a/src/rpc/server.cpp#L170-L172\n\nBut it's from 2015 and the log above makes me very suspicious.",
+          "created_at": "2025-02-18T11:02:16Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "It looks like the scheduler thread never exited? It may be related to the comment:\n\n```\n    // After everything has been shut down, but before things get flushed, stop the\n    // the scheduler. After this point, SyncWithValidationInterfaceQueue() should not be called anymore\n    // as this would prevent the shutdown from completing.\n    if (node.scheduler) node.scheduler->stop();\n```\n\nHowever, the scheduler thread seems to cycle normally, so there doesn't seem to be any `SyncWithValidationInterfaceQueue` event stuck in it.",
+          "created_at": "2025-02-18T11:23:47Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "> [@pinheadmz](https://github.com/pinheadmz) since you are working on the HTTP rewrite...\n\nI hadn't noticed anything about the current implementation but managing the RPC `stop` race condition was definitely a tricky part of the rewrite. \n\nOne thing to note about the actual total time elapsed in your case is that on CI the timeout factors are multiplied by large factors in some cases to avoid timeout errors on low-resource runners:\n\nhttps://github.com/bitcoin/bitcoin/blob/78c19ddd7c56a275d2ae835fd13ed1508acd7806/.github/workflows/ci.yml#L153-L163\n\nI suppose enabling `libevent` logs may help understanding whats happening...\n\nOr maybe investigate why the `net` thread appears to not get the interrupt signal?",
+          "created_at": "2025-02-18T11:44:48Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Or maybe investigate why the `net` thread appears to not get the interrupt signal?\n\nMy impression was that the `net` thread is stopped, along with the http workers, and the http thread. See:\n\n```\nnode1 ...T14:10:53.440186Z (mocktime...) [net] [D:\\a\\bitcoin\\bitcoin\\src\\util\\thread.cpp:22] [TraceThread] net thread exit\n```\n\nThere seem to be two issues here:\n\n* The `stop` RPC timing out\n* The node not stopping",
+          "created_at": "2025-02-18T12:06:28Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "Hm yeah, but then why does `enabling extra block-relay-only peers` happen after that?",
+          "created_at": "2025-02-18T12:08:29Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Hm yeah, but then why does `enabling extra block-relay-only peers` happen after that?\n\nThe `StartExtraBlockRelayPeers` function is logging to the `[net]` category (not to be confused with the `[net]` thread) and is called by `CheckForStaleTipAndEvictPeers`, which is running in the `[scheduler]` thread.",
+          "created_at": "2025-02-18T13:15:59Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "```\n[shutoff] [...\\httpserver.cpp:536] [StopHTTPServer] [http] Waiting for 1 connections to stop HTTP server\n[http] [...\\httpserver.cpp:355] [ThreadHTTP] [http] Exited http event loop\n[net] [...\\util\\thread.cpp:22] [TraceThread] net thread exit\n```\nThe fact that we don't get \"Stopped HTTP server\" or even \"Waiting for HTTP event thread to exit\" after these indicates that we are stuck in the lower part of `StopHTTPServer()`:\n\nhttps://github.com/bitcoin/bitcoin/blob/790c509a4796ec47be2275d86b35370ff25a599a/src/httpserver.cpp#L518-L557\n\nSo we're either stuck on `g_requests.WaitUntilEmpty();` or just after, in the `evhttp_free` logic.\n\nThe pending request taking time to complete is likely `stop` or `gettxout`.\n\nIt is a bit worrying that we get \"net thread exit\" before completely stopping HTTP, but I guess the \"net\" thread (`CConnman::ThreadSocketHandler`) is only used for P2P traffic anyways, not HTTP/RPC, so it shouldn't be related.",
+          "created_at": "2025-02-18T15:15:05Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "#31019 (macOS) might be the same issue, in which case this would not be windows-specific.\n",
+          "created_at": "2025-02-18T16:21:21Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> `StopHTTPServer`\n\nCould update the issue title to say \"timeout in StopHTTPServer\"?\n\n> #31019 \n\nThey are not exactly identical. 31019 likely never received an RPC, and the node is expected to raise an init error after running into a wallet init error. However, the function of the deadlock is the same:\n\n```\n node0 2024-10-02T00:15:45.783904Z [shutoff] [src/httpserver.cpp:522] [StopHTTPServer] [http] Stopping HTTP server \n node0 2024-10-02T00:15:45.783911Z [shutoff] [src/httpserver.cpp:524] [StopHTTPServer] [http] Waiting for HTTP worker threads to exit \n...\n(no further log messages from the `[shutoff]` thread)\n```\n\nSo I agree with you that they seem to be the same underlying cause/issue.",
+          "created_at": "2025-02-18T16:32:57Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "I'm working on making the code a bit more robust:\n- Impose a timeout on HTTP connections shutting down - Maybe related to this issue.\n- Fix an issue where we were not always processing the event to free eventHTTP - Would probably just leak otherwise, shutdown completes regardless of this in my testing.\n\n<details><summary>Edit: Old diff</summary>\n\n```diff\ndiff --git a/src/httpserver.cpp b/src/httpserver.cpp\nindex 88e640c377..ce2534fbd0 100644\n--- a/src/httpserver.cpp\n+++ b/src/httpserver.cpp\n@@ -197,10 +197,15 @@ public:\n         return WITH_LOCK(m_mutex, return m_tracker.size());\n     }\n     //! Wait until there are no more connections with active requests in the tracker\n-    void WaitUntilEmpty() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)\n+    //! or return the number of remaining requests on timeout.\n+    size_t WaitUntilEmpty(std::chrono::seconds timeout) const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)\n     {\n-        WAIT_LOCK(m_mutex, lock);\n-        m_cv.wait(lock, [this]() EXCLUSIVE_LOCKS_REQUIRED(m_mutex) { return m_tracker.empty(); });\n+        {\n+            WAIT_LOCK(m_mutex, lock);\n+            m_cv.wait_for(lock, timeout, [this]() EXCLUSIVE_LOCKS_REQUIRED(m_mutex) { return m_tracker.empty(); });\n+        }\n+\n+        return WITH_LOCK(m_mutex, return m_tracker.size());\n     }\n };\n //! Track active requests\n@@ -535,13 +540,17 @@ void StopHTTPServer()\n         if (const auto n_connections{g_requests.CountActiveConnections()}; n_connections != 0) {\n             LogDebug(BCLog::HTTP, \"Waiting for %d connections to stop HTTP server\\n\", n_connections);\n         }\n-        g_requests.WaitUntilEmpty();\n+        if (int connections = g_requests.WaitUntilEmpty(/*timeout=*/5min); connections > 0) {\n+            LogError(\"%d HTTP connections remain after timeout expired. Aborting to avoid freeing resources still under use.\", connections);\n+            std::abort();\n+        }\n     }\n     if (eventHTTP) {\n         // Schedule a callback to call evhttp_free in the event base thread, so\n         // that evhttp_free does not need to be called again after the handling\n         // of unfinished request connections that follows.\n         event_base_once(eventBase, -1, EV_TIMEOUT, [](evutil_socket_t, short, void*) {\n+            LogDebug(BCLog::HTTP, \"Freeing eventHTTP\");\n             evhttp_free(eventHTTP);\n             eventHTTP = nullptr;\n         }, nullptr, nullptr);\n@@ -549,6 +558,17 @@ void StopHTTPServer()\n     if (eventBase) {\n         LogDebug(BCLog::HTTP, \"Waiting for HTTP event thread to exit\\n\");\n         if (g_thread_http.joinable()) g_thread_http.join();\n+        bool first_run = true;\n+        while (event_base_get_num_events(eventBase, EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_ADDED) > 0) {\n+            if (first_run) LogDebug(BCLog::HTTP, \"Processing events left behind by HTTP event thread\");\n+            event_base_loop(eventBase, EVLOOP_NONBLOCK);\n+            if (first_run) {\n+                first_run = false;\n+            } else {\n+                // Only sleep when this happens repetitively.\n+                std::this_thread::sleep_for(100ms);\n+            }\n+        }\n         event_base_free(eventBase);\n         eventBase = nullptr;\n     }\n```\nWith the change I get:\n```\n2025-02-19T15:22:35Z [http] Stopping HTTP server\n2025-02-19T15:22:35Z [http] Waiting for HTTP worker threads to exit\n2025-02-19T15:22:35Z [http] Exited http event loop\n2025-02-19T15:22:35Z [http] Waiting for HTTP event thread to exit\n2025-02-19T15:22:35Z [http] Processing events left behind by HTTP event thread\n2025-02-19T15:22:35Z [http] Freeing eventHTTP\n2025-02-19T15:22:35Z [http] Stopped HTTP server\n```\n\n</details>",
+          "created_at": "2025-02-19T15:32:15Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Spent a 2-3 days last week experimenting with solutions, ended up with:\n- Improving docs.\n- Fixing an adjacent memory leak.\n- Improving debug-ability of future occurrences of this issue.\n\nSee #31929.\n\nLooking forward to not relying in libevent in the future! Much nicer to be able to debug our code directly.",
+          "created_at": "2025-02-24T11:01:15Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 6,
+    "issues": 2
+  }
+}

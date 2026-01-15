@@ -1,0 +1,167 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:34:21.247490+00:00",
+  "date": "2025-04-20",
+  "pull_requests": [
+    {
+      "number": 32313,
+      "title": "coins: fix `cachedCoinsUsage` accounting in `CCoinsViewCache`",
+      "body": "### Summary\r\n\r\nThis PR fixes `cachedCoinsUsage` accounting bugs in `CCoinsViewCache` that caused UBSan `unsigned-integer-overflow` violations during testing. The issues stemmed from incorrect decrement timing in `AddCoin()`, unconditional reset in `Flush()` on failure, and incorrect increment in `EmplaceCoinInternalDANGER()` when insertion fails.\r\n\r\n### Problems Fixed\r\n\r\n**1. `AddCoin()` underflow on exception**\r\n- Previously decremented `cachedCoinsUsage` *before* the `possible_overwrite` validation\r\n- If validation threw, the map entry remained unchanged but counter was decremented\r\n- This corrupted accounting and later caused underflow\r\n- **Impact**: Test-only in current codebase, but unsound accounting that could affect future changes\r\n\r\n**2. `Flush()` accounting drift on failure**\r\n- Unconditionally reset `cachedCoinsUsage` to 0, even when `BatchWrite()` failed\r\n- Left the map populated while the counter read zero\r\n- **Impact**: Test-only (production `BatchWrite()` returns `true`), but broke accounting consistency\r\n\r\n**3. Cursor redundant usage tracking**\r\n- `CoinsViewCacheCursor::NextAndMaybeErase()` subtracted usage when erasing spent entries\r\n- However, `SpendCoin()` already decremented and cleared the `scriptPubKey`, leaving `DynamicMemoryUsage()` at 0\r\n- **Impact**: Redundant code that obscured actual accounting behavior\r\n\r\n**4. `EmplaceCoinInternalDANGER()` double-counting**\r\n- Incremented `cachedCoinsUsage` even when `try_emplace` did not insert (duplicate key)\r\n- Inflated the counter on duplicate attempts\r\n- **Impact**: Mostly test-reachable (AssumeUTXO doesn't overwrite in production), but incorrect accounting\r\n\r\n### Testing\r\n\r\nTo reproduce the historical UBSan failures on the referenced baseline and to verify the fix, run:\r\n```\r\nMAKEJOBS=\"-j$(nproc)\" FILE_ENV=\"./ci/test/00_setup_env_native_fuzz.sh\" ./ci/test_run_all.sh\r\n```\r\n\r\nThe change was tested with the related unit and fuzz test, and asserted before/after each `cachedCoinsUsage` change (in production code and fuzz) that the calculations are still correct by recalculating them from scratch.\r\n\r\n<details>\r\n<summary>Details</summary>\r\n\r\n```C++\r\nbool CCoinsViewCache::CacheUsageValid() const\r\n{\r\n    size_t actual{0};\r\n    for (auto& entry : cacheCoins | std::views::values) actual += entry.coin.DynamicMemoryUsage();\r\n    return actual == cachedCoinsUsage;\r\n}\r\n```\r\nor\r\n```patch\r\ndiff --git a/src/coins.cpp b/src/coins.cpp\r\n--- a/src/coins.cpp\t(revision fd3b1a7f4bb2ac527f23d4eb4cfa40a3215906e5)\r\n+++ b/src/coins.cpp\t(revision 872a05633bfdbd06ad82190d7fe34b42d13ebfe9)\r\n@@ -96,6 +96,7 @@\r\n         fresh = !it->second.IsDirty();\r\n     }\r\n     if (!inserted) {\r\n+        Assert(cachedCoinsUsage >= it->second.coin.DynamicMemoryUsage());\r\n         cachedCoinsUsage -= it->second.coin.DynamicMemoryUsage();\r\n     }\r\n     it->second.coin = std::move(coin);\r\n@@ -133,6 +134,7 @@\r\n bool CCoinsViewCache::SpendCoin(const COutPoint &outpoint, Coin* moveout) {\r\n     CCoinsMap::iterator it = FetchCoin(outpoint);\r\n     if (it == cacheCoins.end()) return false;\r\n+    Assert(cachedCoinsUsage >= it->second.coin.DynamicMemoryUsage());\r\n     cachedCoinsUsage -= it->second.coin.DynamicMemoryUsage();\r\n     TRACEPOINT(utxocache, spent,\r\n            outpoint.hash.data(),\r\n@@ -226,10 +228,12 @@\r\n             if (itUs->second.IsFresh() && it->second.coin.IsSpent()) {\r\n                 // The grandparent cache does not have an entry, and the coin\r\n                 // has been spent. We can just delete it from the parent cache.\r\n+                Assert(cachedCoinsUsage >= itUs->second.coin.DynamicMemoryUsage());\r\n                 cachedCoinsUsage -= itUs->second.coin.DynamicMemoryUsage();\r\n                 cacheCoins.erase(itUs);\r\n             } else {\r\n                 // A normal modification.\r\n+                Assert(cachedCoinsUsage >= itUs->second.coin.DynamicMemoryUsage());\r\n                 cachedCoinsUsage -= itUs->second.coin.DynamicMemoryUsage();\r\n                 if (cursor.WillErase(*it)) {\r\n                     // Since this entry will be erased,\r\n@@ -279,6 +283,7 @@\r\n {\r\n     CCoinsMap::iterator it = cacheCoins.find(hash);\r\n     if (it != cacheCoins.end() && !it->second.IsDirty() && !it->second.IsFresh()) {\r\n+        Assert(cachedCoinsUsage >= it->second.coin.DynamicMemoryUsage());\r\n         cachedCoinsUsage -= it->second.coin.DynamicMemoryUsage();\r\n         TRACEPOINT(utxocache, uncache,\r\n                hash.hash.data(),\r\n```\r\n\r\n</details>",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-04-20T17:33:09Z",
+      "updated_at": "2025-10-16T00:10:09Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32313",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32313.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [andrewtoth](https://github.com/bitcoin/bitcoin/pull/32313#pullrequestreview-3329398843), [optout21](https://github.com/bitcoin/bitcoin/pull/32313#issuecomment-3400987547), [sipa](https://github.com/bitcoin/bitcoin/pull/32313#pullrequestreview-3335978023), [w0xlt](https://github.com/bitcoin/bitcoin/pull/32313#pullrequestreview-3335987656) |\n| Stale ACK | [ryanofsky](https://github.com/bitcoin/bitcoin/pull/32313#pullrequestreview-3325631861) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33602](https://github.com/bitcoin/bitcoin/pull/33602) ([IBD] coins: reduce lookups in dbcache layer propagation by l0rinc)\n* [#33512](https://github.com/bitcoin/bitcoin/pull/33512) (coins: use number of dirty cache entries in flush warnings/logs by l0rinc)\n* [#33018](https://github.com/bitcoin/bitcoin/pull/33018) (coins: remove SetFresh method from CCoinsCacheEntry by andrewtoth)\n* [#31132](https://github.com/bitcoin/bitcoin/pull/31132) (validation: fetch block inputs on parallel threads >10% faster IBD by andrewtoth)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-04-20T17:33:13Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Rebased to allow CI running the new tests.",
+          "created_at": "2025-04-29T09:50:46Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Rebased after fuzz conflicts, ready for review again.",
+          "created_at": "2025-06-10T11:36:14Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Rebased and adjusted the commits to minimize conflict with https://github.com/bitcoin/bitcoin/pull/33512",
+          "created_at": "2025-10-01T20:18:46Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Added an AssumeUTXO fuzz test here that was requested in https://github.com/bitcoin/bitcoin/pull/33512#discussion_r2404014654 - but it needs the fixes here to work.",
+          "created_at": "2025-10-08T03:03:23Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Just a quick code review for 2b11c47f60b85fe72ab9d093c9f8e5f597182fbc. Sorry if I missed anything obvious, my comments below are mostly asking for things to be explained a little better. Overall the changes seem positive and I did not see any problems.\r\n\r\n- Can PR description be updated to say what types of \"violations\" are being \"fixed\" and clarify what purpose of the changes are? Would be helpful if description was self contained and did not start out referencing a comment in another PR.\r\n\r\n- Purpose of first commit 6b842138c33d8663603d1d0a528cb90c54c70163 seems opaque. Commit description says a check is being moved but not why, and it is not clear what effect this change has or if it can be tested.\r\n\r\n- Third commit 62c600f79a13e8772f3d6d7aaf6593c6dc55ddfe seems to be a refactoring that does not change behavior. Would be helpful to say this explicitly and maybe start commit title with \"refactor\".\r\n\r\n- From what I can tell the second and third commits both seem to be refactorings that do not depend on each other and aren't really related to the rest of the PR. If would be nice if commit messages clarified if they are independent cleanups or if something depends on them. It might also be good to move these refactorings before the bugfix in the first commit if they do not depend on it.\r\n\r\n- Fourth commit f1791d64b437eab31ad941fb4c9e4051e0274c4a seems like a good bugfix. But would be good if commit description could say what impact of bug is. Is it a rare thing that happens only when disk writes fail? What's the actual effect if the bug does happen? Too much memory is allocated? Something else?\r\n\r\n- Last commit a9eb8dfab1c35c2563d3267432b64bb6a812f08f seems to be doing a few unrelated things and would be nice to split up. The main thing it seems to be doing is dropping the \"coins_view_cache.Flush()\" workaround because of an accounting bug \"fixed in a previous commit\". It would be much nicer IMO if the workaround could be dropped in the same commit which actually fixes the accounting bug. Moving this change should make the bugfix and test change both easier to understand.\r\n\r\n- Additionally, the last commit seems to be dropping the `expected_code_path` check which makes sure that after many writes, at least one coin will be overwritten. Unclear why that check is being dropped and would be good to explain in commit message. Adding the EmplaceCoinInternalDANGER call there does seem good and useful to check the accounting.",
+          "created_at": "2025-10-08T18:13:44Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thank you for the quick review, I have restructured the change to tell a more intuitive story and added more commit message guidance for the context and rewrote the intro to make more sense (it helped that I wrote this a longer time ago and I also didn't remember the context).\r\n\r\nThe new structure starts with the simple refactorings and assertions and adding extra guards to document why and where the accounting is incorrect. Most of the accounting problems are test-only, so it's unlikely to fix anything in production - but it enabled us writing more correct tests for coins.\r\n\r\nBased on the feedback I merged the changes in `AddCoin` and `Flush` since this way I can also enable the suppressions in the same commit, proving that they fix the problem.\r\nI have also split out the `Flush()` workaround in `coins_view` which removed the workaround in https://github.com/bitcoin/bitcoin/pull/32602/files#r2113749842 (cc: @marcofleon, @darosior).\r\nThe `expected_code_path` didn't check any overwrites, just that all codepaths result in success - which is simplified in the last commit.\r\n\r\nThe latest push is [zero-diff](https://github.com/bitcoin/bitcoin/compare/a9eb8dfab1c35c2563d3267432b64bb6a812f08f..c4293c7b21971e7ddd813ad3fbe574eb5605d60e), only reorganized and explained better - thanks for the review.",
+          "created_at": "2025-10-08T22:03:43Z"
+        },
+        {
+          "user": "optout21",
+          "body": "ACK c4293c7b21971e7ddd813ad3fbe574eb5605d60e\r\n\r\nWith the recent commit restructuring the steps are clear.\r\nThe code change is sound and looks well tested.\r\nI've left one non-blocking nit, no other comment.",
+          "created_at": "2025-10-09T09:38:30Z"
+        },
+        {
+          "user": "optout21",
+          "body": "> * It looks to me like the `expected_code_path` assert is confirming that the `std::logic_error` exception throws at least once and that test coverage is complete.\r\n\r\nI don't think it checks that exception is thrown at least once, but it checks that either there is no exception, or if there is, it is that specific exception. With this change there is an assert to make sure the exception is the one expected. So I think the test code change is correct, but I agree that the \"that all codepaths result in success.\" description is not precise.",
+          "created_at": "2025-10-10T22:00:24Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks for the comments, the latest push makes it even simpler, removed the temporary asserts, added unit tests instead (thanks @w0xlt), changed the order of the `AddCoin` and `EmplaceCoinInternalDANGER` commits which did indeed allow me to fixup the latest commit with the fuzz simplifications into the `AddCoin` one.\r\n\r\n> In the last commit I'm still not sure why expected_code_path assert is being removed\r\n\r\nThe role of the variable was to verify that code execution follows only expected paths, either successful addition, or if it's an exception, the message is verified and checked that overwrite was disallowed in the first place.",
+          "created_at": "2025-10-12T02:12:01Z"
+        },
+        {
+          "user": "optout21",
+          "body": "reACK 24d861da7894add47747eff69dd3fc71fbcdd7d0",
+          "created_at": "2025-10-14T09:42:58Z"
+        }
+      ]
+    },
+    {
+      "number": 32312,
+      "title": "test: Fix feature_pruning test after nTime typo fix",
+      "body": "This PR contains two commits:\r\n\r\n1. Fixes a typo in feature_pruning.py where 'nTimes' was incorrectly\r\n   used instead of 'nTime'. This typo caused the test to always reset\r\n   mine_large_blocks.nTime to 0, rather than only on the first run.\r\n\r\n2. Fixes the test failure exposed by the typo fix. The\r\n   test_pruneheight_undo_presence test was failing because it was using\r\n   node 2, which is involved in reorg testing and could be on a\r\n   different chain than other nodes. The solution switches to using\r\n   node 5, which is also a pruned node but isn't involved in reorg\r\n   testing.\r\n\r\nTesting:\r\n- Ran test/functional/feature_pruning.py multiple times to verify\r\n  consistent passing\r\n- Verified that the test now passes with the correct nTime variable name\r\n- Confirmed the test behavior matches the intended functionality of\r\n  verifying pruned block availability\r\n- Ran the full test suite to ensure the changes did not introduce any\r\n  regressions or affect other tests\r\n\r\nThanks to fjahr for his assistance in diagnosing the issue and\r\nsuggesting the solution.\r\n\r\nThis fixes the test failure reported in #32249 ",
+      "state": "closed",
+      "user": "enirox001",
+      "created_at": "2025-04-20T10:41:16Z",
+      "updated_at": "2025-05-14T09:59:37Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32312",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32312.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fjahr](https://github.com/bitcoin/bitcoin/pull/32312#issuecomment-2819486409), [naiyoma](https://github.com/bitcoin/bitcoin/pull/32312#pullrequestreview-2837686646), [maflcko](https://github.com/bitcoin/bitcoin/pull/32312#issuecomment-2877505784), [stratospher](https://github.com/bitcoin/bitcoin/pull/32312#pullrequestreview-2837725653) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-04-20T10:41:20Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "Code change looks good to me. The commit message doesn't seem to say anything about the typo fix though. It should be mentioned there and that the rest of the change is fixing a secondary issue caused by this. You could also split this in two separate commits.",
+          "created_at": "2025-04-20T19:07:09Z"
+        },
+        {
+          "user": "enirox001",
+          "body": "> Code change looks good to me. The commit message doesn't seem to say anything about the typo fix though. It should be mentioned there and that the rest of the change is fixing a secondary issue caused by this. You could also split this in two separate commits.\r\n\r\nThanks for the review! I've split the changes into two logical commits as suggested:\r\n\r\n1. First commit fixes the nTimes -> nTime typo and explains its impact on the test behavior\r\n2. Second commit addresses the test failure that was exposed by the typo fix\r\n\r\nI've also updated the PR description to clearly explain both changes and their relationship. Please let me know if you'd like me to make any further adjustments to the commit messages or description.",
+          "created_at": "2025-04-21T15:07:11Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "tACK 2aa63d511affdcc9980b58fc4ff18b8ad10b0f8c\r\n\r\nJust a note: If this test was run by CI we would need to flip the order of the commits because the first commit would fail without the second but the second would succeed without the first. There is a CI job that runs every commit individually. But since this test isn't executed by CI it doesn't matter here.",
+          "created_at": "2025-04-21T20:55:13Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 2aa63d511affdcc9980b58fc4ff18b8ad10b0f8c\r\n\r\n",
+          "created_at": "2025-05-13T18:08:50Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #32292.",
+          "created_at": "2025-05-14T09:03:24Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> I tested by using other blocks and not necessarily changing the node that is requesting blocks from node1. \r\n\r\n> my personal preference would be to make node2 request block 773 (or some other valid block) from node1. but yes, this works :)\r\n\r\nI don't think this is a good idea because it's not testing the same behavior that the test currently does. The test intends to check that the prune height doesn't change when the block data is available, but not the undo data of these blocks. To do this, the test has to fetch the last pruned block, causing it to have the block data but not the pruned data for that block that could potentially change the prune height shown by the RPCs. Before #29668 (which also added the test in question) the test would have failed because the prune height would have changed since it only checked for block data. If you fetch any older block instead, the prune height would not change either way because there are other blocks between the first unpruned block and the fetched block for which the node doesn't have any data. This more general test for interactions between pruning and `getblockfrompeer` should be covered in `rpc_getblockfrompeer.py` as well.\r\n\r\nHappy to review if someone wants to add documentation that makes the intention of the test more clear. And if you want to reduce leakiness I would suggest adding a separate node just for this test case, as mentioned here: https://github.com/bitcoin/bitcoin/issues/32249#issuecomment-2816874110",
+          "created_at": "2025-05-14T09:59:36Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32314,
+      "title": ".",
+      "body": "### Issues, reports or feature requests related to the GUI should be opened directly on the GUI repo\n\n- [x] I still think this issue should be opened here\n\n### Report\n\n> [!IMPORTANT]\n>  ",
+      "state": "closed",
+      "user": "Dustin4444",
+      "created_at": "2025-04-20T21:46:11Z",
+      "updated_at": "2025-04-22T16:19:23Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32314",
+      "labels": []
+    },
+    {
+      "number": 32311,
+      "title": "Critical Discrepancy: Bitcoin Core Node Sees UTXO via scantxoutset, BUT listunspent & Sparrow Wallet Fail; Address Undrivable from LND Key?",
+      "body": "Hello LND Developers and Community,\nI'm facing a highly unusual and critical issue where on-chain funds associated with a past LND channel closure are inaccessible, despite my Bitcoin Core node (v29.0.0, RPi5, fully synced after fresh IBD, txindex=1) confirming the UTXO's existence via scantxoutset. However, both listunspent and external wallet software (Sparrow) fail to see this UTXO, and crucially, the address holding the funds cannot be derived from my LND root key using standard methods.\nSystem & History:\nLND: v0.18.5-beta (upgraded from v0.5.2-beta). Confirmed only one wallet.db used throughout.\nBitcoin Core: v29.0.0 (RPi5), fully synced post-IBD, txindex=1 reports synced: true. Datadir /mnt/hdd/bitcoin.\nChannel History: Opened Mar 2019 (LND v0.5.2, Funding Tx: 7060...9d71), later force-closed by peer.\nSweep Transaction: On Apr 1, 2024 (Block 837257), Tx 4c0407b1188e0ba39313b1d9c87c49f6c81d99aa2839026c8af8c989ce102244 spent the channel output, sending ~0.01495 BTC to P2WPKH address bc1qt728qplpuh6d98evkl4a990zdhwpwvur6qg8qz.\nOn-Chain Verification: Explorers confirm this UTXO (4c04...:0) exists and is unspent at bc1qt7...g8qz.\nThe Core Problem & Contradictions:\nAfter a full IBD and ensuring txindex is synced on my Bitcoin Core node:\ngetrawtransaction 4c04... true SUCCEEDS: The node knows the history of the funding transaction.\nscantxoutset start '[\"addr(bc1qt7...)\"]' SUCCEEDS and RETURNS THE UTXO: This directly confirms that the node's chainstate (UTXO set) database IS CORRECT and contains the unspent output for bc1qt7...g8qz.\n{\n  \"success\": true, ...\n  \"unspents\": [ { \"txid\": \"4c04...\", \"vout\": 0, ... \"address\": \"bc1qt7...\", \"amount\": 0.01495437 ... } ],\n  \"total_amount\": 0.01495437\n}\nUse code [with caution](https://support.google.com/legal/answer/13505487).\nJson\nlistunspent ... '[\"bc1qt7...\"]' (using -rpcwallet=\"\" or other loaded wallets) returns []: Despite the UTXO existing in the chainstate, the wallet-specific RPC call fails to list it.\nSparrow Wallet (fresh install, connected to this node) shows 0 balance: When importing the confirmed LND root xprv and configuring for BIP84 (m/84'/0'/0', Native Segwit P2WPKH), Sparrow completes scanning but shows 0 balance and lists no UTXOs, failing to see the UTXO that the node knows exists (per scantxoutset).\nParallel Wallet Derivation Failure:\nUsing the confirmed root xprv (extracted from the correct wallet.db via chantools showrootkey), extensive checks with offline tools (bip39-standalone.html) on standard BIP84 paths (m/84'/0'/0'/0/* and m/84'/0'/0'/1/*) failed to derive the address bc1qt728qplpuh6d98evkl4a990zdhwpwvur6qg8qz after checking millions of addresses.\nCurrent Status & Urgent Questions:\nI have on-chain funds at bc1qt7...g8qz that my node fundamentally knows about (per scantxoutset), but which are inaccessible via standard wallet RPCs (listunspent) and external wallets (Sparrow). Compounding this is the failure to derive this specific address from the LND root key using standard BIP84 paths.\nSeeking expert help on:\nWhy would listunspent (even with the correct wallet specified) and external wallets like Sparrow fail to see a UTXO when scantxoutset on the same node confirms its existence in the UTXO set? Is this a known Core bug, an issue with how wallets query non-owned addresses, or something else?\nGiven the derivation failure, is it possible for LND (esp. after major version jumps) to sweep funds to an address not derivable via standard BIP84 paths from the aezeed root key? Could a bug or specific state lead to using a different derivation scheme or even a key unrelated to the main wallet for sweep outputs?\nAre there any advanced methods or tools (LND debug commands, specific chantools usage, alternative wallet software known to handle edge cases) that could either:\na) Force Sparrow/LND to recognize the UTXO based on the node's chainstate confirmation?\nb) Help definitively trace the derivation path (even if non-standard) used to generate bc1qt7...g8qz from my wallet.db/xprv?\nThis situation seems highly anomalous. Any insights or guidance would be extremely appreciated.\nThank you.",
+      "state": "closed",
+      "user": "vicortar",
+      "created_at": "2025-04-20T06:06:17Z",
+      "updated_at": "2025-04-20T10:13:59Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32311",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "willcl-ark",
+          "body": "Hi.\n\nGeneral bitcoin questions and/or support requests are best directed to the [Bitcoin StackExchange](https://bitcoin.stackexchange.com/) or the `#bitcoin` IRC channel on the [Libera Chat](https://libera.chat/) network.\n\nThat said, it seems like this question should not even be posted there, and would be better posted in an LND help forum, as the fundamental problem (restoring and LND-derived key) is unrelated to Bitcoin Core?\n\n> Why would listunspent (even with the correct wallet specified) and external wallets like Sparrow fail to see a UTXO when scantxoutset on the same node confirms its existence in the UTXO set? Is this a known Core bug, an issue with how wallets query non-owned addresses, or something else?\n\n`listunspent` is indeed a wallet RPC and will only return to data related to loaded wallets only. `listunspent` returning nothing, but `scantxoutset` returning the UTXO demonstrates that while the UTXO exists, you do not have key information for it loaded in a Bitcoin Core wallet.",
+          "created_at": "2025-04-20T07:52:28Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 2,
+    "issues": 2
+  }
+}

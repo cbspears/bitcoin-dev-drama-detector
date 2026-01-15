@@ -1,0 +1,233 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:50:22.056474+00:00",
+  "date": "2025-06-13",
+  "pull_requests": [
+    {
+      "number": 32747,
+      "title": "Introduce SockMan (\"lite\"): low-level socket handling for HTTP",
+      "body": "Introduces a new low-level socket manager `SockMan` as an abstract class with virtual functions for implementing higher-level networking protocols like HTTP. This is the next step in https://github.com/bitcoin/bitcoin/issues/31194\r\n\r\nThis is a minimal, alternative version of #30988 (\"Split CConnman\") without any changes to working code (P2P is not affected). It adds a stripped-down version of the `SockMan` introduced in that pull request that implements only what is needed for the HTTP server implemented in #32061 (i.e. no I2P stuff and for now, no outbound connection stuff). Exclusions from the original `SockMan` pull request can be checked with:\r\n\r\n```\r\ngit diff vasild/sockman \\\r\nsrc/common/sockman.h \\\r\nsrc/common/sockman.cpp\r\n```\r\n\r\nThe commit order has been flipped quite a bit because the original PR incrementally pulls logic out of `net` wheras this PR builds a new system from the bottom-up. Otherwise I tried to keep all the `SockMan` code in order so reviewers of the original PR would be familiar with it.\r\n\r\nIt also adds unit tests by introducing a `SocketTestingSetup` which mocks network sockets by returning a queue of `DynSock` from `CreateSock()`. HTTP server tests in #32061 will be rebased on this framework as well.\r\n\r\n",
+      "state": "closed",
+      "user": "pinheadmz",
+      "created_at": "2025-06-13T18:36:49Z",
+      "updated_at": "2026-01-15T08:56:02Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32747",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32747.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/32747#pullrequestreview-2937305602), [hodlinator](https://github.com/bitcoin/bitcoin/pull/32747#pullrequestreview-3022243737) |\n| Stale ACK | [vasild](https://github.com/bitcoin/bitcoin/pull/32747#pullrequestreview-3350029842) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32015](https://github.com/bitcoin/bitcoin/pull/32015) (net: replace manual reference counting of CNode with shared_ptr by vasild)\n* [#30988](https://github.com/bitcoin/bitcoin/pull/30988) (Split CConnman by vasild)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- an unique -> a unique [“unique” begins with a consonant sound; “a unique” is grammatically correct]\n- datasent -> data sent [two words; “data sent” is the intended phrase]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-06-13T18:36:52Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `MSan, depends`: https://github.com/bitcoin/bitcoin/runs/44070031695</sub>\n<sub>LLM reason (✨ experimental): MemorySanitizer detected use of uninitialized memory during sockman_tests, causing CI failure.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-06-13T19:03:15Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "I was able to switch https://github.com/Sjors/bitcoin/pull/50 to use this instead of https://github.com/bitcoin/bitcoin/pull/30988 without have to change anything. So it makes sense to me to focus on this PR first, as it's smaller. Thoughts @vasild?",
+          "created_at": "2025-06-16T08:21:26Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "> replace Connman functions\r\n\r\nIn this PR they are just protocol-agnostic copies of those ConnMan functions. Just the socket stuff without the Bitcoin stuff. We could still proceed with the reactor in #30988 after this is merged and actually replace the socket stuff in ConnMan with SockMan but this PR is minimized with the focus being the socket needs of the HTTP server in #32061",
+          "created_at": "2025-06-18T10:04:16Z"
+        },
+        {
+          "user": "theuni",
+          "body": "My $.02 and repeating what I've said elsewhere... I still just don't think that this is the correct level of abstraction. IMO socket-based protocols are different enough to warrant their own logic. Either that, or the abstraction would need to provide a bazillion options and flags, ala libevent/libev/libuv/libkj/etc.\r\n\r\nFor ex: presumably in order to remain generic, `SendBytes` may \"succeed\" at sending only one byte of many. Meaning that implementations will have to maintain their own send buffers, and presumably a thread that does a write/sleep/write/sleep dance. Imo that alone kinda defeats the purpose of this abstraction.\r\n\r\n`IOReadiness` and `Sock` already implement a good chunk of the low-level handling. Sure, a custom event-loop per-protocol isn't exactly trivial, but it's a better result imo than a master-of-none abstraction.\r\n\r\nI'd rather see this and a custom HTTP server collapsed together into a tight implementation. If another another socket-based protocol is implemented in the future, that would be a good time to abstract away the commonalities. But the fact that CConnman isn't a good a good candidate for abstraction is a hint to me that the next one won't be either.",
+          "created_at": "2025-10-17T21:27:13Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "@theuni I hear you, maybe I should re write the PR description: The purpose is not to establish a generic socket manager but to just advance the bigger goal of replacing libevent with #32061. In that context, this PR is just the first 11 commits of the HTTP server replacement, broken off for more focused unit testing and review (which has all been great so far).\r\n\r\nSo with that in mind, what do you recommend? Is it higher level organization like removing the abstract class stuff and moving all the code into `HTTPServer` directly? Or are there actual lower-level implementation details here you think are ineffective for HTTP? \r\n\r\nI'm waiting for approval on this socket chunk before rebasing #32061 but I could also ditch this initial PR and just focus all the work on the bigger picture.",
+          "created_at": "2025-10-21T11:00:06Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "rebased on master to fix conflict but also converted to draft.\r\n\r\nThe plan is now to integrate this I/O loop directly with the new http server. So I will rebase #32061 on this branch to include the feedback the socket stuff has received, and then combine this sockman with the http server and remove the abstraction.",
+          "created_at": "2025-11-18T16:19:51Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "Closing - these commits are all merged into #32061 including all the great review feedback <3",
+          "created_at": "2025-11-26T11:01:39Z"
+        }
+      ]
+    },
+    {
+      "number": 32746,
+      "title": "test: remove unnecessary m_best_header setting hack in feature_assumeutxo.py",
+      "body": "The mentioned bug (issue #26245) has been fixed in PR #30666, so the workaround is not needed anymore.\r\n",
+      "state": "closed",
+      "user": "theStack",
+      "created_at": "2025-06-13T12:50:45Z",
+      "updated_at": "2025-06-13T15:44:54Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32746",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32746.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fjahr](https://github.com/bitcoin/bitcoin/pull/32746#issuecomment-2970553289), [janb84](https://github.com/bitcoin/bitcoin/pull/32746#pullrequestreview-2925031533), [mzumsande](https://github.com/bitcoin/bitcoin/pull/32746#pullrequestreview-2925065440) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-13T12:50:48Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "ACK 206bc05e62c6a71c328eaab90fd865f46328642f",
+          "created_at": "2025-06-13T14:16:57Z"
+        }
+      ]
+    },
+    {
+      "number": 32745,
+      "title": "scripted-diff: Update DeriveType enum values to mention ranged derivations",
+      "body": "While reviewing the MuSig2 descriptors PR #31244, I realized that the enum\r\n`DeriveType` here logically refers to the derive type for ranged descriptors.\r\nThis became evident to me while going through the implementations of `IsRange`\r\n & `IsHardened` functions of `BIP32PubkeyProvider`, and the `ParsePubkeyInner`\r\nfunction. Initially I got confused by reading `IsRange` translating to\r\n`!= DeriveType::NO`, but later realised it specifically referred to the presence\r\n of ranged derivations. I propose explicitly mentioning \"ranged\" in the values\r\nof the `DeriveType` enum would make it easier to parse the descriptors code.\r\n\r\nThis enum is used in one file only - `script/descriptors.cpp`. That's why I\r\nexplicitly passed it as the argument in the `sed` command in the script.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "open",
+      "user": "rkrux",
+      "created_at": "2025-06-13T10:56:00Z",
+      "updated_at": "2025-08-13T11:48:47Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32745",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32745.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32745#issuecomment-2976087376) |\n| Stale ACK | [hodlinator](https://github.com/bitcoin/bitcoin/pull/32745#pullrequestreview-2931318652), [PeterWrighten](https://github.com/bitcoin/bitcoin/pull/32745#pullrequestreview-2932648934) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-13T10:56:03Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "> Concept ACK [d60b008](https://github.com/bitcoin/bitcoin/commit/d60b0088e81e2ef81b9cfe2d4b808ed819a52962) It's a good refactoring for understanding, but perhaps you should still check and modify other documents to make sure it would not missing the explanation of this change in them.\r\n\r\nYes, I had confirmed regarding this, and I did add a note in the commit message & the PR description that all these enum values are contained within one file only.",
+          "created_at": "2025-06-16T07:58:52Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Concept ACK, didn't review it very thoroughly - ping me if you need a full review",
+          "created_at": "2025-06-16T10:54:54Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Rebased over master to incorporate changes from #31244.",
+          "created_at": "2025-08-01T12:08:13Z"
+        }
+      ]
+    },
+    {
+      "number": 32743,
+      "title": "refactor: use `std::vector<std::byte>` for `BlockManager::ReadRawBlock()`",
+      "body": "Following [this comment](https://github.com/bitcoin/bitcoin/pull/32540#discussion_r2135820932), this PR changes `BlockManager::ReadRawBlock()` to accept a `std::vector<std::byte>` instead of `std::vector<uint8_t>`, in order to avoid casts during its invocations.\r\n\r\nIt also adds a new `SpanReader` constructor to allow reading from a span of `std::byte`s (in addition to span of `uint8_t`).",
+      "state": "closed",
+      "user": "romanz",
+      "created_at": "2025-06-13T05:04:34Z",
+      "updated_at": "2025-06-16T09:02:22Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32743",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32743.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32743#issuecomment-2971077521), [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/32743#pullrequestreview-2930337203), [maflcko](https://github.com/bitcoin/bitcoin/pull/32743#issuecomment-2975291334) |\n| Stale ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/32743#pullrequestreview-2924271274), [BrandonOdiwuor](https://github.com/bitcoin/bitcoin/pull/32743#pullrequestreview-2924608815) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-13T05:04:37Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK ddaa27e83dfa13e961a4be3293fb647ed0fe3a1d\r\n\r\nThis changes the underlying type to `std::byte` to get rid of casts in calling code and also allows SpanReader to deal with `std::byte` now.\r\n\r\n",
+          "created_at": "2025-06-13T05:34:33Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Killed and re-ran the never ending CIs: https://cirrus-ci.com/build/4760419941744640.",
+          "created_at": "2025-06-13T10:49:17Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK 6ecb9fc65f9a5654663304757880e50d73cf4a84",
+          "created_at": "2025-06-13T17:36:06Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "re-ACK 6ecb9fc65f9a5654663304757880e50d73cf4a84",
+          "created_at": "2025-06-16T06:43:25Z"
+        },
+        {
+          "user": "romanz",
+          "body": "Many thanks!",
+          "created_at": "2025-06-16T09:02:22Z"
+        }
+      ]
+    },
+    {
+      "number": 32742,
+      "title": "test: fix catchup loop in outbound eviction functional test",
+      "body": "In the course of working on an equivalent of #32421 for the `CBlockHeader` class, I noticed that the [catchup loop in the outbound eviction functional test](https://github.com/bitcoin/bitcoin/blob/19765dca197a6334e5ad3985a30c7836374d5c26/test/functional/p2p_outbound_eviction.py#L86-L103) currently has a small flaw: the contained waiting for a `getheaders` message \r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/19765dca197a6334e5ad3985a30c7836374d5c26/test/functional/p2p_outbound_eviction.py#L98-L99\r\n\r\nonly waits for _any_ such message instead of one with the intended block hash after the first iteration. The reason is that the `prev_prev_hash` variable is set incorrectly, since the `tip_header` instance is not updated and its field `.hash` is None [1]. Fix that by updating `tip_header` after generating a new block and also use the correct field on it -- we want the tip header's previous hash (`.hashPrevBlock`), which will be the previous-previous hash in the next iteration as intended.\r\n\r\nCan be demonstrated by adding a debug output for `prev_prev_hash`, e.g.\r\n\r\n```diff\r\ndiff --git a/test/functional/p2p_outbound_eviction.py b/test/functional/p2p_outbound_eviction.py\r\nindex 30ac85e32f..9886a49512 100755\r\n--- a/test/functional/p2p_outbound_eviction.py\r\n+++ b/test/functional/p2p_outbound_eviction.py\r\n@@ -85,6 +85,7 @@ class P2POutEvict(BitcoinTestFramework):\r\n\r\n         self.log.info(\"Keep catching up with the old tip and check that we are not evicted\")\r\n         for i in range(10):\r\n+            print(f\"i={i}, prev_prev_hash={prev_prev_hash}\")\r\n             # Generate an additional block so the peers is 2 blocks behind\r\n             prev_header = from_hex(CBlockHeader(), node.getblockheader(best_block_hash, False))\r\n             best_block_hash = self.generateblock(node, output=\"raw(42)\", transactions=[])[\"hash\"]\r\n```\r\n\r\nmaster branch\r\n```\r\n...\r\ni=0, prev_prev_hash=21722572577213525620063947414919931742473663114977483853465070858884938201585\r\ni=1, prev_prev_hash=None\r\ni=2, prev_prev_hash=None\r\ni=3, prev_prev_hash=None\r\ni=4, prev_prev_hash=None\r\ni=5, prev_prev_hash=None\r\ni=6, prev_prev_hash=None\r\ni=7, prev_prev_hash=None\r\ni=8, prev_prev_hash=None\r\ni=9, prev_prev_hash=None\r\n...\r\n```\r\n\r\nPR branch\r\n```\r\n...\r\ni=0, prev_prev_hash=21722572577213525620063947414919931742473663114977483853465070858884938201585\r\ni=1, prev_prev_hash=23204083306104595181276643925327085197417756603258684897360269464191973063397\r\ni=2, prev_prev_hash=18117007775254206852722585270408843074799046031613422902091537272077477361634\r\ni=3, prev_prev_hash=30556804635951812756130312631227721973553160707632138130845362630877961299882\r\ni=4, prev_prev_hash=16476515948153779819467376247405243058769281687868039119037064816106574626111\r\ni=5, prev_prev_hash=14965506521435221774966695805624206855826023174786191695076697927307467053159\r\ni=6, prev_prev_hash=14510815979277079515923749862202324542606166669768865640616202929053689167149\r\ni=7, prev_prev_hash=15360268707191667685151951417759114642582372006627142890517655217275478262166\r\ni=8, prev_prev_hash=55984929479619644661389829786223559362979512070332438490054115824374865094074\r\ni=9, prev_prev_hash=6591573629906616262191232272909118561529534571119028248829355592878183757083\r\n...\r\n```\r\n\r\n[1] that's in my opinion another example how caching hashes is confusing and easy to be misused; it's better to remove it and just compute the hash on-the-fly, so returning None is not even possible anymore",
+      "state": "closed",
+      "user": "theStack",
+      "created_at": "2025-06-13T00:07:22Z",
+      "updated_at": "2025-06-26T20:58:11Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32742",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32742.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32742#pullrequestreview-2923802386), [mzumsande](https://github.com/bitcoin/bitcoin/pull/32742#pullrequestreview-2958894994), [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/32742#pullrequestreview-2959781264) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32468](https://github.com/bitcoin/bitcoin/pull/32468) (rpc: generateblock to allow multiple outputs by polespinasa)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-13T00:07:25Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #32810.",
+          "created_at": "2025-06-26T10:26:23Z"
+        },
+        {
+          "user": "theStack",
+          "body": "@pablomartin4btc:\r\n\r\n> not sure if this is an issue but `tip_header.hash` (after this change) will be only used in this file later at [`test_outbound_eviction_blocks_relay_only()`](https://github.com/bitcoin/bitcoin/blob/f27898c8bfe339e2cad09d42e133a05602b1a030/test/functional/p2p_outbound_eviction.py#L235) following the same patter as above, calling `wait_for_getheaders` with `block_hash=tip_header.hash` being `tip_header.hash=None`, should that be fixed too?\r\n\r\nGood catch, just verified that this is indeed another instance where we pass `None` unintentionally, accepting _any_ `GETHEADERS` message instead of the one with the tip header hash (my bad, should have caught and fixed this in the same PR). A follow-up PR would be appreciated, feel free to open one.\r\n",
+          "created_at": "2025-06-26T19:44:29Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32744,
+      "title": "depends: Qt doesn't build on Chimera Linux",
+      "body": "Tested using `podman`  and `chimeralinux/chimera`\n\n```bash\n# c++ --version\nclang version 20.1.6\nTarget: x86_64-chimera-linux-musl\n\n#make -C depends/ qt\n...\n[ 15%] Building C object qtbase/src/tools/bootstrap/CMakeFiles/Bootstrap.dir/__/__/3rdparty/pcre2/src/pcre2_xclass.c.o\n/bitcoin/depends/work/build/x86_64-pc-linux-musl/qt/6.7.3-0a1664c58a9/qtbase/src/corelib/tools/qhash.cpp:1452:45: error: 'memcpy' called with `n` bigger than the size of `d`.\n 1452 |         memcpy(&k, &key, sizeof(long double));\n      |                                             ^\n/usr/include/fortify/string.h:48:1: note: from 'diagnose_if' attribute on 'memcpy':\n   48 | __error_if((__fh_bos(__od, 0) < __n), \"'memcpy' called with `n` bigger than the size of `d`.\")\n      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n/usr/include/fortify/fortify-headers.h:120:47: note: expanded from macro '__error_if'\n  120 | #define __error_if(cond, msg) __attribute__ ((diagnose_if (cond, msg, \"error\")))\n      |                                               ^            ~~~~\n1 error generated.\n```",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2025-06-13T09:58:18Z",
+      "updated_at": "2025-06-15T18:26:35Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32744",
+      "labels": [
+        "Upstream"
+      ],
+      "comment_list": [
+        {
+          "user": "hebasto",
+          "body": "For the reference, Chimera Linux is not listed in Qt 6.7 [Supported Platforms](https://doc.qt.io/archives/qt-6.7/supported-platforms.html).",
+          "created_at": "2025-06-13T10:24:17Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> 6.7 [Supported Platforms](https://doc.qt.io/archives/qt-6.7/supported-platforms.html).\n\nAccording to that page, most of what we do isn't supported. GCC 13, macOS cross compilation, our mingw-w64 compiler, a number of the linux architectures we ship for, etc.",
+          "created_at": "2025-06-13T10:28:57Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 1
+  }
+}

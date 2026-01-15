@@ -1,0 +1,555 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:15:26.295490+00:00",
+  "date": "2025-09-17",
+  "pull_requests": [
+    {
+      "number": 33421,
+      "title": "node: add  `BlockTemplateCache`",
+      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify the maximum age in `MillisecondsDouble`:\r\n- If a matching template exists in the cache and hasn't exceeded the age limit, the cached version is returned (if multiple exist, the most recent one is returned).\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted. This is usually checked after each insertion.\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\nWhen `test_block_validity` is set to `true` in the block creation options, any cached template that hasn't been validated will be checked before being returned. We also then update the cached block validity to indicate it has been checked.\r\n\r\nThis PR also removes an unused `node/context.h` import from miner to prevent a potential circular dependency during exposing the block template cache to the node context.\r\n",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-09-17T18:47:09Z",
+      "updated_at": "2026-01-15T13:44:41Z",
+      "comments": 20,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33421.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Stale ACK | [ryanofsky](https://github.com/bitcoin/bitcoin/pull/33421#pullrequestreview-3411154210) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34075](https://github.com/bitcoin/bitcoin/pull/34075) (fees: Introduce Mempool Based Fee Estimation to reduce overestimation by ismaelsadeeq)\n* [#31382](https://github.com/bitcoin/bitcoin/pull/31382) (kernel: Flush in ChainstateManager destructor by sedited)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-17T18:47:14Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Forced pushed from dca8200c71bb568ffe4821c68209e07a305db80d to 16d55585aa2d26e9177734927b8446faa72570e7 [5db80d..16d5558](https://github.com/bitcoin/bitcoin/compare/dca8200c71bb568ffe4821c68209e07a305db80d..16d55585aa2d26e9177734927b8446faa72570e7)\r\n\r\nMain Changes are\r\n1. Moved the `BlockTemplateCache` to `src/node/miner.cpp` to fix the circular dependency issue\r\n2. The response now return the block template creation time\r\n3. We search for match from right to left to return the fresh hit first\r\n4. Added a fuzz test that test various cache condition and add more coverage to the BlockAssembler Code.",
+          "created_at": "2025-09-23T16:45:54Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "It seems the new fuzz test in [16d5558](https://github.com/bitcoin/bitcoin/pull/33421/commits/16d55585aa2d26e9177734927b8446faa72570e7)\r\ncaught a minor UndefinedBehaviorSanitizer: unsigned-integer-overflow  issue on master.\r\n\r\n\r\n```\r\n/home/admin/actions-runner/_work/_temp/src/node/miner.cpp:414:47: runtime error: unsigned integer overflow: 2000 - 4000 cannot be represented in type 'size_t' (aka 'unsigned long')\r\n    #0 0x5b2b2753aee0 in node::BlockAssembler::addPackageTxs(int&, int&) /home/admin/actions-runner/_work/_temp/build/src/./node/miner.cpp:414:47\r\n\r\n\r\nSUMMARY: UndefinedBehaviorSanitizer: unsigned-integer-overflow /home/admin/actions-runner/_work/_temp/src/node/miner.cpp:414:47 \r\nMS: 5 PersAutoDict-PersAutoDict-EraseBytes-CopyPart-InsertRepeatedBytes- DE: \"\\000\\000\\000\\000\"-\"\\001\\000\\000\\000\\000\\000\\000\\000\"-; base unit: 05fe405753166f125559e7c9ac558654f107c7e9\r\n0x1,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x27,0x27,0x27,0x27,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,\r\n\\001\\000\\000\\000\\000\\000\\000\\000''''\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\r\nartifact_prefix='./'; Test unit written to ./crash-52e81f820b02d40ce3132a4d8e27726deb8eb132\r\nBase64: AQAAAAAAAAAnJycnAAAAAAAAAAAAAAAAAA==\r\n```\r\n\r\nhttps://github.com/bitcoin/bitcoin/actions/runs/17949962995/job/51047356983?pr=33421\r\n\r\nThis is possible on master when node is started with `-blockmaxweight=2000` , `-blockreservedweight=2000` or just `blockmaxweight=2000`  and mining interface `createNewBlock` pass blockReservedWeight as `2000`.\r\n\r\nThis undefined behaviour is possible after #32355 because it introduced a fixed `BLOCK_FULL_ENOUGH_WEIGHT_DELTA` with value `4000`.\r\nBefore #32355 the delta was tied to the `options.blockreservedweight` so will just be `2000 - 2000` which will result in a valid `size_t` value.\r\n\r\nI'll push a commit with a fix soon.\r\n ",
+          "created_at": "2025-09-23T17:01:06Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> It seems the new fuzz test in [16d5558](https://github.com/bitcoin/bitcoin/pull/33421/commits/16d55585aa2d26e9177734927b8446faa72570e7)\r\ncaught a minor UndefinedBehaviorSanitizer: unsigned-integer-overflow issue on master.\r\n\r\nNice! Sorry for the labeling noise, I meant to label #33475",
+          "created_at": "2025-09-24T17:55:33Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Thanks for your review @ryanofsky I will address the comments soon.",
+          "created_at": "2025-10-29T19:53:20Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": " > I do think while the code changes seem good, it would be good to have more clarity about the cases where cache hits are expected and this cache is most likely to be useful. This seems like something that could be mentioned in the BlockTemplateCache documentation. I know the issue #33389 mentioned a number of cases but it's unclear if these would be helped by the caching implemented here or if more changes like sharing templates with different options would be required.\r\n> \r\n> If you have more changes building on this, or planned changes, it would be helpful to have a pointer or description. I don't know if #31664 would benefit from the caching implemented here, for example. \r\n\r\nI've expanded the PR description to be detailed as much as possible  as such IMHO this component will do more than caching, it should be called the **Block Template Manager** instead.\r\n\r\n\r\n",
+          "created_at": "2025-10-30T09:45:12Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "> I tend to think even if this PR is only used to improve getblocktemplate and remove global state [[1]](https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/rpc/mining.cpp#L776), [[2]](https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/rpc/mining.cpp#L859-L861), [[3]](https://github.com/bitcoin/bitcoin/blob/292ea0eb8982faef460c210bd4215d603f487463/src/node/miner.h#L186-L189), the changes might be worth it but I'm not sure if you implemented or are planning that.\r\n\r\n\r\nWith the block template manager, we should get rid of these globals  especially `nTransactionsUpdated`\r\nCurrently, we don’t actually know whether the updated transactions affect the top block template or not, so it’s not a strictly the correct approach.\r\n\r\nWe should update `getblocktemplate` to also provide a fee threshold like the mining interface instead of these state and because we already have previously built block templates cached  we can easily compute the fee difference and reuse the block template manager’s `GetNext` method (see the PR description).\r\n\r\nClients won’t need to track the previous state; the block template manager will handle that. This allows us to remove `GetTransactionsUpdated` from the mempool as well, and with that `getblocktemplate` logic will be simpler I think.\r\n\r\nRemoving `m_last_block_num_txs` and `m_last_block_weight` from the block assembler will also be possible, since that information can easily be retrieved from the block template manager.\r\nI’ll add this to the OP thanks for highlighting these global state.\r\n\r\n\r\n",
+          "created_at": "2025-10-30T10:49:15Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> Plan\r\n\r\nIs this the plan for the current PR? Otherwise maybe it makes more sense to move that to the tracking issue.",
+          "created_at": "2025-10-31T12:16:24Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Thanks for the updated description. This all seems reasonable and is helpful. I do agree with Sjors though it could be good to move the information about next steps into #33389 which could become a tracking issue. Or you could close #33389 and make a new tracking issue (if things have changed since #33389 was opened). Also the current description ends abruptly with \"It would be nice to also\" so looks like some text is missing.\r\n\r\nOther thoughts and suggestions:\r\n\r\n- As long as caching is implemented here, it would seem make sense to expose it to IPC and RPC clients so if there are multiple clients they could take advantage of the cached templates. Implementing this could be as simple as adding `max_age` options to `BlockCreateOption` and `getblocktemplate`.\r\n\r\n- It would be nice to add a basic c++ unit test using `BlockTemplateCache` so if there are changes or bugfixes to this code it is easy to write tests covering them them. The fuzz test is good too, but fuzz tests are more awkward to run. Also, if there any are parts of the fuzz test that don't really benefit from random inputs, it could make sense to make them unit tests instead.\r\n\r\n- No strong opinion, but I'm not really sure this code needs to have both BlockTemplateCache and BlockTemplateManager classes. I'm hoping the PR will stick to only introducing a BlockTemplateCache now, and not add extra layers to the implementation until they are justified. I think it's fine for example if BlockTemplateCache holds a cache and a few stats and counters without needing a separate BlockTemplateManager to hold the counters, unless BlockTemplateManager is going to implement more significant functionality.",
+          "created_at": "2025-10-31T14:42:08Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Forced pushed from 5f798b4a3b1a978b8ac954db54e9e8dfc7da6319 to 084bfbc1ec7f8f64f54d231bb641285622311b59 Compare diff [dfc7da6319..084bfbc1](https://github.com/bitcoin/bitcoin/compare/5f798b4a3b1a978b8ac954db54e9e8dfc7da6319..084bfbc1ec7f8f64f54d231bb641285622311b59)\r\n\r\nThanks for your thorough review. I've made significant changes following your feedback:\r\n\r\n* Removed the first commit, as it is out of scope for now. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2379497293](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2379497293)\r\n* Changed the `block_template_cache` instance in node interfaces to `unique_ptr` and properly unregistered it from the validation interface. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2472926339](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2472926339) [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2472932269](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2472932269)\r\n* Simplified the implementation of the `BlockTemplateCache` class as suggested. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473041954](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473041954)\r\n* Clarified why I don’t check that the coinbase script must match, and why we don’t check that block validity must also match. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473203366](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473203366)\r\n* Implemented a comparison operator for block creation options. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473223014](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473223014)\r\n* Removed the template. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473250518](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473250518)\r\n* Removed the incorrect `BlockTemplateCache` forward declaration in miner. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473275740](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473275740)\r\n* Renamed the generic cache size variable to be more specific. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473282308](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473282308)\r\n* Invalidated the cache after block disconnection and handled background validation block connection. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473298969](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473298969)\r\n* Made `IntervalElapsed` an inline and standalone function. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473412280](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473412280)\r\n* Added a clarifying comment that we always create a new template when the maximum age is 0. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473491581](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473491581)\r\n* Fixed grammar nits. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473499003](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473499003)\r\n* Made the block template cache own the chainstate instead of the chainman. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473636918](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473636918)\r\n* Moved the `max_age` variable to block creation options. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473664992](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473664992)\r\n* Made `GetBlockTemplate` return a shared pointer. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473682869](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473682869)\r\n* Defined a `BlocktemplateRef` type alias. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473714111](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2473714111)\r\n* Deduplicated code as suggested. [https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2474149528](https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2474149528)\r\n\r\nOther update\r\n\r\n- The PR is now using the `block.nTime` for time comparison.\r\n\r\n",
+          "created_at": "2025-10-31T17:27:29Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Thanks for you recent comment @ryanofsky @Sjors \r\n\r\n> Is this the plan for the current PR? Otherwise maybe it makes more sense to move that to the tracking issue.\r\n\r\n> This all seems reasonable and is helpful. I do agree with Sjors though it could be good to move the information about next steps into https://github.com/bitcoin/bitcoin/issues/33389 which could become a tracking issue. Or you could close https://github.com/bitcoin/bitcoin/issues/33389 and make a new tracking issue (if things have changed since https://github.com/bitcoin/bitcoin/issues/33389 was opened). Also the current description ends abruptly with \"It would be nice to also\" so looks like some text is missing.\r\n\r\nYes done, and also fixed the PR description.\r\n\r\n>  Implementing this could be as simple as adding max_age options to BlockCreateOption and getblocktemplate.\r\n\r\nYes good idea, with the current iteration it can easily be done, however I did not see a use case yet (I did not think hard). \r\n\r\n> It would be nice to add a basic c++ unit test using BlockTemplateCache so if there are changes or bugfixes to this code it is easy to write tests covering them them. The fuzz test is good too, but fuzz tests are more awkward to run. Also, if there any are parts of the fuzz test that don't really benefit from random inputs, it could make sense to make them unit tests instead.\r\n\r\nUnit test is nice to demonstrate usage and test some cases, but I really like the coverage fuzz test provide like catching some subtle bugs that could be missed in review.\r\n\r\n> No strong opinion, but I'm not really sure this code needs to have both BlockTemplateCache and BlockTemplateManager classes. I'm hoping the PR will stick to only introducing a BlockTemplateCache now, and not add extra layers to the implementation until they are justified. I think it's fine for example if BlockTemplateCache holds a cache and a few stats and counters without needing a separate BlockTemplateManager to hold the counters, unless BlockTemplateManager is going to implement more significant functionality.\r\n\r\nYou are right, i've limit this to just the cache, we can talk about the block template manager when their is code to review and debate on the best approach.\r\n\r\n\r\nI see some fuzz test are failing, I will work on fixing it and also will make commit atomic per some of @ryanofsky  suggestions",
+          "created_at": "2025-10-31T18:38:43Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "I left the `block_template_cache` fuzz target running overnight and generated a coverage report for it: https://brunoerg.xyz/bitcoin-core-coverage/33421/coverage_report/",
+          "created_at": "2025-11-04T14:53:07Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Thanks for the review @ryanofsky and the coverage report @brunoerg\r\n\r\nI will update the PR shortly with the suggestions and study the report.\r\n",
+          "created_at": "2025-11-04T15:58:54Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> Unit test is nice to demonstrate usage and test some cases, but I really like the coverage fuzz test provide like catching some subtle bugs that could be missed in review.\r\n\r\nI agree with @ryanofsky about having unit test - fuzzing doesn't exclude the need of having unit tests. Fuzzing depends on the provided inputs, unit tests are usually faster, great for regression, demonstrate usage (especially edge cases), etc. Also, the general goal of fuzzing is catching assertion failures, integer overflows, memory violations, etc - but we usually might leverage it by writing harnesses that can check some behavior things - e.g. we can put some metamorphic relations, round-trip assertions, and others (see [An empirical evaluation of fuzz targets using mutation testing](https://sol.sbc.org.br/index.php/sast/article/view/36885/36671)) - as you did here. However, we shouldn't sacrifice performance in favor of it - fuzzing is search. Your fuzz target is good but note that for every single iteration you call `GetBlockTemplate` several times as well as some `BlockConnected`/`BlockDisconnected` to test the cache for every scenario - on my server it barely got more than 50 exec/s.",
+          "created_at": "2025-11-04T17:37:06Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "I forced pushed from 084bfbc1ec7f8f64f54d231bb641285622311b59 to  a3f0010c2062fc88720e7eae33694f2491c32ebe [2311b59..a3f001](https://github.com/bitcoin/bitcoin/compare/084bfbc1ec7f8f64f54d231bb641285622311b59..a3f0010c2062fc88720e7eae33694f2491c32ebe)\r\n- We now avoid the second copy when submitting solution by moving the block by value when constructing the shared pointer https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2486576551\r\n- Removed the `operator=` in block assembler options and instead introduce a `SimilarOptions` function, I think it's better this way because I plan to extend this logic later by indicating whenever options are similar but it's just the block max weight that differ, this is useful for enabling reusing a larger template in the cache when a smaller one is needed with same matching other options. https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2486593971\r\n- Updated the mempool object in the cache to be stored by reference not pointer https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2486606258\r\n- Make `TimeIntervalElapsed` parameter `time_interval` be copied by value. https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2486621134\r\n- Update `maximum_template_age` to `max_template_age` https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2486625191\r\n- Fix previous C.I failure by not having to deal with raw seconds value, we use `MillisecondsDouble` instead https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2490867264\r\n- Get rid of `num_iterations` variable https://github.com/bitcoin/bitcoin/pull/33421#discussion_r2491199977\r\n- Fixed https://github.com/bitcoin/bitcoin/pull/33421#issuecomment-3487272706 and https://github.com/bitcoin/bitcoin/pull/33421#pullrequestreview-3411154210 comment that requested for a unit test.\r\n\r\n@brunoerg thanks the resource it's helpful.",
+          "created_at": "2025-11-05T17:43:08Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `macOS native, no depends, sqlite only, gui`: https://github.com/bitcoin/bitcoin/actions/runs/19111349459/job/54623138521</sub>\n<sub>LLM reason (✨ experimental): miner_tests test suite failed (CTest reported 1 failure).</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-11-05T20:48:28Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "_Apologies for the force pushes, I am attempting to fix a C.I failure which happens only remotely due to `SetMockTime` not able to nudge the node clock in ms, I adjusted the time advances to be in seconds with a large buffer_",
+          "created_at": "2025-11-06T15:34:33Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "The following in the PR description had me confused:\r\n\r\n> Client requests for block templates will specify the maximum age of the template in seconds; that is, how fresh they want the template to be:\r\n\r\nI thought it meant that templates have an expiration time, but from 8af9ede0608f5bb4fe3eddf7d3fe4fbb57a4649d it's clear that the caller specifies how old cached templates can be (via `max_template_age`).\r\n\r\nIf you're having trouble with mock time in the tests / fuzzer, it might help to add some direct tests to `TimeIntervalElapsed ` in 3ed16ab58f5773113efdd973d94911c93459637e.\r\n\r\nCommit ddbad03dddeba255b016622d4569aecbf74b9366 _miner: add block template cache_ introduces quite a lot stuff, without explanation. E.g. I was not expecting to see `validation_signals` as relevant for a cache. It would be good to expand the commit message. Maybe it's better to split this commit, and then introduce the unit tests from e45a195def5f8be0793ba585f49e4d5ff5c8b286 gradually to explain where the complexity comes from.\r\n\r\nI wonder if it makes sense to introduce and use `BlockTemplateRef` as a pure refactor in an earlier commit. That way 9500dca555f7394cd3e51821312309d5b9633539 _interfaces: create block template via block template cache_ just needs to change the type from `std::unique_ptr` to `std::shared_ptr` making that commit smaller.",
+          "created_at": "2025-11-11T13:02:05Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "I really appreciate the feedback and reviews so far from @ryanofsky, @Sjors, and @brunoerg.\r\nGiven that I’ve opened #33758 with the overall plan and we’ve had some recent discussions https://github.com/bitcoin/bitcoin/issues/33756#issuecomment-3502079264, I’ll work on fixing the C. I issue here hence marking as draft.\r\n\r\nI will also work on the e2e implementation separately.\r\n\r\n",
+          "created_at": "2025-11-11T20:52:39Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Thanks for your reviews @Sjors @ryanofsky, and @brunoerg. I have split the commits to be more atomic and added a description based on @Sjors suggestion and rebased.\r\n\r\n",
+          "created_at": "2026-01-13T17:12:10Z"
+        }
+      ]
+    },
+    {
+      "number": 33420,
+      "title": "test: Avoid interface_ipc.py Duplicate ID errors",
+      "body": "This change should fix issue https://github.com/bitcoin/bitcoin/issues/33417 reported by zaidmstrr. It's possible to reproduce the `mp/proxy.capnp:0: failed: Duplicate ID @0xcc316e3f71a040fb` error by installing libmultiprocess system-wide, or to one of the locations listed in the python test's `imports` list before the local libmultiprocess subtree, and then running the test.",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-09-17T16:39:54Z",
+      "updated_at": "2025-09-18T10:53:18Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33420",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33420.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [zaidmstrr](https://github.com/bitcoin/bitcoin/pull/33420#pullrequestreview-3235350017) |\n| Concept ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/33420#issuecomment-3303876135) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- and there are not \"failed: Duplicate ID @0xcc316e3f71a040fb\" errors. -> and that there are no \"failed: Duplicate ID @0xcc316e3f71a040fb\" errors. [the clause needs \"that\" and \"no\" to be grammatical and clear]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-09-17T16:40:00Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Concept ACK\r\n\r\nThat said, I'm unable to reproduce the issue on macOS. I installed `libmultiprocess` using `(sudo) make install` (https://github.com/bitcoin-core/libmultiprocess/blob/master/doc/install.md). `capnp` is installed via Homebrew.",
+          "created_at": "2025-09-17T17:07:18Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "I also haven't reproduced the issue, using the steps provided. i.e installing libmulitprocess system-wide in a new VM, and then building Core & running `interface_ipc.py`. Can someone list the steps to reach the failure, using a clean VM.",
+          "created_at": "2025-09-18T09:53:37Z"
+        },
+        {
+          "user": "zaidmstrr",
+          "body": "Here are the steps to reproduce the error in Ubuntu based systems:\r\n1) Install `libmultiprocess` library system using `sudo make install`\r\n2) Then install `capnp` system-wide. You can refer [this](https://capnproto.org/install.html) for the installation. After succesfully downloading the `capnp` library you can check using the `which capnp` command, which outputs the default location of the installed binary. In most of the cases the location was `/usr/local/bin/capnp`.\r\n3) Now run the `interface_ipc.py` test.",
+          "created_at": "2025-09-18T10:06:40Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Thanks, repro'd:\r\n```bash\r\nRemaining jobs: [interface_ipc.py]\r\n1/1 - interface_ipc.py failed, Duration: 1 s\r\n\r\nstdout:\r\n2025-09-18T10:18:46.257357Z TestFramework (INFO): PRNG seed is: 5267162394658679552\r\n2025-09-18T10:18:46.257836Z TestFramework (INFO): Initializing test directory /tmp/test_runner_₿_🏃_20250918_101846/interface_ipc_0\r\n\r\n\r\nstderr:\r\nterminate called after throwing an instance of 'kj::ExceptionImpl'\r\n  what():  mp/proxy.capnp:0: failed: Duplicate ID @0xcc316e3f71a040fb.\r\n\r\n\r\n\r\nTEST             | STATUS    | DURATION\r\n\r\ninterface_ipc.py | ✖ Failed  | 1 s\r\n\r\nALL              | ✖ Failed  | 1 s (accumulated) \r\nRuntime: 1 s\r\n```",
+          "created_at": "2025-09-18T10:19:12Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 30.x in #33424.",
+          "created_at": "2025-09-18T10:36:38Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> I also haven't reproduced the issue, using the steps provided. i.e installing libmulitprocess system-wide in a new VM, and then building Core & running `interface_ipc.py`.\r\n\r\nYeah, an additional requirement for the bug to happen is that cap'nproto and libmultiprocess need to be installed in the same prefix. If you are using a system provided cap'n proto installed in `/usr` and a locally build libmultiprocess installed in `/usr/local` the bug won't happen. They both need to be installed in `/usr` or `/usr/local` or other prefix.",
+          "created_at": "2025-09-18T10:50:18Z"
+        }
+      ]
+    },
+    {
+      "number": 33416,
+      "title": "[27.x] Backports",
+      "body": "Backports:\r\n* #30198 (partial)\r\n* #33395",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-09-17T14:34:53Z",
+      "updated_at": "2025-10-13T11:21:24Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33416",
+      "labels": [
+        "Backport",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33416.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [willcl-ark](https://github.com/bitcoin/bitcoin/pull/33416#pullrequestreview-3331104875), [marcofleon](https://github.com/bitcoin/bitcoin/pull/33416#pullrequestreview-3331161979) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-17T14:34:59Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Should also backport #31407",
+          "created_at": "2025-09-18T18:10:12Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Yea, I'm not planning on adding any further changes to this PR (which will likely be the last to the `27.x` branch).",
+          "created_at": "2025-10-13T11:10:32Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "I've closed the [27.3 milestone](https://github.com/bitcoin/bitcoin/milestone/76), as there's not currently a plan to make a `27.3` release.",
+          "created_at": "2025-10-13T11:21:24Z"
+        }
+      ]
+    },
+    {
+      "number": 33415,
+      "title": "[28.x] More backports",
+      "body": "Further backports for `28.x`:\r\n* #33236\r\n* #33340\r\n* #33395",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-09-17T11:09:02Z",
+      "updated_at": "2025-09-26T19:32:50Z",
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33415",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33415.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [willcl-ark](https://github.com/bitcoin/bitcoin/pull/33415#pullrequestreview-3267449488), [achow101](https://github.com/bitcoin/bitcoin/pull/33415#issuecomment-3335809587) |\n| Stale ACK | [glozow](https://github.com/bitcoin/bitcoin/pull/33415#pullrequestreview-3259161134) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-17T11:09:07Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Should we also backport #33106 if we're going to be doing a 28.3 anyways?",
+          "created_at": "2025-09-17T18:19:02Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> Should we also backport #33106 if we're going to be doing a 28.3 anyways?\r\n\r\nHere is a branch to do this: https://github.com/glozow/bitcoin/tree/2025-09-28.3-backport\r\n\r\nSimilar to #33226, needed to do some test massaging. I also needed #30948 and #30784 for the test utils/refactors. Feel free to pull; I updated the final changes as well.",
+          "created_at": "2025-09-17T20:43:28Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> Here is a branch to do this: https://github.com/glozow/bitcoin/tree/2025-09-28.3-backport\r\n\r\nThanks. Looks like there are some issues with this branch. i.e:\r\n```bash\r\ntest/mempool_tests.cpp:434: Entering test case \"MempoolSizeLimitTest\"\r\n<snip>\r\ntest/mempool_tests.cpp:562: error: in \"mempool_tests/MempoolSizeLimitTest\": check pool.GetMinFee(1).GetFeePerK() == maxFeeRateRemoved.GetFeePerK() + 1000 has failed [19941 != 20841]\r\n2025-09-18T09:27:52.459923Z (mocktime: 1970-01-01T12:00:42Z) [test] [validationinterface.cpp:228] [MempoolTransactionsRemovedForBlock] [validation] Enqueuing MempoolTransactionsRemovedForBlock: block height=1 txs removed=0\r\ntest/mempool_tests.cpp:566: error: in \"mempool_tests/MempoolSizeLimitTest\": check pool.GetMinFee(1).GetFeePerK() == llround((maxFeeRateRemoved.GetFeePerK() + 1000)/2.0) has failed [9971 != 10421]\r\ntest/mempool_tests.cpp:570: error: in \"mempool_tests/MempoolSizeLimitTest\": check pool.GetMinFee(pool.DynamicMemoryUsage() * 5 / 2).GetFeePerK() == llround((maxFeeRateRemoved.GetFeePerK() + 1000)/4.0) has failed [4985 != 5210]\r\ntest/mempool_tests.cpp:574: error: in \"mempool_tests/MempoolSizeLimitTest\": check pool.GetMinFee(pool.DynamicMemoryUsage() * 9 / 2).GetFeePerK() == llround((maxFeeRateRemoved.GetFeePerK() + 1000)/8.0) has failed [2493 != 2605]\r\ntest/mempool_tests.cpp:578: error: in \"mempool_tests/MempoolSizeLimitTest\": check pool.GetMinFee(1).GetFeePerK() == 1000 has failed [100 != 1000]\r\n```\r\nWant to PR / debug that separately?",
+          "created_at": "2025-09-18T09:32:44Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> Thanks. Looks like there are some issues with this branch. i.e:\r\n\r\nAh sorry about that! It's fixed on the branch now.\r\n\r\n> Want to PR / debug that separately?\r\n\r\nHappy to review this and do a separate PR if that's easier. The default changes also require manpage modifications, so it might be better to defer the rc final changes if you'd like a separate PR.",
+          "created_at": "2025-09-23T14:25:20Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Ok, I'll just pull the branch in here (shortly).",
+          "created_at": "2025-09-23T14:26:28Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "> It looks like [3eab8b7](https://github.com/bitcoin/bitcoin/commit/3eab8b724044dc321f70e5eed66b149713158a04) was skipped in the backport? It doesn't seem like there are significant conflicts and it makes [2e756e8](https://github.com/bitcoin/bitcoin/commit/2e756e8b02d30e9baacd36d4e519ab64421778ba) easier to review.\r\n\r\nAh, I was just complaining about this being tricky to review offline, but now see it in the range-diff too. That would have indeed made it easier for me to review.\r\n\r\n```\r\n 6:  3eab8b72404 <  -:  ----------- [prep/test] replace magic number 1000 with respective feerate vars\r\n```\r\n",
+          "created_at": "2025-09-23T21:03:51Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> It looks like https://github.com/bitcoin/bitcoin/commit/3eab8b724044dc321f70e5eed66b149713158a04 was skipped in the backport? It doesn't seem like there are significant conflicts and it makes https://github.com/bitcoin/bitcoin/commit/2e756e8b02d30e9baacd36d4e519ab64421778ba easier to review.\r\n\r\nMy bad - I missed that commit and it didn't hit me that there was a separate commit while I was resolving the conflicts.",
+          "created_at": "2025-09-23T21:09:10Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Opened #33476 to follow",
+          "created_at": "2025-09-24T19:18:56Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK a5e4fec4949f61ebbd7d6696f39da26df04515f9",
+          "created_at": "2025-09-25T20:22:09Z"
+        }
+      ]
+    },
+    {
+      "number": 33414,
+      "title": "tor: enable PoW defenses for automatically created hidden services",
+      "body": "Enable [PoW defenses](https://tpo.pages.torproject.net/onion-services/ecosystem/technology/security/pow/) for hidden services that we create via Tor Control using the [`ADD_ONION` command](https://spec.torproject.org/control-spec/commands.html#add_onion).\r\n\r\nThe ability to do that has been added in [tor-0.4.9.2-alpha](https://gitlab.torproject.org/tpo/core/tor/-/commit/02c18044464bfe45f168b55297a785244094cfd5). Previous versions return a syntax error to the `ADD_ONION` command with `PoWDefensesEnabled=1`, so the approach here is to try with PoW and if we get syntax error, then retry without PoW.\r\n\r\nAlso update `doc/tor.md` with a hint on enabling PoW on manually configured Tor hidden services.",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2025-09-17T10:40:41Z",
+      "updated_at": "2025-12-02T14:53:09Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33414",
+      "labels": [
+        "P2P",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33414.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33960](https://github.com/bitcoin/bitcoin/pull/33960) (log: Use more severe log level (warn/err) where appropriate by maflcko)\n* [#29641](https://github.com/bitcoin/bitcoin/pull/29641) (scripted-diff: Use LogInfo over LogPrintf [WIP, NOMERGE, DRAFT] by maflcko)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-17T10:40:48Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "Should we then also add PoW to the connections that we make to other nodes running behind hidden services?",
+          "created_at": "2025-09-17T12:52:52Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "> Should we then also add PoW to the connections that we make to other nodes running behind hidden services?\r\n\r\nReading the linked FAQ, the feature still supports \"older clients\" (which don't have PoW defence capability), but they may take a lower priority when a service considers itself under DoS. So no PoW is _required_ on the client side.\r\n\r\nWhen the client-side tor is new-enough, my understanding is that the puzzle-solving is automatically handled by Tor, and doesn't need client-side changes to the connection code, as it happens during the introduction. But I am not 100% certain.",
+          "created_at": "2025-09-17T14:27:05Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "@laanwj you might have some thoughts here?",
+          "created_at": "2025-09-23T13:03:39Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-12-02T14:53:08Z"
+        }
+      ]
+    },
+    {
+      "number": 33412,
+      "title": "Update libmultiprocess subtree to fix intermittent mptest hang",
+      "body": "Includes:\r\n\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/207\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/208\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/211\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/201\r\n\r\nThe last change fixes the test hang reported https://github.com/bitcoin/bitcoin/issues/33244\r\n\r\nThe changes can be verified by running `test/lint/git-subtree-check.sh src/ipc/libmultiprocess` as described in [developer notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#subtrees) and [lint instructions](https://github.com/bitcoin/bitcoin/tree/master/test/lint#git-subtree-checksh)",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-09-17T10:04:06Z",
+      "updated_at": "2025-09-19T09:54:07Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33412",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33412.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/33412#issuecomment-3308650255), [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/33412#pullrequestreview-3243996515) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- before thread client is -> before the thread client is [missing article makes the sentence awkward and slightly unclear]\n- Synchronization note: \\ref callback_threads note applies here as well. -> Synchronization note: the callback_threads note applies here as well. [\\ref looks like a Doxygen reference; as written the phrase is redundant/awkward (\"note\" twice) and the backslash ref makes the sentence unclear in plain English]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-09-17T10:04:12Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @Sjors ",
+          "created_at": "2025-09-18T13:04:11Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK c49a43591f88dc199cc04e76f3cfcb7ba136f1a6",
+          "created_at": "2025-09-18T17:18:00Z"
+        }
+      ]
+    },
+    {
+      "number": 33411,
+      "title": "ci: re-add Valgrind job to the CI",
+      "body": "Now that we've migrated to the new CI setup, and runtimes are looking decent, we could re-add some of the nightly/jobs runs in other repos, back to the main CI. This also came up in https://github.com/bitcoin/bitcoin/pull/33201#discussion_r2325069692.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-09-17T09:26:38Z",
+      "updated_at": "2025-10-21T14:37:23Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33411",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33411.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [willcl-ark](https://github.com/bitcoin/bitcoin/pull/33411#issuecomment-3303296826) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-17T09:26:43Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "The runtime isn't too bad, and it's just blown out by `wallet_miniscript.py`, which is ~4 times slower than the next slowest running test (`signet_miner.py`):\r\n```bash\r\ntool_signet_miner.py                                   | ✓ Passed  | 536 s\r\nwallet_miniscript.py                                   | ✓ Passed  | 2086 s\r\n```",
+          "created_at": "2025-09-17T10:20:56Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "With `wallet_miniscript` skipped, this finishes faster than the ASAN job, and ~roughly the same time as msan & fuzzer.",
+          "created_at": "2025-09-17T10:48:15Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "Concept ACK to re-introducing this job.\r\n\r\nWondering whether it's worth adding an extra runner if we add a new `lg`-sized job? On the whole CI queue sizes/times have been reasonable I think since the migration, and we did reduce a few job sizes recently. But still might be worth considering.\r\n\r\nThe 16th seemed unusually active, most days top out around 20 min max queue time AFAIK, but for reference here's the previous 7 days:\r\n\r\n<img width=\"3384\" height=\"1620\" alt=\"image\" src=\"https://github.com/user-attachments/assets/e214ac83-83be-4dfd-b2c9-c3b69d35e5c6\" />",
+          "created_at": "2025-09-17T14:31:39Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Adjusted to remove the conflict with #31425 and add context to the final commit.",
+          "created_at": "2025-09-18T09:37:13Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "No objection, but are there any real issues that this task has found in the last years? The only ones I am aware of are false-positives around valgrind and questions around updating the task config itself for a newly added package. If those are the only reasons to add it, the reasoning seems circular and pull request authors having to deal with valgrind false positives directly in their pull requests may even be counter-productive? For example, https://github.com/bitcoin/bitcoin/pull/31282/files was open for 4 months, and https://github.com/bitcoin/bitcoin/issues/29635 is still open with no clear solution. I am not sure if it is beneficial to block or delay a perfectly good pull requests based on a false-positive red valgrind CI.",
+          "created_at": "2025-09-23T09:13:52Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Again, this seems fine, and I don't want to raise an objection. However, the general question of how to deal with the false-positives (see my previous comment) here is still unanswered. IIUC, valgrind may not work under a given compiler (version). For example, currently it doesn't work under clang out of the box. There are workarounds needed, but they come with drawbacks:\r\n\r\n* Add a suppression, but if this one is too broad, it decreases the value of running valgrind\r\n* Use `-O1`, but valgrind is already slow, and this will make it even slower\r\n* Refactor the code somehow randomly, until it isn't hit, but that is tedious and unclear, because it isn't trivially actionable\r\n\r\nGenerally, I have the impression that the existing asan and msan task find all memory issues before valgrind could find them. If there was one, it would be good to know it.",
+          "created_at": "2025-10-16T11:44:46Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Can leave it to *san for now.",
+          "created_at": "2025-10-21T14:33:51Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Maybe we can add it to just run under the default branch (master) on merges? Brought up in the context of https://github.com/bitcoin/bitcoin/pull/33509#issuecomment-3381737041, but i guess the same approach could be used for several tasks? Maybe a brainstorming issue?",
+          "created_at": "2025-10-21T14:37:23Z"
+        }
+      ]
+    },
+    {
+      "number": 33410,
+      "title": "coinstats: avoid unnecessary Coin copy in ApplyHash",
+      "body": "Replace local Coin coin = it->second; with const Coin& coin = it->second; when iterating outputs in ApplyHash. The hash serialization path only reads from the Coin, and outputs remains valid for the loop’s duration, so copying is unnecessary. This reduces potential allocations (due to CTxOut/CScript) and improves performance without changing behavior.",
+      "state": "closed",
+      "user": "sashass1315",
+      "created_at": "2025-09-17T08:47:17Z",
+      "updated_at": "2025-11-26T19:11:33Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33410",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33410.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [Raimo33](https://github.com/bitcoin/bitcoin/pull/33410#issuecomment-3303956055) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible places where named args may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\nI don't see the git diff content in your message. Please paste the diff (or attach it), and I will scan the added lines and report any places to suggest naming positional integral literal arguments per your rules.\n\n\n\n<sup>2025-11-26</sup>\n",
+          "created_at": "2025-09-17T08:47:21Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "Concept ACK, I want to expand on l0rinc suggestion by saying that, given the above warning, I think this should only be merged if it results in a significant performance improvement. @sashass1315 are you able to run some before/after benchmarks? ",
+          "created_at": "2025-09-17T17:33:54Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33419,
+      "title": "coin-grinder missing test for TOTAL_TRIES",
+      "body": "The following (mutation) code can be remove from coin-grinder [here](https://github.com/bitcoin/bitcoin/blob/1444ed855f438f1270104fca259ce61b99ed5cdb/src/wallet/coinselection.cpp#L466) without encountering a test failure\n```\nif (curr_try >= TOTAL_TRIES) {\n    // Solution is not guaranteed to be optimal if `curr_try` hit TOTAL_TRIES\n    result.SetAlgoCompleted(false);\n    break;\n}\n```\n\nThis ought to be a similar test to [Test BnB attempt limit (`TOTAL_TRIES`)](https://github.com/bitcoin/bitcoin/blob/1444ed855f438f1270104fca259ce61b99ed5cdb/src/wallet/test/coinselection_tests.cpp#L166)",
+      "state": "open",
+      "user": "yancyribbens",
+      "created_at": "2025-09-17T16:24:53Z",
+      "updated_at": "2025-10-24T01:20:50Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33419",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "yancyribbens",
+          "body": "cc @murchandamus ",
+          "created_at": "2025-09-17T16:26:47Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "For reference: https://corecheck.dev/mutation/src/wallet/coinselection.cpp#L466 and https://corecheck.dev/mutation/src/wallet/coinselection.cpp#L468",
+          "created_at": "2025-09-18T12:42:50Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Yeah, it would be good to add this test. If someone wants to work on this, I would like to suggest that they peruse the very similar test for BnB here: https://github.com/bitcoin/bitcoin/blob/e744fd1249bf9577274614eaf3997bf4bbb612ff/src/wallet/test/coinselection_tests.cpp#L166\nAnd to understand what CoinGrinder is actually doing and how it work, I would suggest that prospective implementers peruse the PR that added CoinGrinder starting with this commit: https://github.com/bitcoin/bitcoin/pull/27877/commits/6cc9a46cd0f4ed80d4523bbef1508142e0c80d27",
+          "created_at": "2025-10-16T19:55:02Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Something like this would work:\n\n```c++\n    {\n        // #################################################################################################################\n        // 8) Max iterations\n        // #################################################################################################################\n        CAmount target =  8 * COIN;\n        int max_selection_weight = 3200; // WU\n        const auto& res = CoinGrinder(target, dummy_params, m_node, max_selection_weight, [&](CWallet& wallet) {\n            CoinsResult doppelgangers;\n            for (int i = 0; i < 19; ++i) {\n                add_coin(doppelgangers, wallet, CAmount(1 * COIN + i), CFeeRate(0), 144, false, 0, true, 96 + i);\n            } \n            return doppelgangers;\n        });\n        BOOST_CHECK(!res);\n    }\n```",
+          "created_at": "2025-10-24T01:20:50Z"
+        }
+      ]
+    },
+    {
+      "number": 33418,
+      "title": "`bitcoin.exe` is not included in Windows installer",
+      "body": "~`bitcoin.exe` does not appear to be included in the Windows installer. Was this intended?~",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-09-17T14:48:27Z",
+      "updated_at": "2025-09-17T15:13:56Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33418",
+      "labels": [
+        "Windows"
+      ],
+      "comment_list": [
+        {
+          "user": "hebasto",
+          "body": "cc @ryanofsky ",
+          "created_at": "2025-09-17T14:48:36Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "nm",
+          "created_at": "2025-09-17T14:58:29Z"
+        }
+      ]
+    },
+    {
+      "number": 33417,
+      "title": "Test interface_ipc.py fails with Duplicate ID error when libmultiprocess is installed system-wide",
+      "body": "When I tried to run the `interface_ipc.py` functional test it failed with the error:\n```\n2025-09-17T08:33:50.642653Z TestFramework (INFO): PRNG seed is: 5837581670543711780\n2025-09-17T08:33:50.643144Z TestFramework (INFO): Initializing test directory /tmp/bitcoin_func_test_qg32uhlp\nterminate called after throwing an instance of 'kj::ExceptionImpl'\n  what():  mp/proxy.capnp:0: failed: Duplicate ID @0xcc316e3f71a040fb.\nAborted (core dumped)\n```\nAfter further investigating the issue I found that when I have the `libmultiprocess` library installed system wide this test is failing, and removing the library from the system will make the test run as normal.\nThe main reason for this is the `load_capnp_modules` function, which imports certain files and libraries. Here is the breakdown for the issue:\n1) If you have already installed `capnp` globally on your system. The function will detect it and add the whole path of the `/include` directory of your system. Which contains all other libraries of your system including `capnp` and `mp` (if installed system-wide) library.\n2. This line of code `mp_dir = src_dir / \"ipc\" / \"libmultiprocess\" / \"include\"` includes the path of `libmultiprocess` directory inside the Bitcoin source tree.\n3. Now, when the `capnp.load()` function parses the imports, it will see multiple declarations of the same file. The first implementation was included from the `/include` path (as this is also the default path for the `libmultiprocess` library when you install system-wide) and secondly from the Bitcoin internal source tree.\n\n### How to reproduce\nTo reproduce the error you must have `capnp` and `libmultiprocess` installed system wide. \n\n### Possible Solution\nOne possible solution is to track when we have `libmultiprocess` installed system-wide or not. If it's installed system-wide, then don't add the one from the Bitcoin source tree.",
+      "state": "closed",
+      "user": "zaidmstrr",
+      "created_at": "2025-09-17T14:37:56Z",
+      "updated_at": "2025-09-18T13:53:09Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33417",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "fanquake",
+          "body": "cc @Sjors @ryanofsky ",
+          "created_at": "2025-09-17T14:39:49Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I wonder if changing order of import directories to put the local include path first would fix this:\n\n```diff\n-        imports = [str(capnp_dir), str(src_dir), str(mp_dir)]\n+        imports = [str(mp_dir), str(capnp_dir), str(src_dir)]\n```\n\nSo far I'm not able to reproduce it on nixos since there's no global include directory. But I think the problem might be the line [`capnp.load(str(mp_dir / \"mp\" / \"proxy.capnp\"), imports=imports)`](https://github.com/bitcoin/bitcoin/blob/1444ed855f438f1270104fca259ce61b99ed5cdb/test/functional/interface_ipc.py#L40) loading the local file first and then later `import \"/mp/proxy.capnp\"` lines importing the system file, causing the duplicate id error because two different files with the same id are loaded",
+          "created_at": "2025-09-17T15:43:46Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I was able to reproduce the error by modifying the test to point at an external libmultiprocess installation and I think #33420 should fix it",
+          "created_at": "2025-09-17T16:41:15Z"
+        },
+        {
+          "user": "zaidmstrr",
+          "body": "I tested with your suggested change `imports = [str(mp_dir), str(capnp_dir), str(src_dir)]` and this fixes the issue. As now `mp_dir` was in the first place of the `imports` list so when `capnp.load()` parses the `imports` it finds `proxy.capnp`  early, so no further lookups in the global directory were taken.",
+          "created_at": "2025-09-17T16:41:49Z"
+        }
+      ]
+    },
+    {
+      "number": 33413,
+      "title": "Support Multiple OP_RETURNs or Raise OP_RETURN Limit",
+      "body": "### Please describe the feature you'd like to see added.\n\nBitcoin currently restricts transactions to a single OP_RETURN output of 80 bytes. This is too limiting for practical use cases like cross-chain swaps and DeFi, where OP_RETURN serves as a lightweight log (e.g. destination token addresses, proofs, parameters).\n\nThe restriction also creates inequality: miners with custom policies already accept multiple or larger OP_RETURNs, while standard users cannot. This is similar to MEV and reduces neutrality.\n\nRecent discussions (e.g. Bitcoin Core PR #32359, v30 policy changes) show growing support for lifting or relaxing these limits, since current workarounds (fake outputs, non-standard scripts) are worse for the UTXO set than using proper OP_RETURN.\n\nProposal:\n\nAllow more than one OP_RETURN per transaction, or\n\nIncrease payload size (e.g. 160–256 bytes, or more in line with v30 updates).\n\nThis would improve interoperability, fairness, and reduce reliance on hacks for metadata.\n\n### Is your feature related to a problem, if so please describe it.\n\n_No response_\n\n### Describe the solution you'd like\n\n_No response_\n\n### Describe any alternatives you've considered\n\n_No response_\n\n### Please leave any additional context\n\n_No response_",
+      "state": "closed",
+      "user": "nerses-asaturyan",
+      "created_at": "2025-09-17T10:28:08Z",
+      "updated_at": "2025-09-17T14:00:38Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33413",
+      "labels": [
+        "Feature"
+      ],
+      "comment_list": [
+        {
+          "user": "glozow",
+          "body": "This was already done in #32406. Easy to miss - fwiw if you're looking to stay up to date with PR merges, I'd recommend the [Optech newsletter](bitcoinops.org).",
+          "created_at": "2025-09-17T14:00:38Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 8,
+    "issues": 4
+  }
+}

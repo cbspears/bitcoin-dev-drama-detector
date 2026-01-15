@@ -1,0 +1,234 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:34:11.446001+00:00",
+  "date": "2025-04-19",
+  "pull_requests": [
+    {
+      "number": 32310,
+      "title": "test: Run all benchmarks in the sanity check",
+      "body": "It is unclear why not all benchmarks are run, given that:\r\n\r\n* they only run as a sanity check (fastest version)\r\n* no one otherwise runs them, not even CI\r\n* issues have been missed due to this",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-04-19T11:58:03Z",
+      "updated_at": "2026-01-12T20:59:34Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32310",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32310.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32310#issuecomment-2822227361), [BrandonOdiwuor](https://github.com/bitcoin/bitcoin/pull/32310#pullrequestreview-2785224059) |\n| Concept ACK | [i-am-yuvi](https://github.com/bitcoin/bitcoin/pull/32310#pullrequestreview-2780062597) |\n| Stale ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/32310#pullrequestreview-2779948289) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-04-19T11:58:06Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Concept ACK, depends on https://github.com/bitcoin/bitcoin/pull/32309 to make the build pass",
+          "created_at": "2025-04-19T18:51:15Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Why is the CI failing?\r\n\r\nThx, excluded msvc for now, with the same approach as the temporary win-cross exclusion.",
+          "created_at": "2025-04-22T07:03:44Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> > Why is the CI failing?\r\n> \r\n> Thx, excluded msvc for now, with the same approach as the temporary win-cross exclusion.\r\n\r\nThis can now be reverted after rebase.",
+          "created_at": "2025-04-22T16:44:56Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK faca46b0421b568e7e5fefe593420e773d0ec9af",
+          "created_at": "2025-04-22T19:05:20Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "For reference, in the two CI `DEBUG=1` configurations, the bench part seems to take 3x the time. Though, this should be fine, given the motivation in the pull description, and also the fact that there are similarly slow other tests.",
+          "created_at": "2025-04-22T19:22:46Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Locally the sanity bench (when running `ctest`) is taking ~19s, roughly the same time as the second worst secp256k1 test. Under the `DEBUG` build type it takes ~140s, the next longest running test is ~80s; so I imagine some devs will wonder why runing ctest is now taking > 2-3 minutes to complete. I checked that under Valgrind the runtime isn't so long that it'd cause the job to fail due to timeout (although there might be a different issue causing that).\r\n\r\nI think ideally we could just delete these benchmarks that take so long to run, especially given that nobody is running them anyway, when changing the related code (#32149).",
+          "created_at": "2025-04-23T09:15:30Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Under the `DEBUG` build type it takes ~140s, the next longest running test is ~80s; so I imagine some devs will wonder why runing ctest is now taking > 2-3 minutes to complete.\r\n\r\nI wonder if this is relevant, given how long the functional tests take. And if someone doesn't want to run all tests, they can trivially exclude all benchmarks via `ctest --exclude-regex ...`.\r\n\r\nAn alternative may be to allow running the individual benchmarks in parallel, similar to the unit tests.",
+          "created_at": "2025-04-23T09:39:58Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> I wonder if this is relevant, given how long the functional tests take.\r\n\r\nMy assumption would be that developers are running the units tests regularly, far more often than they are running the entire functional test suite.",
+          "created_at": "2025-04-23T09:46:55Z"
+        }
+      ]
+    },
+    {
+      "number": 32309,
+      "title": "bench: close wallets after migration",
+      "body": "The low-priority `WalletMigration` benchmark existed for some time but was never run automatically in our CI.\r\n\r\nAlthough the failure first surfaced on Windows as a hang during temporary directory cleanup, it could also be reproduced on Linux and macOS when forcing multiple iterations (e.g. via a long `--min-time`).\r\n\r\n### Root causes\r\n\r\n1. **Leaked open wallets on Windows**\r\n   `MigrateLegacyToDescriptor` produces two new descriptor wallets (the primary spendable wallet and a companion watch‑only wallet). Without unloading them, their database files remained open in the `WalletContext`, blocking directory removal and hanging the test harness.\r\n\r\n<details><summary>Details</summary>\r\n\r\n```bash\r\nwhat():  filesystem error: cannot remove all: The process cannot access the file because it is being used by another process [C:\\Users\\RUNNER\\~1\\AppData\\Local\\Temp\\test_common bitcoin\\WalletMigration\\d8ffd89a7700ce01c31f] [C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\test_common bitcoin\\WalletMigration\\d8ffd89a7700ce01c31f\\regtest\\wallet.dat]\r\n```\r\n\r\n</details>\r\n\r\n2. **Undefined behavior on repeated runs**\r\n   The benchmark body calls `std::move(wallet)`, invalidating the local `wallet` pointer. Running more than one iteration causes a use-after-move by the sanitizers.\r\n\r\n<details><summary>Details</summary>\r\n\r\n```bash\r\nerror: bench_bitcoin 0x00067927: DW_TAG_member '_M_local_buf' refers to type 0x00000000000b3ba7 which extends beyond the bounds of 0x0006791d\r\n* thread #1, name = 'b-test', stop reason = signal SIGSEGV: address not mapped to object (fault address: 0xc8)\r\n  * frame #0: 0x00005555556a3f33 bench_bitcoin`... basic_string<char>::length(this=<unavailable>) const at basic_string.h:1079:16\r\n```\r\n\r\n</details>\r\n\r\n### Fixes\r\n\r\n- **Automatic wallet teardown**\r\n  Wrap the benchmark in a `MakeWalletLoader` (owning a `WalletContext`), so that both migrated wallets are unloaded when the loader goes out of scope, eliminating any lingering open files.\r\n\r\n- **Re-enable benchmarks in CI**\r\n  Drop the temporary filter in GitHub Actions. The `-sanity-check` run already executes each benchmark once, so `WalletMigration` now runs automatically without hangs or crashes.\r\n\r\n- **Single iteration**\r\n  Configure the microbenchmark with `.epochs(1).epochIterations(1)`, ensuring the migration code runs exactly once and avoiding use-after-move.\r\n\r\nNo measurable change in benchmark performance.",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-04-19T10:15:38Z",
+      "updated_at": "2025-04-25T06:27:47Z",
+      "comments": 19,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32309",
+      "labels": [
+        "Wallet",
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32309.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [furszy](https://github.com/bitcoin/bitcoin/pull/32309#pullrequestreview-2784336700), [maflcko](https://github.com/bitcoin/bitcoin/pull/32309#issuecomment-2821598466), [hebasto](https://github.com/bitcoin/bitcoin/pull/32309#pullrequestreview-2784709452) |\n| Concept ACK | [mzumsande](https://github.com/bitcoin/bitcoin/pull/32309#issuecomment-2816951357), [shahsb](https://github.com/bitcoin/bitcoin/pull/32309#pullrequestreview-2781713855), [achow101](https://github.com/bitcoin/bitcoin/pull/32309#issuecomment-2819504455) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#29694](https://github.com/bitcoin/bitcoin/pull/29694) (fuzz: wallet: add target for spkm migration by brunoerg)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-04-19T10:15:41Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "In commit 86646448770888f66c446eacdd47d1a62d5552eb, \"... we're only running 1 epochs anyway\" -- where does this assumption come from?",
+          "created_at": "2025-04-19T11:52:51Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> where does this assumption come from \r\n\r\n```C++\r\nbench.epochs(/*numEpochs=*/1)\r\n```",
+          "created_at": "2025-04-19T11:53:27Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "needs to revert d91a746815e4428c738f1a096a950292cbdb5469 here in this pull",
+          "created_at": "2025-04-19T12:00:06Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Tested 86646448770888f66c446eacdd47d1a62d5552eb on Ubuntu 24.04:\r\n```\r\n$ ./build/bin/bench_bitcoin -filter=WalletMigration -min-time=100000\r\nWarning, results might be unstable:\r\n* CPU frequency scaling enabled: CPU 0 between 800.0 and 4,800.0 MHz\r\n* CPU governor is 'powersave' but should be 'performance'\r\n* Turbo is enabled, CPU frequency will fluctuate\r\n\r\nRecommendations\r\n* Use 'pyperf system tune' before benchmarking. See https://github.com/psf/pyperf\r\nSegmentation fault (core dumped)\r\n```",
+          "created_at": "2025-04-19T12:00:47Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> Segmentation fault (core dumped)\r\n\r\nCan you show me the full build command please, `cmake --preset=libfuzzer -DBUILD_FOR_FUZZING=OFF -DBUILD_BENCH=ON && cmake --build build_fuzz -j$(nproc) && build_fuzz/bin/bench_bitcoin -filter='WalletMigration' --min-time=10000` passes for me on Ubuntu.",
+          "created_at": "2025-04-19T12:03:13Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> > Segmentation fault (core dumped)\r\n> \r\n> Can you show me the full build command please, `cmake --preset=libfuzzer -DBUILD_FOR_FUZZING=OFF -DBUILD_BENCH=ON && cmake --build build_fuzz -j$(nproc) && build_fuzz/bin/bench_bitcoin -filter='WalletMigration' --min-time=10000` passes for me on Ubuntu.\r\n\r\n```\r\n$ rm -rf build && cmake -B build -DBUILD_BENCH=ON\r\n$ cmake --build build -t bench_bitcoin\r\n$ ./build/bin/bench_bitcoin -filter=WalletMigration -min-time=100000\r\nWarning, results might be unstable:\r\n* CPU frequency scaling enabled: CPU 0 between 800.0 and 4,800.0 MHz\r\n* CPU governor is 'powersave' but should be 'performance'\r\n* Turbo is enabled, CPU frequency will fluctuate\r\n\r\nRecommendations\r\n* Use 'pyperf system tune' before benchmarking. See https://github.com/psf/pyperf\r\nSegmentation fault (core dumped)\r\n```",
+          "created_at": "2025-04-19T12:06:03Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks, I have updated the description, let me know if it answered your questions.\r\n\r\nShort answer anyway: we have to clean up regardless of the execution count - and the benchmark seems to have been designed for a single execution anyway, otherwise recreating the wallet might have been too costly.\r\n\r\nLet me know if you have a better idea.",
+          "created_at": "2025-04-19T21:15:19Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "Thanks, I didn't realize that there were multiple independent issues - makes sense now, Concept ACK.",
+          "created_at": "2025-04-20T02:15:00Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> On Windows, benchmark runs sporadically hung because the descriptor wallet and its companion watch-only wallet were never unloaded, remaining registered in the global WalletContext. This prevented the test harness from cleaning up its temporary directory.\r\n\r\nHmm, haven't dug deeper but this does not seem to be completely accurate. The `WalletContext` is not global. It is created at the beginning of the benchmark, just after creating the test context (which is the one that calls to the `fs::removal_all` that crashes during destruction).\r\n\r\nThat said, I think you could just construct a wallet loader instead of manually removing the wallets in the code we want to benchmark. The loader internally creates a `WalletContext` and unloads all wallets during destruction. E.g.\r\n```diff\r\ndiff --git a/src/bench/wallet_migration.cpp b/src/bench/wallet_migration.cpp\r\n--- a/src/bench/wallet_migration.cpp\r\n+++ b/src/bench/wallet_migration.cpp\r\n@@ -5,6 +5,7 @@\r\n #include <bench/bench.h>\r\n #include <kernel/chain.h>\r\n #include <interfaces/chain.h>\r\n+#include <interfaces/wallet.h>\r\n #include <node/context.h>\r\n #include <test/util/mining.h>\r\n #include <test/util/setup_common.h>\r\n@@ -21,9 +22,7 @@\r\n {\r\n     const auto test_setup = MakeNoLogFileContext<TestingSetup>();\r\n\r\n-    WalletContext context;\r\n-    context.args = &test_setup->m_args;\r\n-    context.chain = test_setup->m_node.chain.get();\r\n+    std::unique_ptr<interfaces::WalletLoader> loader = MakeWalletLoader(*test_setup->m_node.chain, test_setup->m_args);\r\n \r\n     // Number of imported watch only addresses\r\n     int NUM_WATCH_ONLY_ADDR = 20;\r\n@@ -63,6 +62,7 @@\r\n         batch.WriteKey(pubkey, key.GetPrivKey(), CKeyMetadata());\r\n     }\r\n \r\n+    WalletContext& context{*loader->context()};\r\n     bench.epochs(/*numEpochs=*/1).run([&context, &wallet] {\r\n         util::Result<MigrationResult> res = MigrateLegacyToDescriptor(std::move(wallet), /*passphrase=*/\"\", context, /*was_loaded=*/false);\r\n         assert(res);\r\n```\r\nAlso, if you want to double-ensure unload before test context destruction, you could manually delete the loader at the end of the benchmark function (outside the benchmark lambda).\r\n\r\n> The benchmark harness executed the benchmark lambda multiple times unless explicitly told not to. After the first invocation moved the wallet (std::move(wallet)), subsequent iterations operated on a moved-from object, leading to undefined behavior. While re-creating the wallet in each iteration would have worked, it defeats the purpose of measuring migration performance. Since the benchmark is already slow and likely intended to run only once, the iteration count was capped at one.\r\n\r\nWhen we run the benchmark in the CI, we provide the `-sanity-check` flag, which already sets `bench.epochs(1).epochIterations(1)`. While it’s good to also set this inside the benchmark for standalone runs, this change shouldn't be related to the CI issue.",
+          "created_at": "2025-04-20T17:13:42Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Is a benchmark that runs only once actually useful?",
+          "created_at": "2025-04-21T20:29:56Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Not sure, we can decide to delete it as well - I'll push tomorrow a fixed version based on @furszy's recommendation (but have to retest it first after my benchmarking servers free up again).\r\n@furszy, is this still relevant or would deleting it be simpler?",
+          "created_at": "2025-04-21T20:37:14Z"
+        },
+        {
+          "user": "achow101",
+          "body": "I guess it is useful as a spot check, but the accuracy is not very good.\r\n\r\nConcept ACK\r\n\r\nTested on Windows and it worked. Was also able to reproduce failure 3, but don't know how to reproduce failure 2. ",
+          "created_at": "2025-04-21T21:05:34Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> Not sure, we can decide to delete it as well - I'll push tomorrow a fixed version based on @furszy's recommendation (but have to retest it first after my benchmarking servers free up again).\r\n> @furszy, is this still relevant or would deleting it be simpler?\r\n\r\nI don't think anyone is planning to touch the legacy wallet code anymore, and the migration procedure no longer takes an hour either (which was the reason behind this benchmark creation). So I'd say it's no longer relevant as a benchmark.\r\n\r\nAlso, agree with achow. Since the introduction of the read-only BDB class, this benchmark no longer covers db reads either. So it's not realistically accurate.\r\n\r\nI believe we've kept it merely as a sanity check because it's the only test that will survive the annihilation of the legacy wallet code.",
+          "created_at": "2025-04-22T00:29:12Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks for the suggestions @furszy, @achow101 and @maflcko.\r\nUpdated the commits to use `MakeWalletLoader` instead of manually closing, and moved the `epochIterations(1)` after the CI change to obviate that the CI already does that.",
+          "created_at": "2025-04-22T10:55:05Z"
+        },
+        {
+          "user": "sedited",
+          "body": "> I believe we've kept it merely as a sanity check because it's the only test that will survive the annihilation of the legacy wallet code.\r\n\r\nSounds like this should be an actual test then instead of a benchmark, no?",
+          "created_at": "2025-04-22T11:02:05Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> Sounds like this should be an actual test then instead of a benchmark, no?\r\n\r\nI also asked the same.\r\nI suggest we fix and reenable full CI-validation first, and we can create a detailed test with proper asserts separately - since I'm not a wallet expert (yet?)",
+          "created_at": "2025-04-22T11:17:04Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review ACK cad39f86fb5a81f0e3b5116e8e989bab8af89718 🍥\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK cad39f86fb5a81f0e3b5116e8e989bab8af89718 🍥\r\nN0Yshc7sd+vM1UmJaQayP38FATXXYL4CaoysjnfZ5MKyq2UwVYCv3eW9US68YcgDTa8SUUMNXk3uHTj2PuXLAQ==\r\n```\r\n\r\n</details>\r\n\r\n",
+          "created_at": "2025-04-22T14:52:30Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> I believe we've kept it merely as a sanity check because it's the only test that will survive the annihilation of the legacy wallet code.\r\n\r\nBest bench-test ever. Just caught a bug in #31423. It seems we have no other migration test exercising a default named wallet with spendable and watch-only scripts.",
+          "created_at": "2025-04-24T23:41:20Z"
+        }
+      ]
+    },
+    {
+      "number": 32308,
+      "title": "ci: Drop no longer necessary `-Wno-error=array-bounds`",
+      "body": "The build log of the \"Linux->Windows cross\" CI job no longer shows any `-Warray-bounds` compiler warnings. Therefore, there's no need to suppress them with `-Wno-error=array-bounds`.\r\n\r\nI likely overlooked this when reviewing https://github.com/bitcoin/bitcoin/pull/29881, as I can run that CI job locally without such warnings even at commit 785649f3977517a4ba45c5d2fedfbda778fb52cb.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-04-19T08:05:05Z",
+      "updated_at": "2025-04-22T12:19:48Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32308",
+      "labels": [
+        "Windows",
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32308.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/32308#pullrequestreview-2779922820) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#30595](https://github.com/bitcoin/bitcoin/pull/30595) (kernel: Introduce initial C header API by TheCharlatan)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-04-19T08:05:08Z"
+        }
+      ]
+    },
+    {
+      "number": 32307,
+      "title": "Update netaddress.cpp",
+      "body": " Sets an internal network address based on a user-defined identifier. This approach ensures deterministic internal address generation, while avoiding accidental mismatches due to case or formatting variations.\r\n",
+      "state": "closed",
+      "user": "ta2ozg",
+      "created_at": "2025-04-19T00:53:46Z",
+      "updated_at": "2025-04-22T16:09:34Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32307",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32307.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\nBitcoin Core'un kendi string utils'i → Bitcoin Core's own string utils\n\n",
+          "created_at": "2025-04-19T00:53:49Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/40806939770</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-04-19T00:57:49Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 4,
+    "issues": 0
+  }
+}

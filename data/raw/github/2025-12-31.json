@@ -1,0 +1,172 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:44:20.695892+00:00",
+  "date": "2025-12-31",
+  "pull_requests": [
+    {
+      "number": 34186,
+      "title": "test: use dynamic port allocation in proxy tests",
+      "body": "Use `port=0` for dynamic port allocation in test framework components to avoid intermittent \"address already in use\" errors when running tests concurrently or when ports are stuck in TIME_WAIT state. Example: https://github.com/bitcoin/bitcoin/pull/29415#discussion_r2634509304\r\n\r\nChanges:\r\n\r\n  - Update `socks5.py` and `p2p.py` to support dynamic port allocation\r\n  - Convert `feature_proxy.py` and `feature_anchors.py` to use `port=0`",
+      "state": "closed",
+      "user": "w0xlt",
+      "created_at": "2025-12-31T17:03:39Z",
+      "updated_at": "2026-01-14T22:40:20Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34186",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34186.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [vasild](https://github.com/bitcoin/bitcoin/pull/34186#pullrequestreview-3649580710), [mzumsande](https://github.com/bitcoin/bitcoin/pull/34186#pullrequestreview-3656500771), [achow101](https://github.com/bitcoin/bitcoin/pull/34186#issuecomment-3752005241) |\n| Concept ACK | [theStack](https://github.com/bitcoin/bitcoin/pull/34186#issuecomment-3709446761) |\n| Stale ACK | [bensig](https://github.com/bitcoin/bitcoin/pull/34186#issuecomment-3702691274) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33954](https://github.com/bitcoin/bitcoin/pull/33954) (test: add functional test for outbound connection management by mzumsande)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-31T17:03:46Z"
+        },
+        {
+          "user": "bensig",
+          "body": "ACK 733df32\r\n\r\nTested on macOS - both feature_proxy.py and feature_anchors.py pass, including when run at the same time.",
+          "created_at": "2025-12-31T18:41:34Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Use `port=0` for dynamic port allocation in test framework components to avoid intermittent \"address already in use\" errors when running tests concurrently or when ports are stuck in TIME_WAIT state. Example: [#29415 (comment)](https://github.com/bitcoin/bitcoin/pull/29415#discussion_r2634509304)\r\n\r\nI don't think this change here avoids this class of error. For example, the rpc ports are still assigned in the old fashion, so this may still happen. Also, the code comment you are referring to is wrong:\r\n\r\n```py\r\n        # Tor ports are the highest among p2p/rpc/tor, so this should be the first available port.\r\n        ports_base = tor_port(MAX_NODES) + 1\r\n```\r\n\r\nWhat the code does is that it picks the first tor port of the next test to run.\r\n\r\nGenerally, calling one of the `*_port` helpers to get a port number, and then manually modifying it is confusing and brittle and should not be done. See also https://github.com/bitcoin/bitcoin/pull/33260, which tried to clean up this bad pattern.",
+          "created_at": "2026-01-01T17:36:05Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Sure, makes sense. Though, I still think the specific bug this is referring to in the pull description is a real bug in the code and the comment in the line above the bug is giving the wrong impression that the code would be fine.",
+          "created_at": "2026-01-02T07:58:24Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I left a comment here with what I think is the correct fix: https://github.com/bitcoin/bitcoin/pull/29415#discussion_r2657163318\r\n\r\n\r\n> > I don't think this change here avoids this class of error. For example, the rpc ports are still assigned in the old fashion, so this may still happen.\r\n> \r\n> This is not the scope of this PR, since also the `p2p_port()` calls in `test_runner.py` are not changed to dynamic port allocation here - this change only affects the socks5 proxy. But even if it remains the case that running functional tests in parallel (unless it's done under a single `test_runner.py` command) can lead to intermittent failures due to port collisions, this seem like a clear improvement.\r\n\r\nMaybe I am missing something obvious, but if parts of the tests use dynamic port assignment, and other parts of the tests use \"deterministic\" port assignment, then how will this not lead to *more* issues of the kind? For example, there could be a test which dynamically assigns port X, but the very next test to be started will call one of the `*_port()` functions, which happens to return this port as well. The test will fail, no?",
+          "created_at": "2026-01-02T10:02:07Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> Maybe I am missing something obvious, but if parts of the tests use dynamic port assignment, and other parts of the tests use \"deterministic\" port assignment, then how will this not lead to more issues of the kind?\r\n\r\nBy making sure that the ranges don't overlap: The `*_port()` functions with their formulas use ports from 11000 - 26000 by default, whereas ephemeral ports start at 32768 on Linux systems (49152 on some others systems). This means we don't have too much ports left for additional `*_port()` functions that could be added in the future. Note that the functional tests already make use of ephemeral ports for the python p2ps, so if there were collisions we should be seeing intermittent failures today irrespective of the changes discussed here. ",
+          "created_at": "2026-01-02T10:27:14Z"
+        },
+        {
+          "user": "theStack",
+          "body": "Concept ACK",
+          "created_at": "2026-01-05T08:41:50Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK ce63d37ebee8d062310a778c5efa6475814188e9",
+          "created_at": "2026-01-14T22:33:33Z"
+        }
+      ]
+    },
+    {
+      "number": 34185,
+      "title": "test: fix `feature_pruning` when built without wallet",
+      "body": "Fixes #34175\r\n\r\nIn `feature_pruning`, the`wallet_test` doesn't require any specific wallet functionality and this test is important for one of next ones (`test_scanblocks_pruned`). The reason is that it synchronizes the node 5 and, without this sync, `test_scanblocks_pruned` will fail since we expect `scanblocks` to fail due to `Block not available (pruned data)` and it doesn't happen without this sync.",
+      "state": "closed",
+      "user": "brunoerg",
+      "created_at": "2025-12-31T15:14:05Z",
+      "updated_at": "2026-01-15T19:15:14Z",
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34185",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34185.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [furszy](https://github.com/bitcoin/bitcoin/pull/34185#pullrequestreview-3647048919), [musaHaruna](https://github.com/bitcoin/bitcoin/pull/34185#pullrequestreview-3659067942), [w0xlt](https://github.com/bitcoin/bitcoin/pull/34185#pullrequestreview-3659079255), [achow101](https://github.com/bitcoin/bitcoin/pull/34185#issuecomment-3751672264) |\n| Stale ACK | [bensig](https://github.com/bitcoin/bitcoin/pull/34185#issuecomment-3702928480) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-31T15:14:13Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> the`wallet_test` doesn't require any specific wallet functionality...\r\n\r\nPerhaps consider giving this function a less confusing name?",
+          "created_at": "2025-12-31T15:23:22Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> if the function was meant to test wallet restarts during pruning, what about actually checking the wallet?\r\n\r\nSounds good, I'm going to address it. ",
+          "created_at": "2025-12-31T17:27:12Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "Force-pushed:\r\n\r\n- Added a proper check for wallet rescan (verifying `getwalletinfo`).\r\n- Renamed `wallet_test` to `test_wallet_rescan`.\r\n- Added a comment explaining why we do not skip `test_wallet_rescan` entirely if there is no wallet compiled.",
+          "created_at": "2025-12-31T18:20:01Z"
+        },
+        {
+          "user": "bensig",
+          "body": "ACK fa49789\r\n\r\nTested on macOS with ENABLE_WALLET=OFF - feature_pruning.py passes.\r\n\r\nnit: \"benefit of synchronization\" --> \"benefit from the synchronization\"",
+          "created_at": "2025-12-31T21:33:10Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> We should be able to fix this by adding another self.sync_blocks([self.nodes[0], self.nodes[5]], wait=5, timeout=300) call in the right place.\r\n\r\nJust a single `sync_blocks` call would not solve it, but anyway, I've changed the approach to a simpler one.\r\n\r\n- 9b57c8d - fix feature_pruning when built without wallet by moving the syncronization code from `wallet_test` to be done before calling `test_wallet` and the next tests that also need it (It avoids duplicated code and actions).\r\n- 9011083 - check wallet rescan properly in feature_pruning by checking \"scanning\" and \"lastprocessedblock\" from getwalletinfo RPC. Also, it renames `wallet_test` to `test_wallet_rescan`.",
+          "created_at": "2026-01-02T22:03:29Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "Force-pushed addressing https://github.com/bitcoin/bitcoin/pull/34185#discussion_r2666387213.",
+          "created_at": "2026-01-08T20:11:04Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "Force-pushed addressing https://github.com/bitcoin/bitcoin/pull/34185#discussion_r2673781437",
+          "created_at": "2026-01-08T20:40:18Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 8fb5e5f41ddf550a78b1253184d79a107097815a",
+          "created_at": "2026-01-14T20:53:18Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 30.x in #34283.",
+          "created_at": "2026-01-15T11:25:30Z"
+        }
+      ]
+    },
+    {
+      "number": 34184,
+      "title": "mining: add cooldown to createNewBlock() immediately after IBD",
+      "body": "At startup `isInitialBlockDownload()` stops returning true once there’s less than a day of blocks left to sync. Connected mining clients will receive a flood of new templates as these last blocks are connected.\r\n\r\nFix this by briefly pausing block template creation while the best header chain is ahead of the tip. If no tip update happens for one second, we stop waiting.\r\n\r\nIt's not safe to keep waiting, because a malicious miner could announce a header and delay revealing the block, causing all other miners using this software to stall.\r\n\r\nThe cooldown only applies to `createNewBlock()`, which is typically called once per connected client; `waitNext()` remains unchanged.\r\n\r\nFixes #33994\r\n\r\n",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-12-31T05:17:32Z",
+      "updated_at": "2026-01-13T13:12:05Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34184",
+      "labels": [
+        "Mining",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34184.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [bensig](https://github.com/bitcoin/bitcoin/pull/34184#issuecomment-3706545897) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33966](https://github.com/bitcoin/bitcoin/pull/33966) (refactor: disentangle miner startup defaults from runtime options by Sjors)\n* [#33965](https://github.com/bitcoin/bitcoin/pull/33965) (mining: fix -blockreservedweight shadows IPC option by Sjors)\n* [#33922](https://github.com/bitcoin/bitcoin/pull/33922) (mining: add getMemoryLoad() and track template non-mempool memory footprint by Sjors)\n* [#33819](https://github.com/bitcoin/bitcoin/pull/33819) (mining: getCoinbase() returns struct instead of raw tx by Sjors)\n* [#33795](https://github.com/bitcoin/bitcoin/pull/33795) (test: Ignore error message give from python because of PYTHON_GIL by kevkevinpal)\n* [#32420](https://github.com/bitcoin/bitcoin/pull/32420) (miner: drop dummy extraNonce in coinbase scriptSig for templates requested via IPC by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-31T05:23:12Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Switched to avoid mock time for the cooldown mechanism (it's possible, but would require additional refactoring).\r\n\r\nAdded a constraint to ignore alternative header branches. This probably doesn't matter in real life, but it does in tests. E.g. the assume_utxo test \"Check importing a snapshot where current chain-tip is not an ancestor of the snapshot block but has less work\" creates an alternative chain of blocks despite having better headers (but not their blocks). In real life this implies a giant block witholding attack.",
+          "created_at": "2025-12-31T07:28:35Z"
+        },
+        {
+          "user": "bensig",
+          "body": "ACK e8b01c43bb05f1a52adf1279280a744111b8dc45\r\n\r\nTested on macOS - `interface_ipc.py` passes.\r\n\r\nCode review:\r\n- Using `SteadyClock` for the cooldown (independent of mocktime) is the right call\r\n- `BestHeaderAheadOfActiveTip()` correctly uses ancestor check to ignore competing branches\r\n- 1s timeout prevents DoS from header-only attacks while still allowing catch-up during final IBD\r\n- \r\n\r\nNice fix for #33994 ",
+          "created_at": "2026-01-03T00:46:16Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2026-01-13T13:12:05Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 3,
+    "issues": 0
+  }
+}

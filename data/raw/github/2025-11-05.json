@@ -1,0 +1,342 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:28:50.448312+00:00",
+  "date": "2025-11-05",
+  "pull_requests": [
+    {
+      "number": 33796,
+      "title": "kernel: Expose `CheckTransaction` consensus validation function",
+      "body": "This PR exposes the consensus-level `CheckTransaction` function through the libbitcoinkernel C API and adds a corresponding C++ wrapper.\r\n\r\nCurrently, libkernel only provided script-level validation via `btck_script_pubkey_verify` and `ScriptPubkeyApi<>::Verify`. \r\n\r\nAFAIK there was no way to perform context-free consensus checks on a transaction’s structure (e.g., coinbase rules, money-range, duplicate inputs).\r\n\r\nThis change introduces a new API:\r\n\r\n```c\r\nint btck_check_transaction(const btck_Transaction* tx, btck_TxValidationState** out_state);\r\n```\r\n\r\nand a C++ convenience wrapper:\r\n\r\n```cpp\r\nstd::pair<bool, TxValidationState> btck::CheckTransaction(const Transaction& tx);\r\n```\r\n\r\nBoth follow the ownership and error-handling conventions established in `bitcoinkernel.h`.\r\n\r\nThe test suite is extended with cases covering:\r\n* coinbase scriptSig length bounds\r\n* empty vin / vout detection\r\n* negative or out-of-range output values\r\n* duplicate inputs\r\n* null prevouts in non-coinbase transactions\r\n\r\n",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2025-11-05T23:59:50Z",
+      "updated_at": "2025-12-27T17:44:19Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33796",
+      "labels": [
+        "Validation",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33796.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/33796#issuecomment-3496583496), [janb84](https://github.com/bitcoin/bitcoin/pull/33796#pullrequestreview-3472013748) |\n| Approach ACK | [yuvicc](https://github.com/bitcoin/bitcoin/pull/33796#pullrequestreview-3437677428) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33908](https://github.com/bitcoin/bitcoin/pull/33908) (kernel: add context‑free block validation API (`btck_check_block_context_free`) with POW/Merkle flags by w0xlt)\n* [#33891](https://github.com/bitcoin/bitcoin/pull/33891) (kernel: Expose reusable `PrecomputedTransactionData` in script validation by joshdoman)\n* [#33856](https://github.com/bitcoin/bitcoin/pull/33856) (kernel, validation: Refactor ProcessNewBlockHeaders to return BlockValidationState by yuvicc)\n* [#33847](https://github.com/bitcoin/bitcoin/pull/33847) (kernel: Improve logging API by ryanofsky)\n* [#33822](https://github.com/bitcoin/bitcoin/pull/33822) (kernel: Add block header support and validation by yuvicc)\n* [#33779](https://github.com/bitcoin/bitcoin/pull/33779) (ci, iwyu: Fix warnings in `src/kernel` and treat them as errors by hebasto)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T23:59:55Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK on adding more checks. I am not sure how useful this check by itself is though, since it lacks finality, inputs, sigops, amount + fee, and script checks. Are you planning on adding these too and if not, what is the purpose served from surfacing the context-free checks, but not the others? \r\n\r\nI think the unit tests are going a bit too far. We don't have to verify again that our validation logic works internally and should instead just verify that the function's contract is correct. If you want to check that the mapping for each of the result enums is correct maybe pass in a few hard-coded transactions instead? We do the same in our unit tests too so maybe just reuse a few of the vectors from test/data/tx_invalid.json?\r\n",
+          "created_at": "2025-11-06T11:01:14Z"
+        },
+        {
+          "user": "w0xlt",
+          "body": "> I am not sure how useful this check by itself is … what is the purpose served from surfacing the context‑free checks, but not the others?\r\n\r\nThe new API intentionally exposes only the context‑free consensus predicate (`consensus/tx_check::CheckTransaction`) so callers can **fail fast** on malformed transactions without needing a kernel context, UTXO set, or policy knobs.\r\n\r\nThis gives library users (indexers, gateways, alternative mempool layers, etc.) a **cheap pre‑filter** to catch structural rule violations like empty vin/vout, out‑of‑range amounts, coinbase scriptSig length bounds, duplicate inputs, or null prevouts in non‑coinbase txs—before doing any stateful or expensive work. \r\n\r\nScript checks are already available via `btck_script_pubkey_verify` in this API; inputs/fees/sigops/finality all need UTXO and/or chain context and are out of scope for a context‑free entry point.\r\n\r\n> think the unit tests are going a bit too far … instead just verify that the function’s contract is correct.\r\n\r\nAgreed. This can be simplified.\r\n",
+          "created_at": "2025-11-06T18:44:12Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-12-27T17:44:18Z"
+        }
+      ]
+    },
+    {
+      "number": 33795,
+      "title": "test: Ignore error message give from python because of PYTHON_GIL",
+      "body": "### Description\r\nI was able to reproduce this issue https://github.com/bitcoin/bitcoin/issues/33582\r\nWe should ignore the warning message if `PYTHON_GIL` is not set, instead of the test being abruptly stopped\r\n\r\n### When `PYTHON_GIL` is `0` or `1` or not set\r\n```\r\nPYTHON_GIL=1 ./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\nor \r\nPYTHON_GIL=0 ./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\nor\r\n./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\n\r\nTemporary test directory at /tmp/test_runner_₿_🏃_20251105_180523\r\nWARNING! There is already a bitcoind process running on this system. Tests may fail unexpectedly due to resource contention!\r\nRemaining jobs: [interface_ipc.py]\r\n1/1 - interface_ipc.py passed, Duration: 13 s\r\n\r\nTEST             | STATUS    | DURATION\r\n\r\ninterface_ipc.py | ✓ Passed  | 13 s\r\n\r\nALL              | ✓ Passed  | 13 s (accumulated)\r\nRuntime: 13 s\r\n```",
+      "state": "open",
+      "user": "kevkevinpal",
+      "created_at": "2025-11-05T23:13:29Z",
+      "updated_at": "2026-01-13T13:17:40Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33795",
+      "labels": [
+        "Tests",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33795.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [ryanofsky](https://github.com/bitcoin/bitcoin/pull/33795#pullrequestreview-3461291850) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34184](https://github.com/bitcoin/bitcoin/pull/34184) (mining: add cooldown to createNewBlock() immediately after IBD by Sjors)\n* [#33966](https://github.com/bitcoin/bitcoin/pull/33966) (refactor: disentangle miner startup defaults from runtime options by Sjors)\n* [#33965](https://github.com/bitcoin/bitcoin/pull/33965) (mining: fix -blockreservedweight shadows IPC option by Sjors)\n* [#33922](https://github.com/bitcoin/bitcoin/pull/33922) (mining: add getMemoryLoad() and track template non-mempool memory footprint by Sjors)\n* [#33819](https://github.com/bitcoin/bitcoin/pull/33819) (mining: getCoinbase() returns struct instead of raw tx by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T23:13:36Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "As mentioned in the issue, I don't see the problem that free threading solves for us. In fact, it is likely going to  cause more issues that are not worth it to debug nor fix.\r\n\r\nFree threading could make sense if there is a heavy multithreaded production workload. However, I don't see this in the functional test, which are single-threaded, or at most double threaded?\r\n\r\nI'd say we should just require the GIL for all Python code. I can't see Python removing the GIL any time soon without controversy. And if they do, workarounds such as this one won't work and are not needed anyway.",
+          "created_at": "2025-11-06T06:54:50Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "I'd be interested to know if the test passes with GIL force-disabled with `PYTHON_GIL=0` or `-Xgil=0`. If it does, then maybe it will be trivial for a new version of pycapnp to declare it is compatible with free-threaded python and this warning will fix itself.\r\n\r\nIn any case, I think it would probably be best just to suppress this warning with [`warnings.filterwarnings`](`https://docs.python.org/3/library/warnings.html#warnings.filterwarnings) instead of skipping the test, since we are ok with python auto-enabling the GIL for this test, and maybe even want that. ChatGPT suggested:\r\n\r\n```python\r\nwith warnings.catch_warnings():\r\n    warnings.filterwarnings(\r\n        \"ignore\",\r\n        message=r\"The global interpreter lock .* capnp\\.lib\\.capnp\",\r\n        category=RuntimeWarning,\r\n        module=r\"importlib\\._bootstrap\",\r\n    )\r\n    import capnp\r\n```\r\n\r\nI think it only makes sense to skip the test if `import capnp` actually fails.",
+          "created_at": "2025-11-06T12:21:48Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "I went with the suggestion to suppress the warning here [4ab4fd7](https://github.com/bitcoin/bitcoin/pull/33795/commits/4ab4fd76dd861d84715079aa9118519d14362894)\r\n\r\nNot sure how verbose you want me to be with the `message` I can make it more exact to the message in the error if wanted",
+          "created_at": "2025-11-06T17:56:50Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/actions/runs/19144971669/job/54720048643</sub>\n<sub>LLM reason (✨ experimental): Python lint errors (ruff) halted CI, due to unused imports in test/functional/interface_ipc.py.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-11-06T18:35:55Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "Would it make sense to add a TODO to remove the warning suppression once GIL is supported in the capnp library?",
+          "created_at": "2025-11-07T14:41:01Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/actions/runs/19171518120/job/54805067357</sub>\n<sub>LLM reason (✨ experimental): (empty)</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-11-07T14:50:30Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "Added a TODO to remove the warning suppression once `capnp` can run safely without the GIL\r\n\r\n[ef268ee](https://github.com/bitcoin/bitcoin/pull/33795/commits/ef268ee288c04a31dd802c4bb729a0c2e6e64786)",
+          "created_at": "2025-11-10T16:34:19Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2026-01-13T13:17:40Z"
+        }
+      ]
+    },
+    {
+      "number": 33793,
+      "title": "test: move create_malleated_version() to messages.py for reuse",
+      "body": "Move `create_malleated_version()` from `p2p_orphan_handling.py` to `test_framework/messages.py` so that it can be reused by other tests.\r\n\r\n---\r\n\r\nThis is part of [#29415 Broadcast own transactions only via short-lived Tor or I2P connections](https://github.com/bitcoin/bitcoin/pull/29415). Putting it in its own PR to reduce the size of #29415 and because it does not depend on the other commits from there.",
+      "state": "closed",
+      "user": "vasild",
+      "created_at": "2025-11-05T15:14:45Z",
+      "updated_at": "2025-11-07T11:20:01Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33793",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33793.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/33793#issuecomment-3492252019), [brunoerg](https://github.com/bitcoin/bitcoin/pull/33793#pullrequestreview-3423238890), [w0xlt](https://github.com/bitcoin/bitcoin/pull/33793#pullrequestreview-3425046399), [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/33793#pullrequestreview-3426229391), [rkrux](https://github.com/bitcoin/bitcoin/pull/33793#pullrequestreview-3427083745), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33793#issuecomment-3496528310) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#29415](https://github.com/bitcoin/bitcoin/pull/29415) (Broadcast own transactions only via short-lived Tor or I2P connections by vasild)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T15:14:51Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review ACK 2bd155e6ee7e3cabd76083ac921b34bb45d98769 🍨\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK 2bd155e6ee7e3cabd76083ac921b34bb45d98769 🍨\r\nopEEp6mbKyDWYRPD0JRuvAz7Trpm3hwooUJFnYCYjUMqlvnSiY69dl9k2bSOlD8FjXYLSPnYPTqvRzRuQMU4CA==\r\n```\r\n\r\n</details>\r\n\r\n",
+          "created_at": "2025-11-05T16:43:08Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK 2bd155e6ee7e3cabd76083ac921b34bb45d98769\r\n\r\nRecreated locally, ended up with the same.\r\nThe move is correct, only the method name is changed. The imports are correctly sorted and adjusted.",
+          "created_at": "2025-11-06T10:50:04Z"
+        }
+      ]
+    },
+    {
+      "number": 33792,
+      "title": "net_processing: reorder the code that handles the VERSION message",
+      "body": "Change the order in which code snippets are executed as a result of receiving the `VERSION` message. Move the snippets that do `MakeAndPushMessage()` near the end. This makes it easier to interrupt the execution when no messages should be sent as a response to the `VERSION` messages, in private broadcast connections.\r\n\r\nThis is a non-functional change.\r\n\r\n---\r\n\r\nThis is part of [#29415 Broadcast own transactions only via short-lived Tor or I2P connections](https://github.com/bitcoin/bitcoin/pull/29415). Putting it in its own PR to reduce the size of #29415 and because it does not depend on the other commits from there.",
+      "state": "closed",
+      "user": "vasild",
+      "created_at": "2025-11-05T15:01:13Z",
+      "updated_at": "2025-12-06T13:52:34Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33792",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33792.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/33792#pullrequestreview-3461290288), [andrewtoth](https://github.com/bitcoin/bitcoin/pull/33792#pullrequestreview-3465930909), [mzumsande](https://github.com/bitcoin/bitcoin/pull/33792#pullrequestreview-3473576018) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#29415](https://github.com/bitcoin/bitcoin/pull/29415) (Broadcast own transactions only via short-lived Tor or I2P connections by vasild)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T15:01:18Z"
+        },
+        {
+          "user": "vasild",
+          "body": "This is just moving code around. Easier reviewed with `~/.gitconfig` like:\r\n\r\n```gitconfig\r\n[diff]\r\n        colorMoved = dimmed-zebra\r\n        colorMovedWS = allow-indentation-change\r\n```",
+          "created_at": "2025-11-05T15:02:06Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @ajtowns ",
+          "created_at": "2025-11-07T12:26:17Z"
+        },
+        {
+          "user": "vasild",
+          "body": "Good question, I guess it is a bit obscure. Let me elaborate. So, when we receive the `VERSION` message, its handling (inside the `if (msg_type == NetMsgType::VERSION) {`) currently goes like this:\r\n\r\n```\r\nif (...)\r\n    A\r\nif (...)\r\n    MakeAndPushMessage()\r\nif (...)\r\n    B\r\nif (...)\r\n    MakeAndPushMessage()\r\nif (...)\r\n    some stuff that better be avoided for private broadcast connections\r\n```\r\n\r\nFor private broadcast we don't want to push any extra messages. To do that I took the approach to reorder the code like:\r\n\r\n```\r\nif (...)\r\n    A\r\nif (...)\r\n    B\r\n\r\nif this is private broadcast connection // newly added condition\r\n    return, end here\r\n\r\nif (...)\r\n    MakeAndPushMessage()\r\nif (...)\r\n    MakeAndPushMessage()\r\nif (...)\r\n    some stuff that better be avoided for private broadcast connections\r\n```\r\nanother option would be to add \"is private broadcast\" check on every of the `if`s, like:\r\n```\r\nif (...)\r\n    A\r\nif (... and not private broadcast)\r\n    MakeAndPushMessage()\r\nif (...)\r\n    B\r\nif (... and not private broadcast)\r\n    MakeAndPushMessage()\r\nif (... and not private broadcast)\r\n    some stuff that better be avoided for private broadcast connections\r\n```\r\nor something else? I guess this can be achieved in more than one way. No strong opinion, the aim is to avoid calling some of the code.\r\n\r\nBtw, `MakeAndPushMessage()` calls `CConnman::PushMessage()` which ignores messages other than the needed ones for private broadcast connections.",
+          "created_at": "2025-11-13T11:15:07Z"
+        },
+        {
+          "user": "vasild",
+          "body": "> What’s the rationale for moving `m_addrman.Good(pfrom.addr)` earlier ?\r\n\r\nHmm, wait! `m_addrman.Good()` need not be earlier, it is one of the \"some stuff that better be avoided\". Then this can be simplified? :bulb: ",
+          "created_at": "2025-11-13T11:30:11Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`431dd57d67...52149b0e2b`: drop some hunks from the diff, `m_addrman.Good()` need not be moved around. Thanks, @w0xlt!",
+          "created_at": "2025-11-13T17:48:59Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Similar to #33565, I don't see why it is useful to have this commit be its own PR.",
+          "created_at": "2025-11-21T22:12:17Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "This is going to get merged via #29415, which at this point, is getting ACKs.",
+          "created_at": "2025-12-06T13:52:34Z"
+        }
+      ]
+    },
+    {
+      "number": 33791,
+      "title": "kernel: Use enumeration type for flags argument",
+      "body": "Just a small followup from https://github.com/bitcoin/bitcoin/pull/30595#issuecomment-3485634089. ",
+      "state": "closed",
+      "user": "sedited",
+      "created_at": "2025-11-05T14:17:15Z",
+      "updated_at": "2025-11-05T15:04:57Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33791",
+      "labels": [
+        "Validation"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33791.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [rkrux](https://github.com/bitcoin/bitcoin/pull/33791#pullrequestreview-3422514325), [alexanderwiederin](https://github.com/bitcoin/bitcoin/pull/33791#issuecomment-3491703847), [stickies-v](https://github.com/bitcoin/bitcoin/pull/33791#pullrequestreview-3422655653) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T14:17:21Z"
+        },
+        {
+          "user": "alexanderwiederin",
+          "body": "ACK https://github.com/bitcoin/bitcoin/pull/33791/commits/ed5720509f03ddd7f9158b9adf0d8fd7f56c8578",
+          "created_at": "2025-11-05T14:58:37Z"
+        }
+      ]
+    },
+    {
+      "number": 33790,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "Ahfaz001",
+      "created_at": "2025-11-05T13:00:24Z",
+      "updated_at": "2025-11-06T01:43:29Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33790",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-11-05T13:00:29Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33790.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T13:00:31Z"
+        }
+      ]
+    },
+    {
+      "number": 33789,
+      "title": "doc: add cmake help option in Windows build docs",
+      "body": "Follow-up to #33088.\r\n\r\nAdds `cmake -B build -LH` documentation to Windows build guides, similar to Unix build documentation.\r\n\r\nBased on the suggestion and example provided by stickies-v in #33088, with minor adjustment to match existing indented code block format in `build-windows.md`.\r\n\r\nTested for:\r\n- WSL Ubuntu with mingw-w64 cross-compilation  \r\n- Windows 11 with Visual Studio 2022 (MSVC)",
+      "state": "closed",
+      "user": "frankomosh",
+      "created_at": "2025-11-05T08:28:39Z",
+      "updated_at": "2025-11-07T14:19:24Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33789",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33789.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [stickies-v](https://github.com/bitcoin/bitcoin/pull/33789#pullrequestreview-3421363751), [hebasto](https://github.com/bitcoin/bitcoin/pull/33789#pullrequestreview-3421455626), [waketraindev](https://github.com/bitcoin/bitcoin/pull/33789#issuecomment-3491311987), [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/33789#pullrequestreview-3422616007) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T08:28:47Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "ACK 9577daa",
+          "created_at": "2025-11-05T13:47:23Z"
+        }
+      ]
+    },
+    {
+      "number": 33788,
+      "title": "[29.x] Backport fixes for CVE-2025-46598",
+      "body": "",
+      "state": "closed",
+      "user": "luke-jr",
+      "created_at": "2025-11-05T01:31:52Z",
+      "updated_at": "2026-01-12T19:41:30Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33788",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33788.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [sipa](https://github.com/bitcoin/bitcoin/pull/33788#issuecomment-3725712498), [darosior](https://github.com/bitcoin/bitcoin/pull/33788#pullrequestreview-3644359200), [glozow](https://github.com/bitcoin/bitcoin/pull/33788#issuecomment-3740161583) |\n| Concept ACK | [bensig](https://github.com/bitcoin/bitcoin/pull/33788#issuecomment-3711853202) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T01:31:58Z"
+        },
+        {
+          "user": "bensig",
+          "body": "Useful to anyone who wants to continue to run core v29... not confident enough to ACK consensus-adjacent code as a newer contributor, but the backport mechanics look clean.\r\n\r\n**What I checked:**\r\n\r\n- All 11 commits properly reference upstream via `Rebased-From:` headers\r\n- Traces back to merged PRs #33105, #32473, #33050\r\n- Builds cleanly on 29.x\r\n- Unit tests pass (sighash_tests, transaction_tests, script_tests)\r\n- Functional tests pass (p2p_invalid_tx, p2p_segwit, feature_cltv, feature_dersig, feature_nulldummy, mempool_accept)\r\n- Reviewed the SigHashCache indexing math (6 modes map correctly to array bounds)\r\n- SpendsNonAnchorWitnessProg logic looks correct for native + P2SH-wrapped witness programs\r\n\r\ncc: @glozow @sipa in case you have bandwidth to look at this since you reviewed the original PRs.",
+          "created_at": "2026-01-05T19:45:08Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Concept ACK, will review in some more detail soon.",
+          "created_at": "2026-01-07T22:41:14Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Code review ACK 6f136cd3914b001752cce02adde00fccaed0ad48\r\n\r\nI have done the rebase myself, and hit the exact same necessary modifications as @luke-jr commented on above.",
+          "created_at": "2026-01-08T20:43:56Z"
+        },
+        {
+          "user": "glozow",
+          "body": "ACK 6f136cd3914b001752cce02adde00fccaed0ad48, looks correct",
+          "created_at": "2026-01-12T19:30:30Z"
+        }
+      ]
+    },
+    {
+      "number": 33787,
+      "title": "build: Upgrade depends to Qt6",
+      "body": "Upgrades the depends system to build Qt 6.7.3, preparing the codebase for Qt6 compatibility.\r\n\r\n## Changes\r\n\r\n- Add Qt6 (6.7.3) package definitions and patches\r\n- Update Qt build configuration to support both Qt5 and Qt6\r\n- Add automatic Qt version detection in depends toolchain\r\n- Add libxcb_util_cursor package for Qt6 Linux builds\r\n- Remove obsolete Qt5-specific patches\r\n- Add initial `wintaskbar` infrastructure for Qt6 compatibility, which is covered in https://github.com/bitcoinknots/bitcoin/pull/215\r\n\r\n## Details\r\n\r\nThis PR modernizes the Qt dependency infrastructure without changing application behavior. The Qt6 upgrade provides:\r\n- Long-term Qt support (Qt5 reaches end-of-life in 2025)\r\n- Better compatibility with modern platforms\r\n- Foundation for future Qt6-specific features",
+      "state": "closed",
+      "user": "kwsantiago",
+      "created_at": "2025-11-05T00:51:50Z",
+      "updated_at": "2025-11-05T11:39:55Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33787",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-11-05T00:52:08Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33787.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-05T00:52:11Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 9,
+    "issues": 0
+  }
+}

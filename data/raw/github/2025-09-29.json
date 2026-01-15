@@ -1,0 +1,450 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:18:36.381678+00:00",
+  "date": "2025-09-29",
+  "pull_requests": [
+    {
+      "number": 33506,
+      "title": "test: sock: Enable socket pair tests on Windows",
+      "body": "Some `class Sock`  tests were previously disabled because Windows lacks [`socketpair(2)`](https://man7.org/linux/man-pages/man2/socketpair.2.html). This PR adds a `CreateSocketPair()` helper which creates a sender socket and receiver socket with a TCP connection, enabling these test cases for Windows.\r\n\r\nThis change is generally an improvement, but is also broken out of a [branch](github.com/davidgumberg/bitcoin/tree/2025-09-02-0xB10C-prefill-rebase) that does compact block prefilling up to the available bytes in the connection's current TCP window (see [delving post](https://delvingbitcoin.org/t/stats-on-compact-block-reconstructions/1052/34)). \r\n\r\nCreating connected socket pairs is useful for added tests in that branch that validate querying the current TCP window state, and without this change those tests don't run on Windows.",
+      "state": "open",
+      "user": "davidgumberg",
+      "created_at": "2025-09-29T23:40:15Z",
+      "updated_at": "2025-12-19T00:37:21Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33506",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33506.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/33506#pullrequestreview-3287055021) |\n| Stale ACK | [laanwj](https://github.com/bitcoin/bitcoin/pull/33506#pullrequestreview-3584811580) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible places where named args for integral literals may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- [sender->Send(msg, msg_len, 0)] in src/test/sock_tests.cpp\n- [receiver->Recv(recv_buf, sizeof(recv_buf), 0)] in src/test/sock_tests.cpp\n\n\n\n<sup>2025-12-19</sup>\n",
+          "created_at": "2025-09-29T23:40:22Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "Rebased to split into two commits, a mostly refactor commit https://github.com/bitcoin/bitcoin/pull/33506/commits/06a5140e96a75948cd2e490b414419a5485f2cfd and the commit that adds the new `CreateSocketPair()` for windows and enables Windows socket tests https://github.com/bitcoin/bitcoin/pull/33506/commits/7586205c4a5e94c7e2357d8928c68dfab95dc47a",
+          "created_at": "2025-09-30T19:34:19Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "Concept ACK. Should we keep using `socketpair` on platforms that support it?\r\n(One reason to do this is that TCP ports might be heavily contended resource on CI systems, though it should be okay)",
+          "created_at": "2025-10-23T14:11:02Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "[[9577508..15cefcd](https://github.com/bitcoin/bitcoin/compare/95775080da6a2c64a023623a060cd89760d6b762..15cefcd7d3729b3af59f63b1ba406b5dfb405e99)] Pushed to address @laanwj's [suggestion.](https://github.com/bitcoin/bitcoin/pull/33506#discussion_r2455303840).\r\n\r\n> Should we keep using socketpair on platforms that support it?\r\n(One reason to do this is that TCP ports might be heavily contended resource on CI systems, though it should be okay)\r\n\r\nMy gut reaction is that it would not be worth the extra code to do this, but I don't feel very strongly and am happy to add this if you think it's better.",
+          "created_at": "2025-12-10T18:44:04Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "> My gut reaction is that it would not be worth the extra code to do this, but I don't feel very strongly and am happy to add this if you think it's better.\r\n\r\nNot 100% sure. As long as this is only used for the tests, like now, i don't mind it being like this. But if it were to be used for anything in the actual code, i think a socket pair should be a socket pair. Using a fallback work-around for functionality that's plainly supported seems strange.",
+          "created_at": "2025-12-16T20:19:23Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> > My gut reaction is that it would not be worth the extra code to do this, but I don't feel very strongly and am happy to add this if you think it's better.\r\n> \r\n> Not 100% sure. As long as this is only used for the tests, like now, i don't mind it being like this. But if it were to be used for anything in the actual code, i think a socket pair should be a socket pair. Using a fallback work-around for functionality that's plainly supported seems strange.\r\n\r\n100% agree that if we were using `socketpair()` in non-test code that we should do this. I also recall now that part of the reason I've done it this way is that some of the tests I'm adding in my branch depend on being able to create and connect the sockets separately, and making TCP sockets instead of UNIX sockets which can't be done with `socketpair()`. This is useful so that e.g. sockopt's can be set that matter for the connection handshake: https://github.com/bitcoin/bitcoin/blob/132d41a220c8e99ecf4b0c60a144606d32dd28ae/src/test/sock_tests.cpp#L195-L210\r\n\r\nEven though it's probably a bad idea to make changes in the present to suit a future use case that might never come about, I think it is generally useful to be able to create and connect the sockets separately in `sock_tests.cpp` and to be able to create TCP sockets like the application does.",
+          "created_at": "2025-12-16T22:38:27Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "> Even though it's probably a bad idea to make changes in the present to suit a future use case that might never come about, I think it is generally useful to be able to create and connect the sockets separately in sock_tests.cpp and to be able to create TCP sockets like the application does.\r\n\r\nIf it's intentionally TCP then calling it `tcp_socket_pair` might be even better. So that no one decides to make this improvement in the meantime.",
+          "created_at": "2025-12-17T09:03:18Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> calling it `tcp_socket_pair` might be even better\r\n\r\nThanks, fixed!\r\n",
+          "created_at": "2025-12-19T00:37:21Z"
+        }
+      ]
+    },
+    {
+      "number": 33505,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "JACOBO10S",
+      "created_at": "2025-09-29T20:50:34Z",
+      "updated_at": "2025-09-29T21:12:50Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33505",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-09-29T20:50:39Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33505.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- you wallet -> your wallet [possessive pronoun error; \"your wallet\" is correct in \"deployed by your wallet....FOREVER!\"]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-09-29T20:50:42Z"
+        },
+        {
+          "user": "JACOBO10S",
+          "body": "next one ",
+          "created_at": "2025-09-29T20:50:42Z"
+        }
+      ]
+    },
+    {
+      "number": 33504,
+      "title": "Mempool: Do not enforce TRUC checks on reorg",
+      "body": "This was the intended behavior but our tests didn't cover the scenario where in-block transactions themselves violate TRUC topological constraints.\r\n\r\nThe behavior in master will potentially lead to many erroneous evictions during a reorg, where evicted TRUC packages may be very high feerate and make sense to mine all together in the next block and are well within the normal anti-DoS chain limits.\r\n\r\nThis issue exists since the merge of https://github.com/bitcoin/bitcoin/pull/28948/files#diff-97c3a52bc5fad452d82670a7fd291800bae20c7bc35bb82686c2c0a4ea7b5b98R956",
+      "state": "closed",
+      "user": "instagibbs",
+      "created_at": "2025-09-29T19:36:40Z",
+      "updated_at": "2025-10-03T15:19:02Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33504",
+      "labels": [
+        "Mempool"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33504.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [sdaftuar](https://github.com/bitcoin/bitcoin/pull/33504#issuecomment-3352132872), [glozow](https://github.com/bitcoin/bitcoin/pull/33504#pullrequestreview-3281925415), [ismaelsadeeq](https://github.com/bitcoin/bitcoin/pull/33504#pullrequestreview-3293966051) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32587](https://github.com/bitcoin/bitcoin/pull/32587) (test: Fix reorg patterns in tests to use proper fork-based approach by yuvicc)\n* [#28676](https://github.com/bitcoin/bitcoin/pull/28676) (Cluster mempool implementation by sdaftuar)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-29T19:36:46Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "cc @glozow @sdaftuar candidate for backport(s)? Should be trivial for all effected versions.",
+          "created_at": "2025-09-29T19:37:02Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "https://github.com/bitcoin/bitcoin/actions/runs/18108538923/job/51529011305?pr=33504#step:8:1778:\r\n```bash\r\nError processing input \"/Users/runner/work/bitcoin/bitcoin/ci/scratch/qa-assets/fuzz_corpora/tx_pool/93f59991917f0dc980deabf80d553cf4573ebdd5\"\r\n\r\ntest/util/txmempool.cpp:191 CheckMempoolTRUCInvariants: Assertion `entry.GetCountWithDescendants() <= TRUC_DESCENDANT_LIMIT' failed.\r\nError processing input \"/Users/runner/work/bitcoin/bitcoin/ci/scratch/qa-assets/fuzz_corpora/tx_pool/93f59991917f0dc980deabf80d553cf4573ebdd5\"\r\n\r\n⚠️ Failure generated from target with exit code 1: ['/Users/runner/work/bitcoin/bitcoin/ci/scratch/build-aarch64-apple-darwin23.6.0/bin/fuzz', PosixPath('/Users/runner/work/bitcoin/bitcoin/ci/scratch/qa-assets/fuzz_corpora/tx_pool')]\r\n```",
+          "created_at": "2025-09-29T19:48:09Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "@fanquake thanks, TRUC topology is no longer actually being stopped when limits are bypassed(when a reorg happens), so invariants checks for TRUC may fail now. I now removed the bypass_limits flags from all but one harness because they're not actually being used to model reorgs. If we want to fuzz reorgs, we should do that instead.",
+          "created_at": "2025-09-29T20:12:48Z"
+        },
+        {
+          "user": "sdaftuar",
+          "body": "ACK 06df14ba75be5f48cf9c417424900ace17d1cf4d\r\n",
+          "created_at": "2025-09-30T13:21:32Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 30.x in #33473.",
+          "created_at": "2025-10-02T13:04:49Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #33474.",
+          "created_at": "2025-10-02T14:19:09Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "I'll open a follow-up soon thanks for the in depth review here",
+          "created_at": "2025-10-03T13:13:08Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 28.x in #33535.",
+          "created_at": "2025-10-03T15:19:02Z"
+        }
+      ]
+    },
+    {
+      "number": 33503,
+      "title": "doc: add clarifying comment that creating the .bitcoin file is to avoid any mainnet datadir access",
+      "body": "referenced from https://github.com/bitcoin/bitcoin/pull/33486#issuecomment-3347684298\r\n\r\nThis adds a clarifying comment to tell the reader that the creation of the `${HOME}/.bitcoin` file is to ensure that there is no mainnet datadir access happening from any of the tests",
+      "state": "closed",
+      "user": "kevkevinpal",
+      "created_at": "2025-09-29T18:03:17Z",
+      "updated_at": "2025-10-23T14:59:36Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33503",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33503.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-29T18:03:23Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "closing due to lack of interest and may not add any substantial value ",
+          "created_at": "2025-10-23T14:59:36Z"
+        }
+      ]
+    },
+    {
+      "number": 33502,
+      "title": ".",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "23Konradbase",
+      "created_at": "2025-09-29T17:42:27Z",
+      "updated_at": "2025-09-29T17:44:04Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33502",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "23Konradbase",
+          "body": "good job",
+          "created_at": "2025-09-29T17:42:38Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-09-29T17:42:41Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33502.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-29T17:42:44Z"
+        }
+      ]
+    },
+    {
+      "number": 33500,
+      "title": "p2p: implement sender-initiated package relay",
+      "body": "[BIP 331](https://github.com/bitcoin/bips/blob/master/bip-0331.mediawiki) implements receiver-initiated package relay, where receivers can request missing information about packages. However, this requires excessive round trips. If the sender knows that it is giving the receiver a transaction for which it doesn't have the ancestors, it should be able to just send a package (containing the transaction and the unknown ancestor(s)) instead. \r\n\r\nThis PR could potentially reduce some bandwidth, and could also reduce the number of transactions in the orphanage. However, if a node is sending packages that the receiver already knows about, this could increase significant bandwidth. As a result, this PR needs more testing. I did some initial testing between two nodes with `sendpackages` enabled, and it showed that no redundant packages were sent, which indicates that this may be a useful feature. \r\n\r\nThis PR implements the following:\r\n- signaling support for `sendpackages` and the corresponding negotiation logic\r\n- a node will send a `pkgtxns` message to the receiver node if the ancestor of a transaction that has been requested is not in the receiver node's `m_tx_inventory_known_filter`\r\n- nodes can process `pkgtxns` messages\r\n- the maximum number of transactions that can be sent through sender-initialized package relay has been set to 2, although this can be changed in the future\r\n- adds logging, functional tests, and fuzzing (for `ReceivedPackage`)\r\n\r\nThank you to glozow for her help with this PR! ",
+      "state": "open",
+      "user": "ishaanam",
+      "created_at": "2025-09-29T16:47:55Z",
+      "updated_at": "2025-10-21T08:43:34Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33500",
+      "labels": [
+        "P2P",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33500.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- \"Whether this node enable package relay and enforces package-related protocol\" -> \"Whether this node enables package relay and enforces package-related protocol\" [subject-verb agreement: \"node\" -> \"enables\"]\n- \"sender-initalized\" -> \"sender-initialized\" [spelling: \"initalized\" -> \"initialized\"] (occurs in comments above MAX_SENDER_INIT_PKG_SIZE and elsewhere) \n- \"sender-inital\" -> \"sender-initial\" [spelling: \"inital\" -> \"initial\"] (in the comment line that begins \"Maximum number of transactions that can be in a sender-inital...\")\n- \"We may remove certain transaction from the package that we already\" -> \"We may remove certain transactions from the package that we already\" [number agreement: \"transaction\" -> \"transactions\"]\n- \"List versions of each sendpackages received\" -> \"List of versions of each sendpackages message received\" [clarity: make it a proper noun phrase and clarify \"sendpackages\" refers to messages]\n\nIf you want, I can produce a patch with these exact comment/text replacements.\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-09-29T16:48:01Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-09-29T18:55:06Z"
+        }
+      ]
+    },
+    {
+      "number": 33498,
+      "title": "p2p: Mitigate GETADDR fingerprinting by setting address timestamps to a fixed value",
+      "body": " When a node is connected to multiple networks (e.g., clearnet and Tor), it keeps separate ADDR response caches for each network. These are refreshed about once per day (randomized between 21 and 27 hours). See →[ https://github.com/bitcoin/bitcoin/blob/master/src/net.cpp#L3519](https://github.com/bitcoin/bitcoin/blob/master/src/net.cpp#L3519)\r\nThis is an example of a dual-homed node’s addrman response, with separate caches:\r\n\r\n_IPv4 response:_\r\n```\r\n{102.130.242.11:8333 : 1741100851}\r\n{119.17.151.161:8333 : 1739825443}\r\n{ubeirqalc4vj54baszpatvctpohn62hzj7vfnbncy6upa6vywvgewrad.onion:8333 : 1739825443}\r\n\r\n```\r\n_Tor response:_\r\n```\r\n{102.130.242.11:8333 : 1741100851}\r\n{94.23.167.176:8333 : 1740895525}\r\n{ubeirqalc4vj54baszpatvctpohn62hzj7vfnbncy6upa6vywvgewrad.onion:8333 : 1739825443}\r\n\r\n```\r\nCurrently, there's a fingerprinting attack that exploits responses to GETADDR messages. An attacker can collect responses from supposedly different nodes and compare the timestamps. By looking at overlaps in responses, they can correlate Tor and clearnet identities — effectively linking them back to the same node.\r\nMore details on this attack here:[ https://delvingbitcoin.org/t/fingerprinting-nodes-via-addr-requests/1786](https://delvingbitcoin.org/t/fingerprinting-nodes-via-addr-requests/1786)\r\n\r\nThis PR mitigates the attack by setting the timestamps in different caches to a fixed value in the past (10.5 ± 2.5 days), preventing correlation through timestamps.\r\nAfter the change, timestamps in each cache are now uniform, but differ between caches:\r\n\r\n_IPv4 response:_\r\n```\r\n{102.130.242.11:8333 : 1757964675}\r\n{119.17.151.161:8333 : 1757964675}\r\n{ubeirqalc4vj54baszpatvctpohn62hzj7vfnbncy6upa6vywvgewrad.onion:8333 : 1757964675}\r\n\r\n```\r\n_Tor response:_\r\n```\r\n{102.130.242.11:8333 : 1757878277}\r\n{119.17.151.161:8333 : 1757878277}\r\n{ubeirqalc4vj54baszpatvctpohn62hzj7vfnbncy6upa6vywvgewrad.onion:8333 : 1757878277}\r\n```\r\n\r\nWe initially considered setting the timestamps to 0, since they would eventually be updated and saved. However, this isn’t compatible with btcd (see details here → https://github.com/btcsuite/btcd/issues/2411 ). \r\nThis is still a work in progress — we’re continuing to test and are open to trying other solutions as well.\r\n\r\nThis is joint work with @danielabrozzoni",
+      "state": "open",
+      "user": "naiyoma",
+      "created_at": "2025-09-29T15:21:00Z",
+      "updated_at": "2025-11-14T13:26:13Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33498",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33498.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [jonatack](https://github.com/bitcoin/bitcoin/pull/33498#issuecomment-3352992312), [mzumsande](https://github.com/bitcoin/bitcoin/pull/33498#pullrequestreview-3286046607), [sipa](https://github.com/bitcoin/bitcoin/pull/33498#issuecomment-3356355027) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-29T15:21:06Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Concept ACK on working on this. Good to see proposals like this and #33464.",
+          "created_at": "2025-09-30T16:38:05Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Concept ACK",
+          "created_at": "2025-10-01T13:32:18Z"
+        },
+        {
+          "user": "naiyoma",
+          "body": "\r\n> With this PR, if an address older than 10 days (but not older than 30 days) is part of a `GetAddr` answer, the receiving peer will _postdate_ its timestamp, giving it more time until it gets Terrible. There is a chaining effect, because the receiving peer will also relay it longer when it answers `GetAddr` requests itself, and so on. If this would happen frequently enough, the addr of the node that has left the network would always stay in the 10-30 day range and never cease to be relayed, and we'd be stuck with it forever - which would be problematic, because with enough time and node turnover, everyone's addrman would get \"full\" and there would be no more room for actual new nodes. \r\n\r\nThanks, this is insightful and likely to happen. I was initially thinking the other checks( `m_last_success `) might still be useful to mark zombie addresses as terrible.\r\n\r\nBut it’s unlikely that there would be enough attempted connections before the address is sent again.\r\n\r\n>The crucial question is if GetAddr interactions happen frequently enough for this to be an important effect.\r\n\r\nI don't have data on this yet - will grep and update soon",
+          "created_at": "2025-10-16T11:20:00Z"
+        },
+        {
+          "user": "danielabrozzoni",
+          "body": "Thank you Martin, I agree that the current solution has this issue.\r\n\r\nOur other approach would have run into the same problem. We had considered setting all timestamps to zero, but we didn’t implement it because we’re not sure if it’s compatible with btcd, as mentioned in the PR description. This approach has the same problem as the current one:\r\n- Suppose we have an address in our addrman with a timestamp of 29 days ago, and the corresponding node has already left the network\r\n- We send the address in a getaddr response with the timestamp set to 0\r\n- The receiving node interprets that as “5 days ago”\r\n\r\nSo it ends up having the same problem: the address looks newer than it actually is, and it sticks around longer than it should, potentially forever.\r\n\r\nI’ve been thinking about an alternative solution, though I’m not sure if it makes sense. Perhaps an approach similar to the current one, but range-based, could work. Instead of setting every timestamp to 10 +- 2 days ago, we could adjust it based on how old the original timestamp is.\r\n\r\nAs a rough idea (numbers are just placeholders for now), we could generate three random reference timestamps once: one around 25+-2 days ago, one around 15+-2 days ago, and one around 5+-2 days ago; then assign each address to one of these depending on how old its original timestamp is:\r\n\r\n- If older than 25 days → use the 25-day reference\r\n- If older than 15 days → use the 15-day reference\r\n- Otherwise → use the 5-day reference\r\n\r\nThe exact numbers would need more thought. The fingerprinting issue would still exist: if two identities correspond to the same node, they would share the same initial timestamp and end up in the same range. Still, if we choose reasonable values, a large number of nodes might end up sending approximately the same timestamps.\r\n",
+          "created_at": "2025-10-16T13:21:13Z"
+        },
+        {
+          "user": "naiyoma",
+          "body": "Moved back to draft, working on addressing -> https://github.com/bitcoin/bitcoin/pull/33498#pullrequestreview-3319680730",
+          "created_at": "2025-10-28T12:01:21Z"
+        }
+      ]
+    },
+    {
+      "number": 33494,
+      "title": "depends: Update URL for `qrencode` package source tarball",
+      "body": "The https://fukuchi.org/ homepage no longer links to the source tarball, and previously available files appear to have been removed. The homepage now instructs users to download source tarballs from the GitHub [releases](https://github.com/fukuchi/libqrencode/releases) page instead.\r\n\r\nThe diff between the source trees is immaterial:\r\n```diff\r\n--- old\r\n+++ new\r\n@@ -1,19 +1,16 @@\r\n 27e7deccd2925c94e4190ee64794a051199f215f145f76fd664cdebedbbf8a35  acinclude.m4\r\n-e1e35b1309482f699a9700a2065a0bce09c2108dd1f78ba7bfbe0f7f0bdcd2e6  aclocal.m4\r\n a9308eec78790720dbcd5452ab8f241b5f1c6939ccf3389917b8e78cb2b58c9e  autogen.sh\r\n aa36725d577048f0370dc7415a1acb578fbdfb531c1b384a836d9360a81f6f5c  bitstream.c\r\n 3feaacd7d096834fc5956215598564ec287ad443185c4433c3f8007cc53ceaa6  bitstream.h\r\n 21bd5a34c90d3d6ee540ceb48c3d5aea5f21bd6b829ef3112db832af0bd423d8  ChangeLog\r\n f8a7a94c9622fab721df47e8121533ebfcb79885aca01ecec2fff00dfb84caef  cmake/FindIconv.cmake\r\n 6345e7eecb92473f361a8eb98dd373aa09cae79a43408cf4b42b00b411c9c197  CMakeLists.txt\r\n-031d560570eab2eda57c2f9ee9952445002f8bf4a23965fcaf43bbc2c61590e2  config.h.in\r\n-d2f42cc5771b69f2d2ecd4b31509864ae2b18b25c823986390bb372ee07030fa  configure\r\n 02867a8ea08206c84d5f4c05f41a15c639291091e3dfac27f3a9029d8f5d3028  configure.ac\r\n a9bdde5616ecdd1e980b44f360600ee8783b1f99b8cc83a2beb163a0a390e861  COPYING\r\n 76c41754bccbf69a60fb7833776637c60b86f59104705c0a5cea9ee3a2968f3d  Doxyfile\r\n 36d84f714cf28397b02d6c44860106a7cb858fc6d25239a2698a72fa5136e5c3  libqrencode.pc.in\r\n f0ce93a7e1b1f0fab87dd071ec3c8dd80a567d778dfc5930d9f375d676ecb9a0  Makefile.am\r\n-507c2385fb49c5724e8e3dfca97feb24cbdd4e651f3f0bfa62524e60088091a0  Makefile.in\r\n+dcb782b1b382328c0bce9194944bdcc65a6035d8e9f89e39436ed2e55ae8b969  makeREADME.sh\r\n 6046d347c6c564fc13a24dc0a15a09a83023e00a4e0d0f23029a81f86ac4d024  mask.c\r\n 9f853cee7d72191a8dbf018b7a86c0f0b6ca661e27a51fab677af911f2ff9e7e  mask.h\r\n a4e17b68d8db573e152132ebcbdc837b55415c12027f81232662db645faf79f0  mmask.c\r\n@@ -30,7 +27,7 @@\r\n 6e9ff66002b4a839c6e78bcd6a55342d9eb8b289273fa838441b27ee9969e293  qrinput.h\r\n 68831e02ee1ba602b1937328abec000e616c4472d9dc40067dd45ab7072df172  qrspec.c\r\n a2a9a5af4d62015e82b48b8316aea2b70031dcdc1ed2b829c0102ea5dc02aca2  qrspec.h\r\n-8730d006f1d45b90dc0ef9a20e4119420f15b37a09483c929baa4225e21f7900  README\r\n+a56773b55989ea5cae8a43f2d845ce0afa9576a26170937fbe36a69fee953cd4  README.md\r\n ace480f2e16001e276c73a5e965c282915ad81e2c28cce3ef574b5a8db7210e8  rsecc.c\r\n c731ebe26d58d5e5df3b2d694de0fb1c4ae80a36cf0559c49b04e989dee8b182  rsecc.h\r\n 8ed1af4414b5628845519581c82bf51ba2b4dee1f8352c1fd01b50afcd0a0ed7  split.c\r\n@@ -46,7 +43,6 @@\r\n e26b20198a7393b3c060891876fa45edb81488aef9df6d6cf45893a605e5e5e4  tests/decoder.h\r\n adabfbddb0f25de2e2cae970195fcfdf11ad1fa66ce64e237d83f821346f64c4  tests/frame\r\n 23c283a3d3b5f1bbb3108603ebf05d7a95951ba86a288e09140eab612a5eb258  tests/Makefile.am\r\n-c8b819bf7f00c979ab0b6f0d0fb10289d2006bc6acda1737d2f1c383a60e1e66  tests/Makefile.in\r\n ebd71b937d4d39f382f8c57f362a01f11fd617b66dbdf6f1a3c4897c8c42e235  tests/prof_qrencode.c\r\n d4adcb234d4c31473cd9ffedd1bfa9645ba336d426640ba5893dfe6e75db171d  tests/pthread_qrencode.c\r\n 62298641504b0a2c1d199cd7f656cb376959200169042de76f7c5950d2d42395  tests/rscode.c\r\n@@ -63,6 +59,7 @@\r\n cf5792cbfb92ba46f7f5f14b98f00813b0e7e4f5e7c790c6a28793774474bf26  tests/test_monkey.c\r\n 3a2c58346d57f6bb2a634d6febf3c65ac524259a2d789657f8d60c678bf8d658  tests/test_mqrspec.c\r\n b9d8c569ba36a2258cb1ad0d1f85ce4fb2935fad519e902bade59aa9772321aa  tests/test_qrencode.c\r\n+785fe14a6f8bc096b20ec271771fb09f22f29eb4f9d729f5b40d6b4cc824ce36  tests/test_qrenc.sh\r\n d0eee6eddf98ee4595c07f7da40c7de548651bf839b26995756e94db2599451f  tests/test_qrinput.c\r\n ace7885e435ef77cc127da0ac23c724498aaa8d80d53b908063f79c9f0b7acce  tests/test_qrspec.c\r\n fde9c2735ce94be51e1b0bbffe65415aa3afd2da5bd4c0e2c5e50e1a2f1ea3f7  tests/test_rs.c\r\n@@ -71,12 +68,4 @@\r\n 6f35c0e1235b31d0068c4ab175d8110c736e60df0309d4be7b3e57dd62d316f6  tests/URI_testset.inc\r\n 6be3983fc397cd5dade1dd219ad6cbe7977f416410b1509984006ecec51605b5  tests/view_qrcode.c\r\n 92b5be1ca2239399232d51503715c848dae9bf3db71b1f03157bfa9779826910  TODO\r\n-c8af04e62bad4ab75dafd22119026e5e3943f385bdcbe7731a4938102453754c  use/compile\r\n-1d9048b0ac9d4d1dfce7aa4e3a0b59ccfd32db2f7693814aa6f4c778560f5669  use/config.guess\r\n b522487f9c47661d321367d133f3d41247dd16d435f2d4b9c643dee95bf65eee  use/config.rpath\r\n-5bf0da2576ebb21ab60a9d9291a85b40af0e956a9eafb709ca8b20dcb105f4ee  use/config.sub\r\n-732bcd6b9e23f241e015d71b0a3a862104053aba20718c1f56b292cee7e29371  use/depcomp\r\n-608b76d735bb2ec2bcb1271644c3d5e7a428fb8d2338e114e8a48ebf91ccfd23  use/install-sh\r\n-2304d53af1f63b76a11651efdd18578adf2bda1ffc2c257100cba374b55f284b  use/ltmain.sh\r\n-f038345dab184e538098d22a8edc423762da66a90ebe269f23bfef85287cd30c  use/missing\r\n-7c1ae35455771ae32050c2ed109e3d297160b6d1a2f70b0278cf6968e5e7e98c  use/test-driver\r\n```\r\n\r\n---\r\n\r\n**UPDATE 2025-09-30**\r\n\r\nA few commits have been added:\r\n\r\n1. The first commit fixes the `$(package)_fetched` target, which erroneously succeeds on the second run after a failure on the master branch:\r\n```\r\n$ gmake -C depends clean-all\r\n$ gmake -C depends qrencode_fetched FALLBACK_DOWNLOAD_PATH=\"https://fallback.invalid\"\r\n$ gmake -C depends qrencode_fetched FALLBACK_DOWNLOAD_PATH=\"https://fallback.invalid\"\r\n$ echo $?\r\n0\r\n```\r\nWith the first commit applied:\r\n```\r\n$ gmake -C depends clean-all\r\n$ gmake -C depends qrencode_fetched FALLBACK_DOWNLOAD_PATH=\"https://fallback.invalid\"\r\n$ gmake -C depends qrencode_fetched FALLBACK_DOWNLOAD_PATH=\"https://fallback.invalid\"\r\n$ echo $?\r\n2\r\n```\r\n\r\n2. The second and third commits allow the depends build subsystem to detect when the source tarball content has been modified and needs to be re-downloaded, even if the file name remains the same.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-09-29T13:36:30Z",
+      "updated_at": "2025-10-09T19:19:44Z",
+      "comments": 24,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33494",
+      "labels": [
+        "Build system"
+      ]
+    },
+    {
+      "number": 33492,
+      "title": ".",
+      "body": "111\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "AureliuszNada",
+      "created_at": "2025-09-29T11:56:46Z",
+      "updated_at": "2025-09-29T12:20:37Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33492",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-09-29T11:56:50Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33492.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-29T11:56:52Z"
+        }
+      ]
+    },
+    {
+      "number": 33491,
+      "title": ".",
+      "body": "111\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "AureliuszNada",
+      "created_at": "2025-09-29T11:55:52Z",
+      "updated_at": "2025-09-29T12:21:04Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33491",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous. Generally, please focus on creating high-quality, original content that demonstrates a clear understanding of the project's requirements and goals.",
+          "created_at": "2025-09-29T11:55:56Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33491.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-29T11:55:59Z"
+        },
+        {
+          "user": "AureliuszNada",
+          "body": "!!! fix",
+          "created_at": "2025-09-29T11:56:02Z"
+        }
+      ]
+    },
+    {
+      "number": 33489,
+      "title": "build: Drop support for EOL macOS 13",
+      "body": "Now that macOS 13 is EOL (https://en.wikipedia.org/wiki/MacOS_Ventura), it seems odd to still support it.\r\n\r\n(macOS Ventura 13.7.8 received its final security update on 20 Aug 2025: https://support.apple.com/en-us/100100)\r\n\r\nThis patch will only be released in version 31.x, another 6 months out from now.\r\n\r\nSo:\r\n\r\n* Update the depends build and release note template to drop EOL macOS 13.\r\n* As a result, update the earliest Xcode to version 16 in CI.\r\n* Also, bump the macOS CI runner to version 15, to avoid issues when version 14 will be at its EOL in about 1 year.\r\n\r\nThis also allows to drop a small workaround in the fuzz tests and unlocks libcpp hardening (https://github.com/bitcoin/bitcoin/pull/33462)",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-09-29T05:31:12Z",
+      "updated_at": "2025-10-10T09:42:16Z",
+      "comments": 16,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33489",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33489.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hodlinator](https://github.com/bitcoin/bitcoin/pull/33489#pullrequestreview-3287946924), [stickies-v](https://github.com/bitcoin/bitcoin/pull/33489#issuecomment-3355697586), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33489#issuecomment-3361731762), [hebasto](https://github.com/bitcoin/bitcoin/pull/33489#pullrequestreview-3302397689) |\n| Stale ACK | [katesalazar](https://github.com/bitcoin/bitcoin/pull/33489#issuecomment-3345907639) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32380](https://github.com/bitcoin/bitcoin/pull/32380) (Modernize use of UTF-8 in Windows code by hebasto)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- const auto [it, ins]{FuzzTargets().try_emplace(name, std::move(target), std::move(opts))}; -> const auto [it, ins] = FuzzTargets().try_emplace(name, std::move(target), std::move(opts)); [structured bindings require '='; the braced form is invalid C++]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-09-29T05:31:18Z"
+        },
+        {
+          "user": "katesalazar",
+          "body": "ACK fab9ddaf554837624fa8f388e046a30d5bf7626f\r\n",
+          "created_at": "2025-09-29T09:22:41Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> This does not affect cross-compilation to macOS. If there is reason or need to change that, it can be done in a separate pull.\n\nThe minimum supported version in the release notes should only be changed with the along with changing the minimum supported version in depends.",
+          "created_at": "2025-09-29T15:31:55Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> The minimum supported version in the release notes should only be changed with the along with changing the minimum supported version in depends.\r\n\r\nThx, done. However, I can't test the resulting depends change on macOS myself.\r\n\r\nEdit: Tested as part of CI in https://github.com/bitcoin/bitcoin/pull/33509:\r\n\r\n* A too low macOS version will now fail (confusingly) with: `Run ./bin/bitcoind -version   : Bad CPU type in executable`\r\n* macos-14 passes",
+          "created_at": "2025-09-30T05:58:27Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--9cd9c72976c961c55c7acef8f6ba82cd-->\n### Guix builds (on x86_64) [untrusted test-only build, possibly unsafe, not for production use]\n\n| File | commit 25212dfdb4cd7291392b6a94130f658c5bfa0a48<br>(master) | commit b69d999325fa687606c9d3973c96ebd307f56b35<br>(pull/33489/merge) |\n|--|--|--|\n| *-aarch64-linux-gnu-debug.tar.gz | [`2c56d77595dccdf3...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-aarch64-linux-gnu-debug.tar.gz) | [`bdddbd7e622ca838...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-aarch64-linux-gnu-debug.tar.gz) |\n| *-aarch64-linux-gnu.tar.gz | [`9f0916a36cb9c82b...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-aarch64-linux-gnu.tar.gz) | [`ac62ee0f433f65f8...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-aarch64-linux-gnu.tar.gz) |\n| *-arm-linux-gnueabihf-debug.tar.gz | [`d288a590cc72104a...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-arm-linux-gnueabihf-debug.tar.gz) | [`e9d7f23c6f8e85b2...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-arm-linux-gnueabihf-debug.tar.gz) |\n| *-arm-linux-gnueabihf.tar.gz | [`cfebbd7cc439171a...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-arm-linux-gnueabihf.tar.gz) | [`9f6fefd6ffff24bc...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-arm-linux-gnueabihf.tar.gz) |\n| *-arm64-apple-darwin-codesigning.tar.gz | [`f3dfb6b92522f348...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-arm64-apple-darwin-codesigning.tar.gz) |  |\n| *-arm64-apple-darwin-unsigned.tar.gz | [`d8c439aba5230f0e...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-arm64-apple-darwin-unsigned.tar.gz) |  |\n| *-arm64-apple-darwin-unsigned.zip | [`81a1f905cd3e8389...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-arm64-apple-darwin-unsigned.zip) |  |\n| *-powerpc64-linux-gnu-debug.tar.gz | [`57f006139be92591...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-powerpc64-linux-gnu-debug.tar.gz) | [`c3938c9af83200a8...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-powerpc64-linux-gnu-debug.tar.gz) |\n| *-powerpc64-linux-gnu.tar.gz | [`3350960e5a37dfce...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-powerpc64-linux-gnu.tar.gz) | [`e3d470c638dca037...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-powerpc64-linux-gnu.tar.gz) |\n| *-riscv64-linux-gnu-debug.tar.gz | [`aad4594dbaacb444...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-riscv64-linux-gnu-debug.tar.gz) | [`da13c7aa38148521...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-riscv64-linux-gnu-debug.tar.gz) |\n| *-riscv64-linux-gnu.tar.gz | [`50a9ca7aa56f7787...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-riscv64-linux-gnu.tar.gz) | [`197e32f59e65093c...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-riscv64-linux-gnu.tar.gz) |\n| *-x86_64-apple-darwin-codesigning.tar.gz | [`0cc8b72f029ddcaf...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-x86_64-apple-darwin-codesigning.tar.gz) |  |\n| *-x86_64-apple-darwin-unsigned.tar.gz | [`91e7e882c35a3f30...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-x86_64-apple-darwin-unsigned.tar.gz) |  |\n| *-x86_64-apple-darwin-unsigned.zip | [`058d461790e90df9...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-x86_64-apple-darwin-unsigned.zip) |  |\n| *-x86_64-linux-gnu-debug.tar.gz | [`88de3a19603c413c...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-x86_64-linux-gnu-debug.tar.gz) | [`4a0170d30d91d5e6...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-x86_64-linux-gnu-debug.tar.gz) |\n| *-x86_64-linux-gnu.tar.gz | [`52c8471f79f62023...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd-x86_64-linux-gnu.tar.gz) | [`6c9f415a4006524b...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa-x86_64-linux-gnu.tar.gz) |\n| *.tar.gz | [`519150aed6da5f1b...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/bitcoin-25212dfdb4cd.tar.gz) | [`054311ccbe246b6b...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/bitcoin-b69d999325fa.tar.gz) |\n| SHA256SUMS.part | [`210bd14fc7210e8a...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/SHA256SUMS.part) | [`dd518a279543dd5e...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/SHA256SUMS.part) |\n| guix_build.log | [`bdff2fe226e41677...`](https://drahtbot.space/guix/monotree/25212dfdb4cd7291392b6a94130f658c5bfa0a48/guix_build.log) | [`7f7d0af0ae5679f1...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/guix_build.log) |\n| guix_build.log.diff |  | [`80efb0867c82240f...`](https://drahtbot.space/guix/monotree/b69d999325fa687606c9d3973c96ebd307f56b35/guix_build.log.diff) |\n\n",
+          "created_at": "2025-09-30T22:25:58Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "This will likely fix the Guix build:\r\n```diff\r\n--- a/contrib/guix/symbol-check.py\r\n+++ b/contrib/guix/symbol-check.py\r\n@@ -249,7 +249,7 @@ def check_MACHO_libraries(binary) -> bool:\r\n     return ok\r\n \r\n def check_MACHO_min_os(binary) -> bool:\r\n-    if binary.build_version.minos == [13,0,0]:\r\n+    if binary.build_version.minos == [14,0,0]:\r\n         return True\r\n     return False\r\n```",
+          "created_at": "2025-09-30T22:31:18Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "re-ACK 1aaaaa078bb2efed126e3f41ecf7c81ccf005818",
+          "created_at": "2025-10-01T10:27:43Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--9cd9c72976c961c55c7acef8f6ba82cd-->\n### Guix builds (on x86_64) [untrusted test-only build, possibly unsafe, not for production use]\n\n| File | commit f41f97240c06fbb1a70c3462dcc8d3d6734e4199<br>(master) | commit 5352a0db57c280fab68650783ccae43713c1fed3<br>(pull/33489/merge) |\n|--|--|--|\n| *-aarch64-linux-gnu-debug.tar.gz | [`35b7c2fec31a2b9f...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-aarch64-linux-gnu-debug.tar.gz) | [`1021218f357b26bf...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-aarch64-linux-gnu-debug.tar.gz) |\n| *-aarch64-linux-gnu.tar.gz | [`f207135286722f5b...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-aarch64-linux-gnu.tar.gz) | [`a85d037ec9c98fc5...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-aarch64-linux-gnu.tar.gz) |\n| *-arm-linux-gnueabihf-debug.tar.gz | [`ee501f6f8e721ef9...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-arm-linux-gnueabihf-debug.tar.gz) | [`3520bbf0b8ff4416...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-arm-linux-gnueabihf-debug.tar.gz) |\n| *-arm-linux-gnueabihf.tar.gz | [`0e7b094ff22affc3...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-arm-linux-gnueabihf.tar.gz) | [`c96ac9a49487a3ca...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-arm-linux-gnueabihf.tar.gz) |\n| *-arm64-apple-darwin-codesigning.tar.gz | [`dd78b12a869d1e8f...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-arm64-apple-darwin-codesigning.tar.gz) | [`bf74c81a6836991c...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-arm64-apple-darwin-codesigning.tar.gz) |\n| *-arm64-apple-darwin-unsigned.tar.gz | [`14c891899b0433e3...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-arm64-apple-darwin-unsigned.tar.gz) | [`d078c173a03d7255...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-arm64-apple-darwin-unsigned.tar.gz) |\n| *-arm64-apple-darwin-unsigned.zip | [`483d4096c0a2c0f6...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-arm64-apple-darwin-unsigned.zip) | [`2702a90b87e83857...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-arm64-apple-darwin-unsigned.zip) |\n| *-powerpc64-linux-gnu-debug.tar.gz | [`bf50aeda683016e9...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-powerpc64-linux-gnu-debug.tar.gz) | [`8df5378ef504cd36...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-powerpc64-linux-gnu-debug.tar.gz) |\n| *-powerpc64-linux-gnu.tar.gz | [`c7de6894e0e05c29...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-powerpc64-linux-gnu.tar.gz) | [`3017ff0e24a74990...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-powerpc64-linux-gnu.tar.gz) |\n| *-riscv64-linux-gnu-debug.tar.gz | [`bd3d8226c66ab628...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-riscv64-linux-gnu-debug.tar.gz) | [`18870901a2b6f5b7...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-riscv64-linux-gnu-debug.tar.gz) |\n| *-riscv64-linux-gnu.tar.gz | [`a76c0590e27ee802...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-riscv64-linux-gnu.tar.gz) | [`d89a3a1cead6aac0...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-riscv64-linux-gnu.tar.gz) |\n| *-x86_64-apple-darwin-codesigning.tar.gz | [`91e535145d5f1ff9...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-x86_64-apple-darwin-codesigning.tar.gz) | [`0e9de811589b9954...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-x86_64-apple-darwin-codesigning.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.tar.gz | [`ac192ccd08539550...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-x86_64-apple-darwin-unsigned.tar.gz) | [`795bd6806a4b5e23...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-x86_64-apple-darwin-unsigned.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.zip | [`61886daf83664eb5...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-x86_64-apple-darwin-unsigned.zip) | [`5ed306083344545a...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-x86_64-apple-darwin-unsigned.zip) |\n| *-x86_64-linux-gnu-debug.tar.gz | [`9d8354e25bb71c19...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-x86_64-linux-gnu-debug.tar.gz) | [`4ad5caa7b7a8ebe2...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-x86_64-linux-gnu-debug.tar.gz) |\n| *-x86_64-linux-gnu.tar.gz | [`62e9e1084e7cb454...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06-x86_64-linux-gnu.tar.gz) | [`d4a17af8a92b0ef7...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2-x86_64-linux-gnu.tar.gz) |\n| *.tar.gz | [`8ac413d7387a3587...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/bitcoin-f41f97240c06.tar.gz) | [`78b333af90fcfe26...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/bitcoin-5352a0db57c2.tar.gz) |\n| SHA256SUMS.part | [`27b9516ad575bc4e...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/SHA256SUMS.part) | [`f831c31d0d3d5992...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/SHA256SUMS.part) |\n| guix_build.log | [`388b38082c568be2...`](https://drahtbot.space/guix/monotree/f41f97240c06fbb1a70c3462dcc8d3d6734e4199/guix_build.log) | [`f8fa1141cc33b34d...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/guix_build.log) |\n| guix_build.log.diff |  | [`43c2dd987dd6e080...`](https://drahtbot.space/guix/monotree/5352a0db57c280fab68650783ccae43713c1fed3/guix_build.log.diff) |\n\n",
+          "created_at": "2025-10-02T02:58:23Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Looking around for more versions and checking [446e73c](https://github.com/bitcoin/bitcoin/commit/446e73cc0bb7cd628039eaf9b1bcc93db23b924f) it seem to me we could update a few more places:\r\n\r\nThis is about something else: The sdk and xcode version used for the depends/guix build. So it should be a separate pull request. Generally, bumping the sdk/xcode in depends is a lengthy/tedious process, so it should be done only when needed. My recommendation would be to bump it to 26.x within the next year, or to 27.x in one year.\r\n\r\nWhereas, this pull request is about increasing the min macos version to exclude the EOL macos version(s). This also allows to bump the xcode when self-compiling, e.g. in CI.\r\n\r\n> Note that latest `AppleClang` doesn't play well with latest `Clang` regarding fuzzing: [#32084 (comment)](https://github.com/bitcoin/bitcoin/pull/32084#issuecomment-3361478681)\r\n\r\nThx, but I don't see how this is related to this pull?",
+          "created_at": "2025-10-02T14:46:44Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> This is about something else: \r\n\r\nWhat's the reason for keeping a version in the bug issue template that we don't support?\r\n\r\n> I don't see how this is related to this pull?\r\n\r\nIf we recommend a newer `AppleClang` version, it may not work with fuzzing, that's all.",
+          "created_at": "2025-10-02T14:53:18Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > This is about something else:\r\n> \r\n> What's the reason for keeping a version in the bug issue template that we don't support?\r\n\r\nIt is just a placeholder, so shouldn't matter. I can bump it on the next push, if there is one, or it can be done as a follow-up.",
+          "created_at": "2025-10-02T14:57:00Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "code review ACK 1aaaaa078bb2efed126e3f41ecf7c81ccf005818",
+          "created_at": "2025-10-02T15:19:10Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "I just retired my 27\" iMac from 2017, which happens to only support macOS 13. I was only using it for its great 5K monitor though, connecting my IDE to a faster computer for compilation.\r\n\r\nThat means it will be more work for me to test things on that machine, since even booting it takes several minutes. If I was still using that machine I would have preferred to maintain support for it a bit longer, until something actually breaks or blocks progress.",
+          "created_at": "2025-10-10T08:33:04Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I just retired my 27\" iMac from 2017, which happens to only support macOS 13. I was only using it for its great 5K monitor though, connecting my IDE to a faster computer for compilation.\r\n> \r\n> That means it will be more work for me to test things on that machine, since even booting it takes several minutes. If I was still using that machine I would have preferred to maintain support for it a bit longer, until something actually breaks or blocks progress.\r\n\r\nI don't think this pull request changes anything about your workflow, if you connect to a different computer to compile and run.\r\n\r\nAlso, I am sure as a developer you can trivially still compile on your old machine, if you want to. You'll have to carry a patch to revert the `src/test/fuzz/fuzz.cpp` changes (or skip compiling it), but that is trivial for you as a developer. (It may also be possible to use the clang package from brew or nix to compile, but that isn't supported or documented IIRC)\r\n\r\nThe goal here is to drop support for an insecure base operating system, so that users are not exposing themselves to unfixed security vulnerabilities on an internet-connected machine.\r\n\r\nNot sure what should be done differently here exactly to have a net benefit, but there are still 6 months until this even hits a release, so if there is something I am missing, there is plenty of time to re-visit.",
+          "created_at": "2025-10-10T08:46:32Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> I don't think this pull request changes anything about your workflow, if you connect to a different computer to compile and run.\r\n\r\nI'm not worried about my own workflow for running a node, I was talking about us supporting it as a project. For that I need to compile it to occasionally test things, which is more work since I no longer have that machine on all day.\r\n\r\n> The goal here is to drop support for an insecure base operating system\r\n\r\n> (macOS Ventura 13.7.8 received its final security update on 20 Aug 2025: https://support.apple.com/en-us/100100)\r\n\r\nThat article doesn't say it's the \"final\" update, it's just the most recent one. I can't find an official statement by Apple themselves that this version of macOS is unsupported, that seems to be an interpretation by others. It seems to be an extrapolation based on their _hardware_ support.\r\n\r\nThere are more recent security updates for other versions of macOS, but it could simply be that these issues don't impact 13. If on the other hand we know those bugs do apply to macOS 13, then that's a clear sign they _actually_ stopped maintaining it.",
+          "created_at": "2025-10-10T09:01:15Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I'm not worried about my own workflow for running a node, I was talking about us supporting it as a project.\r\n\r\nI think dropping support for an OS that hasn't received security updates for 6 months is fine. Also, you can still run a 30.x node until the release of 33.0 (https://bitcoincore.org/en/lifecycle/), which is 1.5 years. Also, you can compile and run any version yourself at your own risk (not using xcode).\r\n\r\nThough, I am happy to review a pull request with the improvements you have in mind, if there are some.",
+          "created_at": "2025-10-10T09:42:16Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 11,
+    "issues": 0
+  }
+}

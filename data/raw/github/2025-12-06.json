@@ -1,0 +1,297 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:37:48.529700+00:00",
+  "date": "2025-12-06",
+  "pull_requests": [
+    {
+      "number": 34025,
+      "title": "net: Waste less time in socket handling",
+      "body": "Cuts out some wasted time in net socket handling. First, only calculates the current time once every 50ms, rather than once for each peer, which given we only care about second-level precision seems more than adequate. Second, caches the value of the `-capturemessages` setting in `CConnman` rather than re-evaluating it every time we invoke `PushMessaage`.",
+      "state": "closed",
+      "user": "ajtowns",
+      "created_at": "2025-12-06T22:44:20Z",
+      "updated_at": "2025-12-18T15:09:26Z",
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34025",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34025.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [vasild](https://github.com/bitcoin/bitcoin/pull/34025#pullrequestreview-3560802543), [maflcko](https://github.com/bitcoin/bitcoin/pull/34025#issuecomment-3635669700), [sedited](https://github.com/bitcoin/bitcoin/pull/34025#pullrequestreview-3562174924), [mzumsande](https://github.com/bitcoin/bitcoin/pull/34025#pullrequestreview-3569594119) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#30951](https://github.com/bitcoin/bitcoin/pull/30951) (net: option to disallow v1 connection on ipv4 and ipv6 peers by stratospher)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible places where named args for integral literals may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- CaptureMessage(pnode->addr, msg.m_type, msg.data, /*is_incoming=*/false) in src/net.cpp\n\n\n\n<sup>2025-12-09</sup>\n",
+          "created_at": "2025-12-06T22:44:26Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "Not sure if the flame graph is usable, but:\r\n\r\n![perf](https://github.com/user-attachments/assets/e3d6595b-d48c-4582-8bb2-6a05eacd6ca8)\r\n\r\nGetBoolArg takes up 0.31% of total time, as part of PushMessage that takes up 1.75% of total time, in b-msghand.\r\n\r\nGetTime takes up 0.82% of total time, as part of InactivityCheck that takes up 1.78% of total time, in b-net.\r\n\r\nConverting from std::chrono::microseconds to NodeClock::time_point is a lot more intrusive (impacting at least net_processing and node/eviction as well).\r\n\r\n~~Note that CConnman was a friend of CNode until #27257~~ (no longer relevant)",
+          "created_at": "2025-12-06T22:56:03Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK",
+          "created_at": "2025-12-06T23:24:57Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @theuni @vasild ",
+          "created_at": "2025-12-08T16:54:47Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "Re: https://github.com/bitcoin/bitcoin/pull/34025#issuecomment-3621332052\r\n\r\nJust to confirm, this flamegraph is from a node that has finished syncing to the tip? i.e. IBD is not included in this graph, right?",
+          "created_at": "2025-12-09T18:37:38Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> GetTime takes up 0.82% of total time, as part of InactivityCheck that takes up 1.78% of total time, in b-net.\r\n\r\nInteresting. I was wondering why getting the time eats so much CPU. Though, in the happy path, `InactivityCheck` is just loading a few atomics, which means getting the time costs as much as loading a few atomics. Also, the flame graph probably shows the CPU time, and not the wall clock time. So the patch here likely won't cut the wall clock time between two calls of `SocketHandlerConnected`, but only the CPU time inside a single `SocketHandlerConnected` call?\r\n\r\nconcept ack, Seems fine to still make the changes here.",
+          "created_at": "2025-12-09T19:35:50Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> Just to confirm, this flamegraph is from a node that has finished syncing to the tip? i.e. IBD is not included in this graph, right?\r\n\r\nYes; it's taken over a longish period though, iirc, I think ~~either~~ 30m ~~or 2h~~. You can see ProcessNewBlock at 0.20% just before ProcessTransaction at 4.56% fwiw.\r\n\r\n> Also, the flame graph probably shows the CPU time, and not the wall clock time. So the patch here likely won't cut the wall clock time between two calls of `SocketHandlerConnected`, but only the CPU time inside a single `SocketHandlerConnected` call?\r\n\r\nYeah, presuming `SocketHandlerConnected` isn't using 100% of a core, it'll be spending its time waiting for the `SELECT_TIMEOUT_MILLISECONDS` timeout to hit, which is 50ms.",
+          "created_at": "2025-12-09T20:41:02Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review ACK 5f5c1ea01955d277581f6c2acbeb982949088960 🏣\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK 5f5c1ea01955d277581f6c2acbeb982949088960 🏣\r\nDIf+EMRUrE9g+3ldiGUW0pHeRyThkZk3bbOL6sas10+I4f60l14Vo/S1nCwtrHEqiue3z1X4uTE3S7uN3Tg3DQ==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-12-10T06:59:24Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> it seems a bit absurd to check every `50ms` for a timeout of 20 minutes. Even the initial waiting time `m_peer_connect_timeout` from `ShouldRunInactivityChecks()` for a new peer doesn't really be checked _that_ frequently.\r\n\r\nI think if you're running a listening node with many real inbound peers, on mainnet where there seems to be maybe 4.5 tx/s, you probably expect to receive socket data from each peer every 2 seconds or so (announcing the ~9 txs that have been received in that time). With 80 (inbound, tx relay) peers, that's an interrupt every 25ms, rather than every 50ms. Worse if you have more peers, better if many of your peers are block-relay only or inactive spy nodes or similar.",
+          "created_at": "2025-12-13T00:13:14Z"
+        },
+        {
+          "user": "theuni",
+          "body": "Post-merge ACK 5f5c1ea01955d277581f6c2acbeb982949088960. Nits aside, both of these are nice cleanups.",
+          "created_at": "2025-12-18T15:09:26Z"
+        }
+      ]
+    },
+    {
+      "number": 34024,
+      "title": "rpc: Reject distinct transactions in combinerawtransaction",
+      "body": "Previously, combinerawtransaction silently processed only the first transaction when given unrelated transactions as input, ignoring the rest. This could be confusing and lead to unexpected behavior.\r\n\r\nThis change adds validation to ensure all transactions passed to combinerawtransaction have the same base structure (same inputs and outputs), throwing RPC_INVALID_PARAMETER if they differ.\r\n\r\nFixes #25980\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "mossein",
+      "created_at": "2025-12-06T22:17:25Z",
+      "updated_at": "2025-12-06T22:24:29Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34024",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34024.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-06T22:17:31Z"
+        }
+      ]
+    },
+    {
+      "number": 34023,
+      "title": "Optimized SFL cluster linearization",
+      "body": "Follow-up to #32545, part of #30289.\r\n\r\nThis contains many of the optimizations that were originally part of #32545 itself.",
+      "state": "open",
+      "user": "sipa",
+      "created_at": "2025-12-06T20:21:44Z",
+      "updated_at": "2026-01-15T14:41:01Z",
+      "comments": 18,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34023",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34023.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34259](https://github.com/bitcoin/bitcoin/pull/34259) (Find minimal chunks in SFL by sipa)\n* [#34257](https://github.com/bitcoin/bitcoin/pull/34257) (txgraph: deterministic optimal transaction order by sipa)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible typos and grammar issues:\n\n- // Verify it has a valid chunk index, and that chunk includes this -> // Verify it has a valid chunk index, and that chunk includes this transaction. [The sentence is truncated and missing the noun \"transaction\", making the comment incomplete and less clear.]\n\n\n\n<sup>2026-01-15</sup>\n",
+          "created_at": "2025-12-06T20:21:51Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `32 bit ARM`: https://github.com/bitcoin/bitcoin/actions/runs/19993781856/job/57338323718</sub>\n<sub>LLM reason (✨ experimental): Cluster linearize tests fail due to a size mismatch (linearization size != depgraph TxCount) triggering assertion failures and aborted tests.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-12-06T20:52:18Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `Windows-cross to x86_64, ucrt`: https://github.com/bitcoin/bitcoin/actions/runs/20182154259/job/57944831923</sub>\n<sub>LLM reason (✨ experimental): Compiler error: -Werror treats a range-for over a tuple as an error in cluster_linearize.h, causing the build to fail.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-12-12T23:07:03Z"
+        },
+        {
+          "user": "sipa",
+          "body": "I have moved the changes to TxGraph here to a separate PR, #34085, as it's not actually dependent on the optimizations here.",
+          "created_at": "2025-12-16T21:23:06Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Rebased after merge of #32545, but not marking as Ready for review yet, as I'm investigating another data structure layout. If that turns out to be fruitful, that may replace some of the commits here, so I don't want to waste reviewers' time on those yet.",
+          "created_at": "2025-12-19T15:31:26Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Ready for review.\r\n\r\nI have made a substantial change here, mostly in the new \"get rid of DepData, reuse sets (optimization)\" commit. It's cleaner code, but does a few things quite differently from the merged code. As a result, it touches a good portion of the SFL code due to data structure changes. I've used the opportunity to make variable names more consistent throughout.\r\n\r\nSorry for this - if I had considered this approach before #32545, I'd have used a data structure layout closer to this one from the start, avoiding such a big change. As is however, I don't see a good way of splitting it up into smaller meaningful changes.",
+          "created_at": "2025-12-21T22:41:07Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/actions/runs/20444032805/job/58743457093</sub>\n<sub>LLM reason (✨ experimental): Lint check failed due to scripted-diffs detecting mismatches in code changes.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-12-22T22:29:00Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Made a number of improvements:\r\n* Moved some of the logic to new functions (`PickRandomTx`, `GetReachable`, `PickMergeCandidate`), hopefully making things more readable.\r\n* Added a precomputation for the set of reachable transactions (union of out-of-chunk parents/children within a chunk) rather than computing them on the fly at merging time in `Activate()` and `Deactivate()`.\r\n* Added a special case for self-merges in `Improve()`, avoiding the need for `MergeSequence()` in that case.\r\n* Made chunk minimization use randomly-chosen pivot transactions, out of a concern that the earlier deterministic choice could be used to create reliably-slow-to-minimize clusters.\r\n* Optimized the chunk minimization logic to not retry certain cases that can be predicted to be useless: when a split of a chunk is found in its second phase (so with pivot down for example, after pivot up has been tried and failed already), then the created sub-chunk that holds the pivot can reuse the same pivot, direction, and phase, because we know no split with the pivot in the other direction is possible.\r\n",
+          "created_at": "2025-12-26T20:37:33Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Ugh, this cluster takes 1.25 ms on my Ryzen 5950X machine to linearize optimally on average (most of the time is in optimizing, the time spent on minimizing chunks is negligible). For comparison, the worst existing benchmark on the same system takes 0.051 ms.\r\n\r\n```\r\n01020001020101020201020301020401020501020601020701020801020901020a01020b01020c01020d01020e01020f0102100102110102127b02137b02147b021501020001000000000100000000010001000000000e0102010000000000000000000001000000000000020f0102020001000101000000000000000000000000000e01020300000001010100000000000000000000000004010204000000010001000000000000000000000000000e010205000000000000000000010000000001000000000b0102060000000000000100000000000000000000010009010207000100000100000000000000000000000000000501020800000000000000000000000000000000010000001a01020a00000000000000000000000000000000000000001701020a00000000000000000000000000000000000100001401020b00000000010000000000000000000000000000001401020c00000000000000000000000000000001000000000801020d00000000000000000100000000000000000000000701020e00000000000000000100000000000000000000000601020f000100000000000000000000000000000000000006010210000000000000000000000001000000000000000003010211000000000001000000000000000000000000000001010212000000000000000000000000000000000000000000220102130000000000000000000000000000000000000000001a0102140000000000000000000000000000000000000000000c010215000000000000000000000000000000000000000000070102000000010000010000000000000000000000000029010201000000000001000000000000010000000000000c01020200000000000000000100000100000000000000090102030000000100010000000000000000000000000001010204000101000000000000000000000000000000000101020500000000000000000000000000000000010000002401020600000001000000000000000000000000000000001d01020700000000000000000000000000000001000000001c01020800000000000000000000000000000000010000001c01020900000000000000000000000000000000010000001501020a00000000000000000000000000000000000001000901020b00000000000000000000000000000000000100000101020c0000000000000000000000000000000000000000002e01020d0000000000000000000000000000000000000000002c01020e0000000000000000000000000000000000000000002b01020f0000000000000000000000000000000000000000001e0102100000000000000000000000000000000000000000000a01021100000000000000000000000000000000000000000006010212000000000000000000000000000000000000000000040102130000000000000000000000000000000000000000000000\r\n```\r\n\r\n<img width=\"3374\" height=\"251\" alt=\"out\" src=\"https://github.com/user-attachments/assets/343e4971-33ff-4da4-a5c4-21acfb7e8a76\" />\r\n\r\n\r\nInterestingly, it's only 0.15 ms when using a splitting strategy consisting of first 2 random split attempts on a given chunk, and then all max-gain splits.",
+          "created_at": "2026-01-01T18:17:30Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "huh, I was playing around with your new worst case SFL example. I'm getting ~2ms per optimal solve which roughly matches your number.\r\n\r\nBut, if I modify the harness to do 1'700*5 iterations per Linearize, and loop until optimal passing in prior linearizations emitted (was curious how bad it would be with DoWork), I'm getting 245mics to optimal? (edit: looks like it's taking just 2 iterations at this level)\r\n\r\nAs I add more to max iterations, the performance starts to progressively get worse until it solves it in one call.\r\n\r\nIf I drop it to down to 1,700 iterations only, it becomes 150mics average. Any lower and it starts to fail solving it ever since we're presumably not making enough progress to overcome the fact we're losing SFL state in between.\r\n\r\nI guess this is randomness bailing us out once every N invocations rather than getting stuck in a loop deep somewhere?",
+          "created_at": "2026-01-03T18:50:56Z"
+        },
+        {
+          "user": "sipa",
+          "body": "@instagibbs Interesting, that's arguably a more relevant metric in the grand scheme of things, though it doesn't say much here, as the example isn't specifically designed to need a high \"minimum iterations to make progress\" - it's very well possible that examples exist that are far worse than this one in that regard.\r\n\r\nThese outlier long optimal linearization times seem very dependent on the particular splitting strategy used. The current PR here uses max-gain always, except every third split is done randomly (so random is used iff m_self_merges for a chunk is 2, 5, 8, 11, ...). It seems like there may be much better (and much worse) choices here. I'm investigating this more.",
+          "created_at": "2026-01-05T16:29:57Z"
+        },
+        {
+          "user": "sipa",
+          "body": "This is pretty unexpected. I've analyzed a number of split strategies, and gathered the maximum iteration count needed to reach optimal, under a large-ish (~380000 clusters) rather arbitrarily constructed set of input clusters (while providing them with bad or missing input linearization).\r\n\r\n<details>\r\n<summary>Old results (prior to bug fix)</summary>\r\n\r\n```\r\nMMMMMMMMMMMM: ((m_self_merges[chunk_idx] + 0) % 1) == 0: 387722  # always max_gain\r\nMrMrMrMrMrMr: ((m_self_merges[chunk_idx] + 0) % 2) == 0: 5614508\r\nMrrMrrMrrMrr: ((m_self_merges[chunk_idx] + 0) % 3) == 0: 3354629\r\nMrrrMrrrMrrr: ((m_self_merges[chunk_idx] + 0) % 4) == 0: 1648066\r\nMrrrrMrrrrMr: ((m_self_merges[chunk_idx] + 0) % 5) == 0: 2139700\r\nMrrrrrMrrrrr: ((m_self_merges[chunk_idx] + 0) % 6) == 0: 1021390\r\n\r\nrrrrrrrrrrrr: ((m_self_merges[chunk_idx] + 0) % 1) != 0: 100000000 # always random\r\nrMrMrMrMrMrM: ((m_self_merges[chunk_idx] + 0) % 2) != 0: 100000000\r\nrMMrMMrMMrMM: ((m_self_merges[chunk_idx] + 0) % 3) != 0: 100000000\r\nrMMMrMMMrMMM: ((m_self_merges[chunk_idx] + 0) % 4) != 0: 4479215\r\nrMMMMrMMMMrM: ((m_self_merges[chunk_idx] + 0) % 5) != 0: 861766\r\nrMMMMMrMMMMM: ((m_self_merges[chunk_idx] + 0) % 6) != 0: 459358\r\n\r\nMMMMMMMMMMMM: ((m_self_merges[chunk_idx] + 1) % 1) == 0: 387722    # always max_gain, same as ((m_self_merges[chunk_idx] + 0) % 1) == 0\r\nrMrMrMrMrMrM: ((m_self_merges[chunk_idx] + 1) % 2) == 0: 100000000 # same as ((m_self_merges[chunk_idx] + 0) % 2) != 0\r\nrrMrrMrrMrrM: ((m_self_merges[chunk_idx] + 1) % 3) == 0: 100000000\r\nrrrMrrrMrrrM: ((m_self_merges[chunk_idx] + 1) % 4) == 0: 100000000\r\nrrrrMrrrrMrr: ((m_self_merges[chunk_idx] + 1) % 5) == 0: 100000000\r\nrrrrrMrrrrrM: ((m_self_merges[chunk_idx] + 1) % 6) == 0: 100000000\r\n\r\nrrrrrrrrrrrr: ((m_self_merges[chunk_idx] + 1) % 1) != 0: 100000000 # always random, same as ((m_self_merges[chunk_idx] + 0) % 1) != 0\r\nMrMrMrMrMrMr: ((m_self_merges[chunk_idx] + 1) % 2) != 0: 5614508 # same as ((m_self_merges[chunk_idx] + 0) % 2) == 0\r\nMMrMMrMMrMrM: ((m_self_merges[chunk_idx] + 1) % 3) != 0: 3659198 # the current PR\r\nMMMrMMMrMMrM: ((m_self_merges[chunk_idx] + 1) % 4) != 0: 1083539\r\nMMMMrMMMMrMM: ((m_self_merges[chunk_idx] + 1) % 5) != 0: 650703\r\nMMMMMrMMMMMr: ((m_self_merges[chunk_idx] + 1) % 6) != 0: 668819\r\n\r\nMMMMMMMMMMMM: m_self_merges[chunk_idx] >= 0: 387722 # always max_gain, same as ((m_self_merges[chunk_idx] + 0) % 1) == 0\r\nrMMMMMMMMMMM: m_self_merges[chunk_idx] >= 1: 388318\r\nrrMMMMMMMMMM: m_self_merges[chunk_idx] >= 2: 594013\r\nrrrMMMMMMMMM: m_self_merges[chunk_idx] >= 3: 8543778\r\nrrrrMMMMMMMM: m_self_merges[chunk_idx] >= 4: 27802956\r\nrrrrrMMMMMMM: m_self_merges[chunk_idx] >= 5: 100000000\r\n\r\nrrrrrrrrrrrr: m_self_merges[chunk_idx] < 0: 100000000 # always random, same as ((m_self_merges[chunk_idx] + 0) % 1) != 0\r\nMrrrrrrrrrrr: m_self_merges[chunk_idx] < 1: 2191100\r\nMMrrrrrrrrrr: m_self_merges[chunk_idx] < 2: 759915\r\nMMMrrrrrrrrr: m_self_merges[chunk_idx] < 3: 464325\r\nMMMMrrrrrrrr: m_self_merges[chunk_idx] < 4: 1042613\r\nMMMMMrrrrrrr: m_self_merges[chunk_idx] < 5: 523463\r\n```\r\n\r\nThe maximum iteration count passed to `Linearize` was 100M, so when `100000000` appears it may well mean \"indefinite\".\r\n\r\nMore max-gain seems to be pretty much always better. However, I'm very surprised that always-random apparently doesn't reach optimal for some input clusters. Will investigate further, but with this, I'm inclined to take something like `((m_self_merges[chunk_idx] + 0) % 6) != 0` rather than the PR's `((m_self_merges[chunk_idx] + 1) % 3) != 0`.\r\n\r\n</details>\r\n\r\nEDIT: redid the numbers after fixing a bug that sometimes caused splits with zero gain.\r\n\r\n```\r\nMMMMMMMMMMMM: ((m_self_merges[chunk_idx] + 0) % 1) == 0: 387722  # always max_gain\r\nMrMrMrMrMrMr: ((m_self_merges[chunk_idx] + 0) % 2) == 0: 6012644\r\nMrrMrrMrrMrr: ((m_self_merges[chunk_idx] + 0) % 3) == 0: 3354629\r\nMrrrMrrrMrrr: ((m_self_merges[chunk_idx] + 0) % 4) == 0: 1648066\r\nMrrrrMrrrrMr: ((m_self_merges[chunk_idx] + 0) % 5) == 0: 2139700\r\nMrrrrrMrrrrr: ((m_self_merges[chunk_idx] + 0) % 6) == 0: 1003802\r\n\r\nrrrrrrrrrrrr: ((m_self_merges[chunk_idx] + 0) % 1) != 0: 416225 # always random\r\nrMrMrMrMrMrM: ((m_self_merges[chunk_idx] + 0) % 2) != 0: 4796320\r\nrMMrMMrMMrMM: ((m_self_merges[chunk_idx] + 0) % 3) != 0: 1427591\r\nrMMMrMMMrMMM: ((m_self_merges[chunk_idx] + 0) % 4) != 0: 1095346\r\nrMMMMrMMMMrM: ((m_self_merges[chunk_idx] + 0) % 5) != 0: 570429\r\nrMMMMMrMMMMM: ((m_self_merges[chunk_idx] + 0) % 6) != 0: 426605\r\n\r\nMMMMMMMMMMMM: ((m_self_merges[chunk_idx] + 1) % 1) == 0: 387722 # always max_gain, same as ((m_self_merges[chunk_idx] + 0) % 1) == 0\r\nrMrMrMrMrMrM: ((m_self_merges[chunk_idx] + 1) % 2) == 0: 4796320 # same as ((m_self_merges[chunk_idx] + 0) % 2) != 0\r\nrrMrrMrrMrrM: ((m_self_merges[chunk_idx] + 1) % 3) == 0: 2473649\r\nrrrMrrrMrrrM: ((m_self_merges[chunk_idx] + 1) % 4) == 0: 1520079\r\nrrrrMrrrrMrr: ((m_self_merges[chunk_idx] + 1) % 5) == 0: 2107109\r\nrrrrrMrrrrrM: ((m_self_merges[chunk_idx] + 1) % 6) == 0: 882761\r\n\r\nrrrrrrrrrrrr: ((m_self_merges[chunk_idx] + 1) % 1) != 0: 416225 # always random, same as ((m_self_merges[chunk_idx] + 0) % 1) != 0\r\nMrMrMrMrMrMr: ((m_self_merges[chunk_idx] + 1) % 2) != 0: 6012644 # same as ((m_self_merges[chunk_idx] + 0) % 2) == 0\r\nMMrMMrMMrMrM: ((m_self_merges[chunk_idx] + 1) % 3) != 0: 2223704 # the current PR\r\nMMMrMMMrMMrM: ((m_self_merges[chunk_idx] + 1) % 4) != 0: 872725\r\nMMMMrMMMMrMM: ((m_self_merges[chunk_idx] + 1) % 5) != 0: 916415\r\nMMMMMrMMMMMr: ((m_self_merges[chunk_idx] + 1) % 6) != 0: 668819\r\n\r\nMMMMMMMMMMMM: m_self_merges[chunk_idx] >= 0: 387722 # always max_gain, same as ((m_self_merges[chunk_idx] + 0) % 1) == 0\r\nrMMMMMMMMMMM: m_self_merges[chunk_idx] >= 1: 471715\r\nrrMMMMMMMMMM: m_self_merges[chunk_idx] >= 2: 598471\r\nrrrMMMMMMMMM: m_self_merges[chunk_idx] >= 3: 270490\r\nrrrrMMMMMMMM: m_self_merges[chunk_idx] >= 4: 248124\r\nrrrrrMMMMMMM: m_self_merges[chunk_idx] >= 5: 291305\r\n\r\nrrrrrrrrrrrr: m_self_merges[chunk_idx] < 0: 416225 # always random, same as ((m_self_merges[chunk_idx] + 0) % 1) != 0\r\nMrrrrrrrrrrr: m_self_merges[chunk_idx] < 1: 700377\r\nMMrrrrrrrrrr: m_self_merges[chunk_idx] < 2: 546130\r\nMMMrrrrrrrrr: m_self_merges[chunk_idx] < 3: 464325\r\nMMMMrrrrrrrr: m_self_merges[chunk_idx] < 4: 467645\r\nMMMMMrrrrrrr: m_self_merges[chunk_idx] < 5: 523463\r\n```\r\n\r\nAs expected, generally more max-gain is better, but it does seem that alternating often between the two strategies is worse than sticking with one. Also - and this may be an artifact of a biased test set - it seems that doing a few random iterations first helps.",
+          "created_at": "2026-01-06T00:04:00Z"
+        },
+        {
+          "user": "gmaxwell",
+          "body": "You could consider if there is some other progress metric you could gate randomness on--  it really only needs to use random if its consistently not making progress under max_gain (or even 'less than expected progress').    Might also be worth checking if there isn't some bug with random since IIRC in the initial test when you decided to MMrMMr didn't have as much of negative effect over MMM as you're seeing now.",
+          "created_at": "2026-01-06T01:12:58Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Certainly there seems to be something wrong. These clusters that need millions/billions of iterations only need a few 1000 iterations in my Python version of the algorithm, which ought to be roughly identical to the always-random strategy.\r\n\r\nEDIT: found the bug, indeed inside the random strategy (it would under certain conditions split equal-feerate tops off).",
+          "created_at": "2026-01-06T04:10:58Z"
+        },
+        {
+          "user": "sipa",
+          "body": "See updated results above. ",
+          "created_at": "2026-01-06T15:46:50Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Rebased, changed the approach here to \"rMMMMMrMMMMM\" (`((m_self_merges[chunk_idx] + 0) % 6) != 0`), and fixed the bug in the random strategy.",
+          "created_at": "2026-01-06T21:53:20Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `Windows native, fuzz, VS 2022`: https://github.com/bitcoin/bitcoin/actions/runs/20908711728/job/60067268129</sub>\n<sub>LLM reason (✨ experimental): Fuzz test txgraph failed due to an assertion violation (iters <= iters_for_optimal) causing the fuzz target to exit with code 1.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2026-01-12T06:21:15Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/actions/runs/20942872497/job/60179846256</sub>\n<sub>LLM reason (✨ experimental): Lint check failed (scripted-diffs) causing the CI failure.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2026-01-13T03:21:47Z"
+        }
+      ]
+    },
+    {
+      "number": 34022,
+      "title": "validation: Remove min_pow_checked arg in ProcessNewBlockHeaders",
+      "body": "It is always set to true, since its introduction in ed6cddd98e32263fc116a4380af6d66da20da990. It is supposed to \"...ensure that all call-sites which might cause a new header to be accepted into memory have to grapple with the question of whether the header is safe to accept, or needs further validation\". I think it has surpassed its usefulness at this point for this function. Headers presync is a well-established concept, and developers imitate existing call sites, without necessarily considering its nested implication, calling its usefulness into question. The path also lacks unit and fuzz tests.",
+      "state": "closed",
+      "user": "sedited",
+      "created_at": "2025-12-06T12:20:30Z",
+      "updated_at": "2025-12-15T20:28:36Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34022",
+      "labels": [
+        "Validation"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34022.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/34022#issuecomment-3629227687), [danielabrozzoni](https://github.com/bitcoin/bitcoin/pull/34022#pullrequestreview-3562829354), [yuvicc](https://github.com/bitcoin/bitcoin/pull/34022#issuecomment-3649377448) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33856](https://github.com/bitcoin/bitcoin/pull/33856) (kernel, validation: Refactor ProcessNewBlockHeaders to return BlockValidationState by yuvicc)\n* [#32740](https://github.com/bitcoin/bitcoin/pull/32740) (refactor: Header sync optimisations & simplifications by danielabrozzoni)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible typos and grammar issues:\n\n- validationinterface -> validation interface (or ValidationInterface) [compound word lacks spacing/incorrect capitalization and may be unclear; write as two words \"validation interface\" or use the actual class name \"ValidationInterface\"]\n\n\n\n<sup>2025-12-08</sup>\n",
+          "created_at": "2025-12-06T12:20:36Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "Concept ACK",
+          "created_at": "2025-12-07T01:57:29Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> It is always set to true\r\n\r\n[🌍👨‍🚀🔫👨‍🚀](https://www.twitchquotes.com/copypastas/4370)\r\n\r\nThis was intentional, as explained in the commit message of ed6cddd98e32263fc116a4380af6d66da20da990 (part of #25717):\r\n\r\n> This commit adds a new argument to `AcceptBlockHeader()` so that we can ensure that all call-sites which might cause a new header to be accepted into memory have to grapple with the question of whether the header is safe to accept, or needs further validation.\r\n\r\nNot sure if we need to keep it forever, as you say in your comment: https://github.com/bitcoin/bitcoin/pull/34022#discussion_r2596217297.\r\n\r\ncc @sdaftuar ",
+          "created_at": "2025-12-08T18:44:03Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Updated beff6ff964c5c1b4a96af89daf6b2ddaede3464a -> 8ca9997e48bb2067ea83fabb1c640af72178f97c ([rmMinPowChecked_0](https://github.com/TheCharlatan/bitcoin/tree/rmMinPowChecked_0) -> [rmMinPowChecked_1](https://github.com/TheCharlatan/bitcoin/tree/rmMinPowChecked_1), [compare](https://github.com/TheCharlatan/bitcoin/compare/rmMinPowChecked_0..rmMinPowChecked_1))\r\n\r\n* Addressed [comment](https://github.com/bitcoin/bitcoin/pull/34022#discussion_r2599070189), and [comment](https://github.com/bitcoin/bitcoin/pull/34022#discussion_r2596019236), documenting the proof of work pre-check as an anti-dos measure in the function docstring. ",
+          "created_at": "2025-12-08T22:11:30Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "reACK 8ca9997e48bb2067ea83fabb1c640af72178f97c\r\n\r\nonly doc updates since last ACK",
+          "created_at": "2025-12-08T22:14:59Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "ACK 8ca9997e48bb2067ea83fabb1c640af72178f97c",
+          "created_at": "2025-12-13T12:41:56Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "@mzumsande a constant value with comment won't bite back if misused: can we rather add a test that makes sure this remains correct (while removing the misleading arg)?",
+          "created_at": "2025-12-14T20:54:44Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Re https://github.com/bitcoin/bitcoin/pull/34022#pullrequestreview-3575826688\r\n\r\n> So I think it's justified from a defensive programming standpoint to have a bit of extra caution by making the PoW check explicit so that any callers in future changes are forced to deal with this, even if the documentation is missed.\r\n\r\nI just don't think this does much from a defensive programming perspective. Reading through the comments here, people seem confused on what it even is supposed to signal, and my guess is that it just being true everywhere leads people to just blindly copy that anyway. \r\n\r\nThat said, if people believe a bit of defensive programming is necessary here, an alternative to this could be (and this is something I could similarly see working for Blocks with regards to `fChecked`) introducing a separate min pow checked header type that can only be retrieved from sources where we indeed do the check, or have clearly ascertained that it is harmless. That should leave little in the way of applying it inconsistently, or being confused about its purpose. What do you think?",
+          "created_at": "2025-12-14T21:14:44Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> What do you think?\r\n\r\nIf doable, introducing some type safety here does sound compelling.",
+          "created_at": "2025-12-15T09:02:38Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> I just don't think this does much from a defensive programming perspective. Reading through the comments here, people seem confused on what it even is supposed to signal, and my guess is that it just being true everywhere leads people to just blindly copy that anyway.\r\n\r\nTo address that type of confusion maybe just the name would need be clearer, for example `has_minimum_acceptable_pow` or similar.\r\n\r\n>  can we rather add a test that makes sure this remains correct (while removing the misleading arg)?\r\n\r\nWhat that acceptable minimum work is depends on the context and how trusted the caller is, could be minchainwork or nothing - what would a unit or functional test for this look like? \r\n\r\n> That said, if people believe a bit of defensive programming is necessary here, an alternative to this could be (and this is something I could similarly see working for Blocks with regards to fChecked) introducing a separate min pow checked header type that can only be retrieved from sources where we indeed do the check, or have clearly ascertained that it is harmless.\r\n\r\nthat sounds like an interesting idea, even though I'm not sure I understand it completely yet.\r\n\r\nOne point for removing the arg that hasn't been brought up yet is that we now have a  fuzz test with a rather general design (#30661) that should catch many types of possible future bugs / regressions.\r\n\r\nAlso worth noting that there is ongoing and planned work in this area (#33547), so even if headers-sync is well-established by now, the underlying code might undergo some changes in the near future.\r\n",
+          "created_at": "2025-12-15T18:06:10Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Thanks for the reviews. I think I'll close this again based on the number of concerns raised. A more comprehensive solution that retains some defensive techniques to prohibit acceptance of low-work headers was raised repeatedly as desirable. I'd prefer to do that at some point on a clean slate.",
+          "created_at": "2025-12-15T20:28:35Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 34021,
+      "title": "ci: The bitcoincore.org depends fallback is missing sqlite-autoconf-3500400.tar.gz",
+      "body": "The depends fallback is down again?\r\n\r\n```\r\n$ curl --show-headers 'https://bitcoincore.org/depends-sources/sqlite-autoconf-3500400.tar.gz'\r\nHTTP/2 404 \r\nserver: nginx\r\ndate: Fri, 28 Nov 2025 09:21:07 GMT\r\ncontent-type: text/html\r\ncontent-length: 146\r\nstrict-transport-security: max-age=63072000; includeSubDomains; preload\r\n```\r\n\r\n_Originally posted by @maflcko in https://github.com/bitcoin/bitcoin/issues/32655#issuecomment-3588516475_\r\n            ",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-12-06T10:15:32Z",
+      "updated_at": "2025-12-11T18:36:13Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34021",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "theuni",
+          "body": "Yeah, there was a firewall issue after a server move. Fixed now, and sqlite-autoconf-3500400.tar.gz is available.",
+          "created_at": "2025-12-11T18:36:02Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 4,
+    "issues": 1
+  }
+}

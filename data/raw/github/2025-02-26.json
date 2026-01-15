@@ -1,0 +1,70 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:20:29.037657+00:00",
+  "date": "2025-02-26",
+  "pull_requests": [],
+  "issues": [
+    {
+      "number": 31957,
+      "title": "callgrind_annotate broken after cmake migration?",
+      "body": "Steps to reproduce on a fresh install of Ubuntu LTS 24.04:\n\n* Install packages and clone repo: `( export DEBIAN_FRONTEND=noninteractive && apt update && apt install git ccache make build-essential libtool cmake autotools-dev automake pkg-config bsdmainutils python3     libevent-dev libboost-dev  libsqlite3-dev valgrind  -y && git clone https://github.com/bitcoin/bitcoin.git b-c ) && cd b-c`\n* `git checkout 338bc2cd261ba3daf7fb494f8cb4a534762e292c  # cmake migration (allows to test autotools and cmake on the same commit)`\n* Apply a diff to create more function calls in one hotspot (optional):\n\n```diff\ndiff --git a/src/test/util_tests.cpp b/src/test/util_tests.cpp\nindex c2c725d676..704c060749 100644\n--- a/src/test/util_tests.cpp\n+++ b/src/test/util_tests.cpp\n@@ -273,13 +273,15 @@ BOOST_AUTO_TEST_CASE(util_ReplaceAll)\n         ReplaceAll(test, search, substitute);\n         BOOST_CHECK_EQUAL(test, expected);\n     };\n-\n+    int i{10000};\n+while (i-->0){\n     test_replaceall(\"\", \"foo\", original);\n     test_replaceall(original, \"foo\", \"foo\");\n     test_replaceall(\"%s\", \"foo\", \"A test \\\"foo\\\" string 'foo'.\");\n     test_replaceall(\"\\\"\", \"foo\", \"A test foo%sfoo string '%s'.\");\n     test_replaceall(\"'\", \"foo\", \"A test \\\"%s\\\" string foo%sfoo.\");\n }\n+}\n \n BOOST_AUTO_TEST_CASE(util_TrimString)\n {\n```\n\n* Then create two out-of-tree builds, run a test in callgrind, and annotate it:\n* `./autogen.sh && rm -rf ./bld-a && mkdir bld-a && ( cd bld-a && ../configure && make -j$(nproc) )`\n* `rm -rf ./bld-c && cmake -B ./bld-c && cmake --build ./bld-c -j $(nproc)`\n* `valgrind --tool=callgrind --callgrind-out-file=cg-a-%p.out ./bld-a/src/test/test_bitcoin -t util_tests/util_ReplaceAll`\n* `valgrind --tool=callgrind --callgrind-out-file=cg-c-%p.out ./bld-c/src/test/test_bitcoin -t util_tests/util_ReplaceAll`\n* `callgrind_annotate ./cg-a-40328.out`\n* `callgrind_annotate ./cg-c-39984.out`\n\nThe cmake version of the last call will print a warning:\n\n```\n--------------------------------------------------------------------------------\nThe following files chosen for auto-annotation could not be found:\n--------------------------------------------------------------------------------\n  ./bld-c/src/crypto/./src/compat/byteswap.h\n  ./bld-c/src/crypto/./src/crypto/sha256.cpp\n  ./bld-c/src/crypto/./src/crypto/sha512.cpp\n  ./bld-c/src/test/./src/test/crypto_tests.cpp\n  ./bld-c/src/test/./src/test/util_tests.cpp\n  ./bld-c/src/util/./src/random.cpp\n  ./bld-c/src/util/./src/util/string.cpp\n...\n```\n\nIt also seems not possible to fix with `--include=dir`, as the path look a bit odd (non-existing)",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2025-02-26T15:48:13Z",
+      "updated_at": "2026-01-14T14:58:18Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31957",
+      "labels": [
+        "Build system",
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "hebasto",
+          "body": "Are there any requirements for debug info when using the `valgrind --tool=callgrind` + `callgrind_annotate` toolset? Are there any incompatible or unsupported compiler flags?",
+          "created_at": "2025-03-26T13:47:20Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "I've tested the master branch @ c0b7159de47592c95c6db061de682b4af4058102 with the diff from https://github.com/bitcoin/bitcoin/issues/31957#issue-2882058716 on Ubuntu 24.04:\n```\n$ callgrind_annotate ./cg-c-72381.out\n<snip>\n...\n--------------------------------------------------------------------------------\nThe following files chosen for auto-annotation could not be found:\n--------------------------------------------------------------------------------\n  ./elf/../sysdeps/generic/dl-new-hash.h\n  ./elf/../sysdeps/x86_64/dl-machine.h\n  ./elf/./elf/dl-lookup.c\n  ./elf/./elf/dl-reloc.c\n  ./elf/./elf/do-rel.h\n  ./malloc/./malloc/arena.c\n  ./malloc/./malloc/malloc.c\n  ./string/../sysdeps/x86_64/multiarch/../multiarch/strcmp-sse2.S\n  ./string/../sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S\n  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S\n  ./string/../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S\n  ./string/../sysdeps/x86_64/multiarch/strchr-avx2.S\n\n--------------------------------------------------------------------------------\nIr                   \n--------------------------------------------------------------------------------\n787,159,045 (83.13%)  events annotated\n\n```\n\nUPD. When configured `-DWITH_CCACHE=OFF`:\n```\n--------------------------------------------------------------------------------\nThe following files chosen for auto-annotation could not be found:\n--------------------------------------------------------------------------------\n  ./elf/../sysdeps/generic/dl-new-hash.h\n  ./elf/../sysdeps/x86_64/dl-machine.h\n  ./elf/./elf/dl-lookup.c\n  ./elf/./elf/dl-reloc.c\n  ./elf/./elf/do-rel.h\n  ./malloc/./malloc/arena.c\n  ./malloc/./malloc/malloc.c\n  ./string/../sysdeps/x86_64/multiarch/../multiarch/strcmp-sse2.S\n  ./string/../sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S\n  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S\n  ./string/../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S\n  ./string/../sysdeps/x86_64/multiarch/strchr-avx2.S\n  build/./compat/byteswap.h\n  build/./crypto/sha256.cpp\n  build/./crypto/sha512.cpp\n  build/./random.cpp\n  build/./test/crypto_tests.cpp\n  build/./test/util_tests.cpp\n  build/./util/string.cpp\n\n--------------------------------------------------------------------------------\n```",
+          "created_at": "2025-03-26T13:52:49Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I've tested the master branch @ [c0b7159](https://github.com/bitcoin/bitcoin/commit/c0b7159de47592c95c6db061de682b4af4058102) with the diff from [#31957 (comment)](https://github.com/bitcoin/bitcoin/issues/31957#issue-2882058716) on Ubuntu 24.04:\n\nI can't reproduce. What are the exact steps to reproduce from a fresh install of the operating system, like in OP?",
+          "created_at": "2025-03-26T15:28:57Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Ah, looks like this is related to the prefix-map and the following workaround fixes it:\n\n```diff\ndiff --git a/CMakeLists.txt b/CMakeLists.txt\nindex f264acc..9ed5b46 100644\n--- a/CMakeLists.txt\n+++ b/CMakeLists.txt\n@@ -488,12 +488,6 @@ try_append_cxx_flags(\"-fno-extended-identifiers\" TARGET core_interface SKIP_LINK\n # which can cause issues with coverage builds, particularly when using\n # Clang in the OSS-Fuzz environment due to its use of other options\n # and a third party script, or with GCC.\n-try_append_cxx_flags(\"-fdebug-prefix-map=A=B\" TARGET core_interface SKIP_LINK\n-  IF_CHECK_PASSED \"-fdebug-prefix-map=${PROJECT_SOURCE_DIR}/src=.\"\n-)\n-try_append_cxx_flags(\"-fmacro-prefix-map=A=B\" TARGET core_interface SKIP_LINK\n-  IF_CHECK_PASSED \"-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/src=.\"\n-)\n \n # GCC versions 13.2 (and earlier) are subject to a class of bugs, see\n # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90348 and the meta bug\n",
+          "created_at": "2025-11-18T15:07:05Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Maybe the prefix-map can be disabled by default or an option could be added to disable it, or it could be disabled on `-DWITH_CCACHE=NO`, as there is no need for it then?",
+          "created_at": "2025-11-18T15:10:21Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Maybe the prefix-map can be disabled by default or an option could be added to disable it, or it could be disabled on `-DWITH_CCACHE=NO`, as there is no need for it then?\n\nhttps://github.com/bitcoin/bitcoin/commit/788c1324f3d840f7a39b8bc3537dcff26ca0b552 could be considered for reverting. However, doing so would resurface https://github.com/bitcoin/bitcoin/issues/30799.",
+          "created_at": "2025-11-23T10:43:30Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> > Maybe the prefix-map can be disabled by default or an option could be added to disable it, or it could be disabled on `-DWITH_CCACHE=NO`, as there is no need for it then?\n> \n> [788c132](https://github.com/bitcoin/bitcoin/commit/788c1324f3d840f7a39b8bc3537dcff26ca0b552) could be considered for reverting. However, doing so would resurface [#30799](https://github.com/bitcoin/bitcoin/issues/30799).\n\nAnd the latter could be addressed using another approach:\n```diff\n--- a/src/logging.cpp\n+++ b/src/logging.cpp\n@@ -410,7 +410,7 @@ void BCLog::Logger::FormatLogStrInPlace(std::string& str, BCLog::LogFlags catego\n     str.insert(0, GetLogPrefix(category, level));\n \n     if (m_log_sourcelocations) {\n-        str.insert(0, strprintf(\"[%s:%d] [%s] \", RemovePrefixView(source_loc.file_name(), \"./\"), source_loc.line(), source_loc.function_name()));\n+        str.insert(0, strprintf(\"[%s:%d] [%s] \", RemovePrefixView(RemovePrefixView(source_loc.file_name(), \"./\"), \"src/\"), source_loc.line(), source_loc.function_name()));\n     }\n \n     if (m_log_threadnames) {\n```",
+          "created_at": "2025-11-23T11:08:14Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "For reference, the current steps to test on a fresh install of Ubuntu 26.04 LTS:\n\n```\n    1  ( export DEBIAN_FRONTEND=noninteractive && apt update && apt install git ccache make build-essential libtool cmake autotools-dev automake pkg-config bsdmainutils python3     libevent-dev libboost-dev  libsqlite3-dev valgrind  -y && git clone https://github.com/bitcoin/bitcoin.git b-c ) && cd b-c \n    7  git apply /tmp/a  # apply optional patch\n    9  rm -rf ./bld-c && cmake -DENABLE_IPC=OFF -B ./bld-c && cmake --build ./bld-c -j $(nproc) \n   10  valgrind --tool=callgrind --callgrind-out-file=cg-c-%p.out ./bld-c/bin/test_bitcoin -t util_tests/util_ReplaceAll \n   11  callgrind_annotate ./cg-c-19826.out \n```\n\nThis allows testing with and without https://github.com/bitcoin/bitcoin/pull/34281 to confirm it is fixed.",
+          "created_at": "2026-01-14T14:58:18Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 0,
+    "issues": 1
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:24:08.392872+00:00",
+  "date": "2025-10-18",
+  "pull_requests": [
+    {
+      "number": 33654,
+      "title": "fix: invalid plist format and update values to meet macOS 1.0 standard",
+      "body": "corrected the outdated and invalid parts of the plist file to comply with the current macOS property list 1.0 specification.\r\n\r\n**changes:**\r\n\r\n* replaced the old `SYSTEM` declaration and `version=\"0.9\"` with the proper `PUBLIC` declaration and `version=\"1.0\"`.\r\n* updated `LSMinimumSystemVersion` from `14` to `10.14.0` (using the proper `X.Y.Z` format).\r\n* changed `<string>True</string>` to `<true/>` to use a valid boolean value instead of a string.\r\n\r\nnow validates correctly with Apple’s DTD and works as expected on modern macOS versions.\r\n",
+      "state": "closed",
+      "user": "famouswizard",
+      "created_at": "2025-10-18T11:09:36Z",
+      "updated_at": "2025-10-21T08:49:33Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33654",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33654.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-18T11:09:40Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33655,
+      "title": "importdescriptors: check for errors before rescanning",
+      "body": "I tried to import two descriptors with labels but one was an internal descriptor. I didn't realize that was not allowed until the entire rescan (for the first descriptor) completed and the return object included  success false with that error message, for the second descriptor.",
+      "state": "open",
+      "user": "pinheadmz",
+      "created_at": "2025-10-18T12:49:22Z",
+      "updated_at": "2026-01-14T15:17:41Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33655",
+      "labels": [
+        "Wallet",
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "waketraindev",
+          "body": "Reference: #31514, #32376, #33614 ",
+          "created_at": "2025-10-18T16:40:10Z"
+        },
+        {
+          "user": "naiyoma",
+          "body": "Currently, if there are any validation errors, they're added in the result and returned after a rescan . I think we should validate all descriptors first without modifying the wallet. If any descriptor fails validation, throw an error immediately and abort— no rescan.\nA possible fix for this:\n\n```diff\ndiff --git a/src/wallet/rpc/backup.cpp b/src/wallet/rpc/backup.cpp                                                                                                                      \nindex 4b4e432176..342f27dc13 100644                                                                                                                                                     \n--- a/src/wallet/rpc/backup.cpp                                                                                                                                                         \n+++ b/src/wallet/rpc/backup.cpp                                                                                                                                                         \n@@ -137,7 +137,7 @@ static int64_t GetImportTimestamp(const UniValue& data, int64_t now)                                                                                                \n     throw JSONRPCError(RPC_TYPE_ERROR, \"Missing required timestamp field for key\");                                                                                                    \n }                                                                                                                                                                                      \n                                                                                                                                                                                        \n-static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, const int64_t timestamp) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)                                     \n+static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, const int64_t timestamp, bool validate_only = false) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)\n {                                                                                          \n     UniValue warnings(UniValue::VARR);      \n     UniValue result(UniValue::VOBJ);\n@@ -224,8 +224,9 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c\n             throw JSONRPCError(RPC_WALLET_ERROR, \"Cannot import private keys to a wallet with private keys disabled\");\n         }\n                                                                                            \n+                                                                                           \n         for (size_t j = 0; j < parsed_descs.size(); ++j) {      \n-            auto parsed_desc = std::move(parsed_descs[j]);                                                                                                                             \n+            const auto& parsed_desc = parsed_descs[j];\n             if (parsed_descs.size() == 2) {\n                 desc_internal = j == 1;\n             } else if (parsed_descs.size() > 2) {\n@@ -259,6 +260,20 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c\n                    warnings.push_back(\"Not all private keys provided. Some wallet functionality may return unexpected errors\");\n                }\n             }\n+        }\n+        }\n+        if (validate_only) {\n+            result.pushKV(\"success\", UniValue(true));\n+            PushWarnings(warnings, result);\n+            return result;\n+        }\n+        for (size_t j = 0; j < parsed_descs.size(); ++j) {\n+            auto parsed_desc = std::move(parsed_descs[j]);\n+            bool desc_internal = internal.has_value() && internal.value();\n+            if (parsed_descs.size() == 2) {\n+                desc_internal = j == 1;\n+            } else if (parsed_descs.size() > 2) {\n+                CHECK_NONFATAL(!desc_internal);\n+            }\n  \n             WalletDescriptor w_desc(std::move(parsed_desc), timestamp, range_start, range_end, next_index);\n  \n@@ -379,6 +394,15 @@ RPCHelpMan importdescriptors()\n  \n         CHECK_NONFATAL(pwallet->chain().findBlock(pwallet->GetLastBlockHash(), FoundBlock().time(lowest_timestamp).mtpTime(now)));\n  \n+        for (const UniValue& request : requests.getValues()) {\n+        const int64_t timestamp = std::max(GetImportTimestamp(request, now), minimum_timestamp);\n+        const UniValue result = ProcessDescriptorImport(*pwallet, request, timestamp, /*validate_only=*/true);\n+        // If any validation fails, throw immediately and abort everything\n+        if (!result[\"success\"].get_bool()) {\n+            throw result[\"error\"];\n+        }\n+    }\n+\n         // Get all timestamps and extract the lowest timestamp\n\n\n```\n",
+          "created_at": "2025-11-05T11:52:32Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "@naiyoma thanks for taking an interest in this and digging in! I think a cleaner approach would be to separate the validation into a separate function entirely, so we validate in a loop first then process in a second loop. It smells better than adding an extra argument and feels more bitcoin-core-y. If you open a PR like that I'll help you get it merged ;-)",
+          "created_at": "2025-11-05T14:09:39Z"
+        },
+        {
+          "user": "naiyoma",
+          "body": "\n\n\n> ! I think a cleaner approach would be to separate the validation into a separate function entirely, so we validate in a loop first then process in a second loop. It smells better than adding an extra argument and feels more bitcoin-core-y. If you open a PR like that I'll help you get it merged ;-)\n\ngreat, I'll work on this \n\n",
+          "created_at": "2025-11-06T12:14:36Z"
+        }
+      ]
+    },
+    {
+      "number": 33648,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "dipankarjana3657-bot",
+      "created_at": "2025-10-18T05:16:18Z",
+      "updated_at": "2025-10-21T08:32:01Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33648",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 1,
+    "issues": 2
+  }
+}

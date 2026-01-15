@@ -1,0 +1,519 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:24:55.056400+00:00",
+  "date": "2025-03-14",
+  "pull_requests": [
+    {
+      "number": 32073,
+      "title": "net: Block v2->v1 transport downgrade if !fNetworkActive",
+      "body": "We might have just set `CNode::fDisconnect` in the first loop because of `!CConnman::fNetworkActive`.\r\n\r\nAttempting to reconnect using v1 transport just because `fNetworkActive` was set to `false` at the \"right\" stage in the v2 handshake does not make sense.\r\n\r\nIssue [discovered](https://github.com/bitcoin/bitcoin/pull/31633#discussion_r1930908304) by davidgumberg.",
+      "state": "closed",
+      "user": "hodlinator",
+      "created_at": "2025-03-14T21:30:57Z",
+      "updated_at": "2025-03-24T21:43:51Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32073",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32073.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32073#issuecomment-2731477125), [vasild](https://github.com/bitcoin/bitcoin/pull/32073#pullrequestreview-2698186277), [mabu44](https://github.com/bitcoin/bitcoin/pull/32073#issuecomment-2738096709), [stratospher](https://github.com/bitcoin/bitcoin/pull/32073#issuecomment-2739349521) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32061](https://github.com/bitcoin/bitcoin/pull/32061) ([draft] Replace libevent with our own HTTP and socket-handling implementation by pinheadmz)\n* [#32015](https://github.com/bitcoin/bitcoin/pull/32015) (net: replace manual reference counting of CNode with shared_ptr by vasild)\n* [#30988](https://github.com/bitcoin/bitcoin/pull/30988) (Split CConnman by vasild)\n* [#30951](https://github.com/bitcoin/bitcoin/pull/30951) (net: option to disallow v1 connection on ipv4 and ipv6 peers by stratospher)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-14T21:31:01Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "#### How I tested\r\n\r\nOn `master`, run mainnet node:\r\n```shell\r\nbitcoind -debug=net -daemonwait\r\n```\r\nTail log for relevant info:\r\n```shell\r\ntail -f ~/.bitcoin/debug.log | grep -E \"SetNetworkActive|Network not active|retrying\"\r\n```\r\nIn another console, spam:\r\n```shell\r\nbuild/bin/bitcoin-cli setnetworkactive false && sleep 0.5 && build/bin/bitcoin-cli setnetworkactive true\r\n```\r\n\r\nExpected grep results:\r\n```\r\n2025-03-14T21:12:17Z SetNetworkActive: false\r\n2025-03-14T21:12:17Z [net] Network not active, disconnecting peer=9\r\n2025-03-14T21:12:17Z SetNetworkActive: true\r\n2025-03-14T21:12:18Z SetNetworkActive: false\r\n...\r\n2025-03-14T21:12:23Z SetNetworkActive: true\r\n2025-03-14T21:12:23Z SetNetworkActive: false\r\n2025-03-14T21:12:24Z [net] Network not active, disconnecting peer=10\r\n2025-03-14T21:12:24Z [net] retrying with v1 transport protocol for peer=10\r\n```",
+          "created_at": "2025-03-14T21:32:48Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "> Could you update the online/offline terminology in the PR?\r\n\r\nFixed to use `fNetworkActive` instead, agree it was a bit of a stretch.\r\n\r\n> If we're attempting a v2 connection during the time period when the `fNetworkActive` option is toggled, we would have the 1 extra connection attempt but less probability of this happening/`OpenNetworkConnection` [immediately returns](https://github.com/bitcoin/bitcoin/blob/a799415d84d392c0f877d3619583b9a16f940c54/src/net.cpp#L2996) anyways.\r\n\r\nYes, seems like we wouldn't get very far with reconnection anyway, but good to avoid the log message.",
+          "created_at": "2025-03-17T16:27:17Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "[Windows CI failure](https://github.com/bitcoin/bitcoin/actions/runs/13904008032/job/38902487830?pr=32073) is unrelated:\r\n```\r\nDownloading https://gitlab.freedesktop.org//freetype/freetype/-/archive/VER-2-13-3/freetype-VER-2-13-3.tar.gz -> freetype-freetype-VER-2-13-3.tar.gz\r\nerror: https://gitlab.freedesktop.org//freetype/freetype/-/archive/VER-2-13-3/freetype-VER-2-13-3.tar.gz: failed: status code 503\r\n```\r\nCurrently tracked as #32085.",
+          "created_at": "2025-03-17T16:44:56Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "Tested and Reviewed ACK 6869fb417096b43ba7f7\r\n\r\n~I could be wrong, but I think https://github.com/bitcoin/bitcoin/commit/0f4e20728d231935f0140845370090a760ae93af was more correct (see  https://github.com/bitcoin/bitcoin/pull/32073#discussion_r1999868812), but I don't think it's that important.~\r\nI was wrong, see https://github.com/bitcoin/bitcoin/pull/32073#discussion_r2001138653\r\n\r\n---\r\n\r\nAnecdotally, the issue this fixes is more likely to occur on startup, probably because of how many new connections we're making, so I used this script to reproduce:\r\n```bash\r\nbitcoind -debug=net -daemonwait  && sleep 20 \\\r\n  && bitcoin-cli setnetworkactive false && sleep 0.5 \\\r\n  && bitcoin-cli setnetworkactive true && sleep 0.5 \\\r\n  && bitcoin-cli  stop\r\n```\r\n\r\nMessage about retrying v1 connection doesn't occur on this branch.",
+          "created_at": "2025-03-18T02:56:50Z"
+        },
+        {
+          "user": "mabu44",
+          "body": "ACK 6869fb417096b43ba7f74bf767ca3e41b9894899\r\nReviewed the code and tested it with the command provided in https://github.com/bitcoin/bitcoin/pull/32073#issuecomment-2731477125. I was able to reproduce the problem on master only once and never on this branch.",
+          "created_at": "2025-03-19T20:57:50Z"
+        },
+        {
+          "user": "stratospher",
+          "body": "ACK 6869fb4. I've reviewed the code but don't have strong preference for this branch vs master since only functional change is just a single log not being printed in a low probability scenario (we happen to be attempting v2 connection when P2P network activity is being turned off).",
+          "created_at": "2025-03-20T06:34:11Z"
+        }
+      ]
+    },
+    {
+      "number": 32071,
+      "title": "build: Drop option to disable hardening.",
+      "body": "Follow up to #32038 which dropped `NO_HARDEN` from depends builds, this PR drops the `ENABLE_HARDENING` build option since disabling hardening of binaries should not be a supported or maintained use case. With this change, hardening flags are always enabled.\r\n\r\nIndividual hardening flags and options can still be disabled by appending flags, e.g.:\r\n\r\n```bash\r\ncmake -B build \\\r\n  -DAPPEND_CPPFLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fcf-protection=none -fno-stack-clash-protection' \\\r\n  -DAPPEND_LDFLAGS='-Wl,-z,lazy -Wl,-z,norelro -Wl,-z,noseparate-code'\r\n```\r\n\r\nThere is an issue with NetBSD 10.0's dynamic linker that makes one of the hardening linker flags, `-z separate-code`, [problematic](https://github.com/bitcoin/bitcoin/pull/28724#issuecomment-2589347934), so this PR also introduces a check to prevent the use of this flag in NetBSD versions < 11.0, (where this issue is [fixed](https://github.com/NetBSD/src/commit/acf7fb3abf88f29f6b15c894b6b18cadc12763c0)). The fix for this [might be backported](https://mail-index.netbsd.org/tech-userlevel/2023/01/05/msg013670.html) to NetBSD 10.0.\r\n\r\nI suggest reviewing the diff with whitespace changes hidden (`git diff -w` or using github's hide whitespace option)",
+      "state": "closed",
+      "user": "davidgumberg",
+      "created_at": "2025-03-14T18:57:00Z",
+      "updated_at": "2025-04-28T12:32:26Z",
+      "comments": 13,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32071",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32071.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/32071#pullrequestreview-2712884249), [laanwj](https://github.com/bitcoin/bitcoin/pull/32071#pullrequestreview-2712899044), [janb84](https://github.com/bitcoin/bitcoin/pull/32071#pullrequestreview-2740901480), [vasild](https://github.com/bitcoin/bitcoin/pull/32071#pullrequestreview-2756079602), [musaHaruna](https://github.com/bitcoin/bitcoin/pull/32071#pullrequestreview-2776493428) |\n| Concept ACK | [sipa](https://github.com/bitcoin/bitcoin/pull/32071#pullrequestreview-2760085866) |\n| Stale ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32071#pullrequestreview-2687522118) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n",
+          "created_at": "2025-03-14T18:57:04Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "> The only case I'm aware of where some hardening flags cause an issue is on NetBSD 10, and this is expected to be fixed in NetBSD 11.\r\n\r\nRight. Not sure if it's worth it in this specific case, as it's going to be fixed upstream soon, but imo in general if some flags (hardening or otherwise) are a problem on some platform this should be taken into account by the build system automatically instead of having the user disable hardening entirely, which is a hassle and creates a bigger risk than necessary.",
+          "created_at": "2025-03-17T15:01:52Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> > The only case I'm aware of where some hardening flags cause an issue is on NetBSD 10, and this is expected to be fixed in NetBSD 11.\r\n> \r\n> in general if some flags (hardening or otherwise) are a problem on some platform this should be taken into account by the build system automatically instead of having the user disable hardening entirely.\r\n\r\nOkay, I think this branch will break building on NetBSD, and shouldn't be merged as-is, I'll follow up.",
+          "created_at": "2025-03-18T03:56:26Z"
+        },
+        {
+          "user": "fanquake",
+          "body": ">  I'll follow up.\r\n\r\nDo you want to split out 7d34c19853e7a5528d69c5f30580e7e9712e61f0? That can be merged now.",
+          "created_at": "2025-03-18T03:59:39Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> Do you want to split out [7d34c19](https://github.com/bitcoin/bitcoin/commit/7d34c19853e7a5528d69c5f30580e7e9712e61f0)? That can be merged now.\r\n\r\nOpened https://github.com/bitcoin/bitcoin/pull/32087",
+          "created_at": "2025-03-18T04:34:11Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> > > The only case I'm aware of where some hardening flags cause an issue is on NetBSD 10, and this is expected to be fixed in NetBSD 11.\r\n> > \r\n> > \r\n> > in general if some flags (hardening or otherwise) are a problem on some platform this should be taken into account by the build system automatically instead of having the user disable hardening entirely.\r\n> \r\n> Okay, I think this branch will break building on NetBSD, and shouldn't be merged as-is, I'll follow up.\r\n\r\nPerhaps I should clarify that only the `libbitcoinkernel.so` shared library is broken. All executables run fine, except that invoking `ldd` (or any other operation involving the dynamic linker) fails.\r\n\r\nTherefore, I'm fine with dropping `NO_HARDEN`.",
+          "created_at": "2025-03-18T09:28:07Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "@davidgumberg want to rebase here?",
+          "created_at": "2025-03-21T07:24:33Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "Force-pushed to rebase and address @vasild feedback to drop `hardening_interface`, and added a check to `CMakeLists.txt` to avoid `-z separate-code` on NetBSD < 11.0 (thanks @hebasto). I've also updated the PR description.",
+          "created_at": "2025-03-21T22:13:39Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @theuni ",
+          "created_at": "2025-03-27T08:08:50Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": ">this PR also introduces a check to prevent the use of this flag in NetBSD versions < 11.0, (where this issue is [fixed](https://github.com/NetBSD/src/commit/acf7fb3abf88f29f6b15c894b6b18cadc12763c0)). The fix for this [might be backported](https://mail-index.netbsd.org/tech-userlevel/2023/01/05/msg013670.html) to NetBSD 10.0.\r\n\r\nIf the fix is backported, presumably your change will still disable it?",
+          "created_at": "2025-04-10T02:30:41Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> > this PR also introduces a check to prevent the use of this flag in NetBSD versions < 11.0, (where this issue is [fixed](https://github.com/NetBSD/src/commit/acf7fb3abf88f29f6b15c894b6b18cadc12763c0)). The fix for this [might be backported](https://mail-index.netbsd.org/tech-userlevel/2023/01/05/msg013670.html) to NetBSD 10.0.\r\n> \r\n> If the fix is backported, presumably your change will still disable it?\r\n\r\nYes, but I think that's okay, since only one flag of dubious hardening benefit is disabled on NetBSD. More discussion in this comment: https://github.com/bitcoin/bitcoin/pull/32071#discussion_r2040365957",
+          "created_at": "2025-04-11T22:43:06Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--9cd9c72976c961c55c7acef8f6ba82cd-->\n### Guix builds (on x86_64) [untrusted test-only build, possibly unsafe, not for production use]\n\n| File | commit 055254e212a260c0d108f424ac32e0f2e8f3a07a<br>(master) | commit 641ced6465a0a1163c8340395ed2063b7cd8a367<br>(pull/32071/merge) |\n|--|--|--|\n| *-aarch64-linux-gnu-debug.tar.gz | [`6958692cb4a5c8d1...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-aarch64-linux-gnu-debug.tar.gz) | [`d38c18f2bc9ff027...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-aarch64-linux-gnu-debug.tar.gz) |\n| *-aarch64-linux-gnu.tar.gz | [`3490d7bae603cd71...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-aarch64-linux-gnu.tar.gz) | [`1c7ae998b9c5b7c8...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-aarch64-linux-gnu.tar.gz) |\n| *-arm-linux-gnueabihf-debug.tar.gz | [`70f77901477929bb...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-arm-linux-gnueabihf-debug.tar.gz) | [`8712014bc0997a01...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-arm-linux-gnueabihf-debug.tar.gz) |\n| *-arm-linux-gnueabihf.tar.gz | [`e4973cb9a9cb92af...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-arm-linux-gnueabihf.tar.gz) | [`61a0a2149904fe08...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-arm-linux-gnueabihf.tar.gz) |\n| *-arm64-apple-darwin-codesigning.tar.gz | [`a9c64587c616e9bc...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-arm64-apple-darwin-codesigning.tar.gz) | [`c8010709380b0272...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-arm64-apple-darwin-codesigning.tar.gz) |\n| *-arm64-apple-darwin-unsigned.tar.gz | [`e9da12bf10fbb599...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-arm64-apple-darwin-unsigned.tar.gz) | [`7b519c49e9eca17e...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-arm64-apple-darwin-unsigned.tar.gz) |\n| *-arm64-apple-darwin-unsigned.zip | [`fe1bde00f81b6b83...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-arm64-apple-darwin-unsigned.zip) | [`579b60fdc3372143...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-arm64-apple-darwin-unsigned.zip) |\n| *-powerpc64-linux-gnu-debug.tar.gz | [`be2bdb34ab87fa18...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-powerpc64-linux-gnu-debug.tar.gz) | [`0c3a94a717606628...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-powerpc64-linux-gnu-debug.tar.gz) |\n| *-powerpc64-linux-gnu.tar.gz | [`b2edc2247d66e3a3...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-powerpc64-linux-gnu.tar.gz) | [`eb7cdc23dcec60cb...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-powerpc64-linux-gnu.tar.gz) |\n| *-riscv64-linux-gnu-debug.tar.gz | [`7e57194d799282e1...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-riscv64-linux-gnu-debug.tar.gz) | [`d81d323f9415875c...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-riscv64-linux-gnu-debug.tar.gz) |\n| *-riscv64-linux-gnu.tar.gz | [`552b26dd046591b0...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-riscv64-linux-gnu.tar.gz) | [`62745b263504bcfb...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-riscv64-linux-gnu.tar.gz) |\n| *-x86_64-apple-darwin-codesigning.tar.gz | [`c0879281383ca6d3...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-x86_64-apple-darwin-codesigning.tar.gz) | [`6c22146f4be2a76f...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-x86_64-apple-darwin-codesigning.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.tar.gz | [`abfab6ceeecba5f0...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-x86_64-apple-darwin-unsigned.tar.gz) | [`7c8e07cf1dfcd45f...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-x86_64-apple-darwin-unsigned.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.zip | [`9530db22ec18aa4c...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-x86_64-apple-darwin-unsigned.zip) | [`ad990733e4c751da...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-x86_64-apple-darwin-unsigned.zip) |\n| *-x86_64-linux-gnu-debug.tar.gz | [`6387ec83bfd80c7c...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-x86_64-linux-gnu-debug.tar.gz) | [`e8385ccdaaf88586...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-x86_64-linux-gnu-debug.tar.gz) |\n| *-x86_64-linux-gnu.tar.gz | [`09b3afaa1f7cbb7d...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2-x86_64-linux-gnu.tar.gz) | [`7feb84525f638e76...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0-x86_64-linux-gnu.tar.gz) |\n| *.tar.gz | [`ee9a589f63dd7186...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/bitcoin-055254e212a2.tar.gz) | [`1c73c9327e285b3c...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/bitcoin-641ced6465a0.tar.gz) |\n| SHA256SUMS.part | [`627adcd835150acb...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/SHA256SUMS.part) | [`1f6542e1d219c144...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/SHA256SUMS.part) |\n| guix_build.log | [`228812ae9a01ba79...`](https://drahtbot.space/guix/monotree/055254e212a260c0d108f424ac32e0f2e8f3a07a/guix_build.log) | [`028a5d94dab94a66...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/guix_build.log) |\n| guix_build.log.diff |  | [`0374696142bfc83a...`](https://drahtbot.space/guix/monotree/641ced6465a0a1163c8340395ed2063b7cd8a367/guix_build.log.diff) |\n\n",
+          "created_at": "2025-04-19T20:51:25Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Guix Build:\r\n```bash\r\ndb95c26122204cf686ae4d0a7d6f2e2f2cd30d7ea0dce425f28bf4fa1af9fa12  guix-build-77e553ab6a0a/output/aarch64-linux-gnu/SHA256SUMS.part\r\n3b5b3fd4b6ca8539e2ea5e50afdea37593f1f2e0c0b26851c20fc0505dd79a42  guix-build-77e553ab6a0a/output/aarch64-linux-gnu/bitcoin-77e553ab6a0a-aarch64-linux-gnu-debug.tar.gz\r\n4c6b3a3949cc70e3f1a82fa38ed5c204c54074a79b267d67c02439279099c2ff  guix-build-77e553ab6a0a/output/aarch64-linux-gnu/bitcoin-77e553ab6a0a-aarch64-linux-gnu.tar.gz\r\nb9d2d30e3b5df7ad303c951176feb18a18c42e43c95a038128ca10669bb4a6a9  guix-build-77e553ab6a0a/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n58cb80d16437acba0bbaa5df0a69521270dbc61b84a5b8284c18b4e96263b0a6  guix-build-77e553ab6a0a/output/arm-linux-gnueabihf/bitcoin-77e553ab6a0a-arm-linux-gnueabihf-debug.tar.gz\r\naa55ed2d8be3cfa760d373ab971ebf686c040785b0c64fd2e77779475a866165  guix-build-77e553ab6a0a/output/arm-linux-gnueabihf/bitcoin-77e553ab6a0a-arm-linux-gnueabihf.tar.gz\r\n5b217641817eda09edbf4efdc74b9c110defcb4bdd85c9d37c91b0721dcf7674  guix-build-77e553ab6a0a/output/arm64-apple-darwin/SHA256SUMS.part\r\n6453fb94f8c9015c080eda0d0eb3818b9c07e1073b7dae05758b7a0f9259aa15  guix-build-77e553ab6a0a/output/arm64-apple-darwin/bitcoin-77e553ab6a0a-arm64-apple-darwin-codesigning.tar.gz\r\nad867c154209ddb30b245f813a531406e55b0803ad100187f66ec22d8a8a8780  guix-build-77e553ab6a0a/output/arm64-apple-darwin/bitcoin-77e553ab6a0a-arm64-apple-darwin-unsigned.tar.gz\r\n2b176309d5e44bc7c8cc8d6a352d47c59699ce449e566653fefc661c1e72ecda  guix-build-77e553ab6a0a/output/arm64-apple-darwin/bitcoin-77e553ab6a0a-arm64-apple-darwin-unsigned.zip\r\nb433b9c2bd8d9258414edbd98f247771c2edcfa532eba8dc8bde10d93c98048b  guix-build-77e553ab6a0a/output/dist-archive/bitcoin-77e553ab6a0a.tar.gz\r\n356a8f1c01fd3ea760ed6e120814f3fe9b9a4ce69b7c22b504369a702d776ef3  guix-build-77e553ab6a0a/output/powerpc64-linux-gnu/SHA256SUMS.part\r\nfc42a3468634083cceaa0a606953e6199b0f0071ced469395bce98c763aee2a2  guix-build-77e553ab6a0a/output/powerpc64-linux-gnu/bitcoin-77e553ab6a0a-powerpc64-linux-gnu-debug.tar.gz\r\nf52e9149e7e792592c48d31f1b0ce319c5ee887077157df2c6a6665fbebc8112  guix-build-77e553ab6a0a/output/powerpc64-linux-gnu/bitcoin-77e553ab6a0a-powerpc64-linux-gnu.tar.gz\r\n39aefacf7be73c6dbf444532c3bc344ecebf9290cb6a80e1072bfb2e8eae6f0c  guix-build-77e553ab6a0a/output/riscv64-linux-gnu/SHA256SUMS.part\r\n1c3ea57370a8e04dea9d86aac34af7e5ba118f2835431137e4475efeed5543c5  guix-build-77e553ab6a0a/output/riscv64-linux-gnu/bitcoin-77e553ab6a0a-riscv64-linux-gnu-debug.tar.gz\r\nfb63f9bd863e5305ae0b385a2c2b1d0dbb61ef872d3fda1d8ca12fed9e23455b  guix-build-77e553ab6a0a/output/riscv64-linux-gnu/bitcoin-77e553ab6a0a-riscv64-linux-gnu.tar.gz\r\n63da72119d2ff82095a4309bdbc92623067c0f8187be1ce56ba7ddbe9ff11960  guix-build-77e553ab6a0a/output/x86_64-apple-darwin/SHA256SUMS.part\r\n935697e705a322fec78048fb1df34d5fd00aa9353afce508a387f7b7958eb7a9  guix-build-77e553ab6a0a/output/x86_64-apple-darwin/bitcoin-77e553ab6a0a-x86_64-apple-darwin-codesigning.tar.gz\r\na77aeff6f41b5d9b4278cdb1417b59520a6f09bef360063f3a69d3e213addf26  guix-build-77e553ab6a0a/output/x86_64-apple-darwin/bitcoin-77e553ab6a0a-x86_64-apple-darwin-unsigned.tar.gz\r\ndf59e2ac7f5676a7753ffba9571e2a503d177171d80e6d2260f595645ce367bb  guix-build-77e553ab6a0a/output/x86_64-apple-darwin/bitcoin-77e553ab6a0a-x86_64-apple-darwin-unsigned.zip\r\n439ce4c9c108527d1c1f26f70b575e27d91321a41bad824bac5adff658bd8d29  guix-build-77e553ab6a0a/output/x86_64-linux-gnu/SHA256SUMS.part\r\n011a4bd59cac89991163b0e04bfdb2f75ca1f590cd7880bf46f1ee6522c69351  guix-build-77e553ab6a0a/output/x86_64-linux-gnu/bitcoin-77e553ab6a0a-x86_64-linux-gnu-debug.tar.gz\r\n7f1e7dbf479e939e6ffb1cceb7fd80e9bca8a186be8e6b7cf4d99d468eedc8a8  guix-build-77e553ab6a0a/output/x86_64-linux-gnu/bitcoin-77e553ab6a0a-x86_64-linux-gnu.tar.gz\r\naa9ceb2a5d639edf7a222810c2d4ffc5305cc274333153145606ff4ad77669bd  guix-build-77e553ab6a0a/output/x86_64-w64-mingw32/SHA256SUMS.part\r\nf75a42a14138aa927f9483f0d5a4b2d160c9ee61bfc2715b8551f8eace90a563  guix-build-77e553ab6a0a/output/x86_64-w64-mingw32/bitcoin-77e553ab6a0a-win64-codesigning.tar.gz\r\n9bf895bd1f16d7b8524213090e770dc7bdb11a1803f2358613d34aab6ba5435a  guix-build-77e553ab6a0a/output/x86_64-w64-mingw32/bitcoin-77e553ab6a0a-win64-debug.zip\r\n05bff16e246264f47f29a0e1097ebcb666cbc34a07173dffff17061d1a2a2c08  guix-build-77e553ab6a0a/output/x86_64-w64-mingw32/bitcoin-77e553ab6a0a-win64-setup-unsigned.exe\r\nbd29ba767147ccd87e1c43209e3a80b357aedbe9fb508d70e506704d72697fbe  guix-build-77e553ab6a0a/output/x86_64-w64-mingw32/bitcoin-77e553ab6a0a-win64-unsigned.zip\r\n```",
+          "created_at": "2025-04-28T12:13:22Z"
+        }
+      ]
+    },
+    {
+      "number": 32070,
+      "title": "build: use make < 3.82 syntax for define directive",
+      "body": "From the GNU make 3.82 [release announcement](https://lists.gnu.org/archive/html/info-gnu/2010-07/msg00023.html) (2010):\r\n\r\n> The 'define' make directive now allows a variable assignment operator\r\n  after the variable name, to allow for simple, conditional, or appending\r\n  multi-line variable assignment.\r\n\r\nmacOS ships with 3.81 (2006). This caused the multiprocess config options to be ignored.\r\n\r\nFixes #32068\r\n\r\n",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-03-14T15:15:51Z",
+      "updated_at": "2025-03-17T12:37:35Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32070",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32070.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [ryanofsky](https://github.com/bitcoin/bitcoin/pull/32070#pullrequestreview-2685973287) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31741](https://github.com/bitcoin/bitcoin/pull/31741) (multiprocess: Add libmultiprocess git subtree by ryanofsky)\n* [#30975](https://github.com/bitcoin/bitcoin/pull/30975) (ci: build multiprocess on most jobs by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-14T15:15:54Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "We don't seem to specify a minimum make version?",
+          "created_at": "2025-03-14T15:17:09Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> I don't understand how it wasn't causing any errors with make 3.81\r\n\r\nI probably haven't recently used the depends build to test multiprocess on my development machine. I would either use my locally install `libmultiprocess` or a (cross-compiled) Guix build.\r\n\r\nAnd macOS native CI doesn't build depends with multiprocess.",
+          "created_at": "2025-03-14T15:50:38Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> This is a pretty unusual bug and I don't understand how it wasn't causing any errors with make 3.81, just causing the flags to be ignored.\r\n\r\nIn light of silent failures, it would be better to rule out this class of bug completely. Otherwise, a new instance will be added in the future, or will already exist somewhere in the code.\r\n\r\nI am not sure why reviewers should spend time on supporting build tools that were released about  20 years ago. So rejecting such a build tool early with a failure seems more appropriate and will likely save developer, reviewer and user time debugging silent failures.",
+          "created_at": "2025-03-14T15:51:14Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@maflcko I'm fine with introducing a minimum GNU make version, as long as we actually check the version (otherwise we're back to silent failures).\r\n\r\nBut note that I run the stock macOS GNU make all the time, as do many other devs. So new issues are likely to be caught during review, though they'll still waste time debugging.",
+          "created_at": "2025-03-14T15:53:13Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "(unrelated to the make issue, the same conceptual problem exists for the macOS bash version, but I guess the bash version check would be even harder to achieve and is only reliably avoidable by not writing bash code)",
+          "created_at": "2025-03-14T15:56:20Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Backported in #32062\r\n",
+          "created_at": "2025-03-17T02:12:55Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> But note that I run the stock macOS GNU make all the time, as do many other devs. So new issues are likely to be caught during review, though they'll still waste time debugging.\r\n\r\nFWIW, the stock macOS Make has [other issues](https://github.com/bitcoin/bitcoin/issues/30978#issuecomment-2582535849).",
+          "created_at": "2025-03-17T11:33:39Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Is there a way we can pick up a modern homebrew version of make without forcing macOS devs and users to change their default make? (and without the use of env variables)",
+          "created_at": "2025-03-17T11:37:45Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Is there a way we can pick up a modern homebrew version of make without forcing macOS devs and users to change their default make? (and without the use of env variables)\r\n\r\nI imagine something like that:\r\n```\r\ngmake -C depends -j 4\r\n```",
+          "created_at": "2025-03-17T11:41:25Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Proposed in #32086.",
+          "created_at": "2025-03-17T12:37:34Z"
+        }
+      ]
+    },
+    {
+      "number": 32069,
+      "title": "test: fix intermittent failure in wallet_reorgsrestore.py",
+      "body": "In response to #32066 intermittent failure.\r\n\r\nWait until the node's process has fully stopped before starting a new instance of it.\r\nSame behavior as in the [tool_wallet.py](https://github.com/bitcoin/bitcoin/blob/698f86964c68041d938aaf54fdd39466266c371c/test/functional/tool_wallet.py#L540) test.",
+      "state": "closed",
+      "user": "furszy",
+      "created_at": "2025-03-14T14:36:02Z",
+      "updated_at": "2025-07-24T13:39:00Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32069",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32069.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32069#issuecomment-2724997907), [Chand-ra](https://github.com/bitcoin/bitcoin/pull/32069#issuecomment-2727416972) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31250](https://github.com/bitcoin/bitcoin/pull/31250) (wallet: Disable creating and loading legacy wallets by achow101)\n* [#28710](https://github.com/bitcoin/bitcoin/pull/28710) (Remove the legacy wallet and BDB dependency by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-14T14:36:06Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "introduced in 11f8ab140fe63857f6a93b81021efda8f90ceeda, so added 30.0 milestone",
+          "created_at": "2025-03-14T14:50:45Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 0f377b4ef959d5722c02d39d63916233f6e30c64\r\n\r\nMaybe there could be a method on test_node, similar to stop_node to kill the node ?",
+          "created_at": "2025-03-14T14:52:37Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> Maybe there could be a method on test_node, similar to stop_node to kill the node ?\r\n\r\nDone as suggested.",
+          "created_at": "2025-03-14T15:01:12Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/38783776230</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-14T15:06:45Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 36b0713edc4655f6e0c291975d6d280fbc89cf2e",
+          "created_at": "2025-03-14T15:13:20Z"
+        },
+        {
+          "user": "Chand-ra",
+          "body": "tACK [36b0713](https://github.com/bitcoin/bitcoin/commit/36b0713edc4655f6e0c291975d6d280fbc89cf2e)\r\n\r\nTested by pulling the PR locally and verifying that the behavior of the changed test (or any other test) doesn't change with the proposed change.",
+          "created_at": "2025-03-16T13:23:09Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to `29.x` in #33052.",
+          "created_at": "2025-07-24T13:39:00Z"
+        }
+      ]
+    },
+    {
+      "number": 32065,
+      "title": "i2p: make a time gap between creating transient sessions and using them",
+      "body": "Connecting to an I2P peer consists of creating a session (the\r\n`SESSION CREATE` command) and then connecting to the peer using that\r\nsession (`STREAM CONNECT ID=session_id ...`).\r\n\r\nThis change is only relevant for transient sessions because when a\r\npersistent session is used it is created once and used for all\r\nconnections.\r\n\r\nBefore this change Bitcoin Core would create the session and use it in\r\nquick succession. That is, the `SESSION CREATE` command would be\r\nimmediately followed by `STREAM CONNECT`. This could ease network\r\nactivity monitoring by an adversary.\r\n\r\nTo mitigate that, this change creates sessions upfront without an\r\nimmediate demand for new sessions and later uses them. This creates a\r\ntime gap between `SESSION CREATE` and `STREAM CONNECT`. Note that there\r\nis always some demand for new I2P connections due to disconnects.\r\n\r\n---\r\n\r\nSummary of the changes in the code:\r\n\r\n* Create the session from the `Session` constructor (send `SESSION CREATE`\r\n  to the I2P SAM proxy). This constructor was only called when transient\r\n  sessions were needed and was immediately followed by `Connect()` which\r\n  would have created the session. So this is a noop change if viewed\r\n  in isolation.\r\n\r\n* Every time we try to connect to any peer (not just I2P) create a new\r\n  I2P session, up to a limit (currently 10). This way a bunch of\r\n  sessions are created (`SESSION CREATE`) at times that are decoupled\r\n  from the time when sessions will be used (`STREAM CONNECT`).\r\n\r\n* Tweak the code in `CConnman::ConnectNode()` to avoid creating session\r\n  objects while holding `m_unused_i2p_sessions_mutex` because now\r\n  creating `i2p::sam::Session` involves network activity and could take\r\n  a few seconds.\r\n\r\n---\r\n\r\nBefore (note the timestamps):\r\n\r\n2025-03-13T09:23:40Z [opencon] [i2p:info] Transient SAM session cd7ea49a7e created\r\n2025-03-13T09:23:43Z [opencon] [i2p] -> STREAM CONNECT ID=cd7ea49a7e DESTINATION=...\r\n\r\n2025-03-13T09:23:51Z [opencon] [i2p:info] Transient SAM session cb0956207e created\r\n2025-03-13T09:23:52Z [opencon] [i2p] -> STREAM CONNECT ID=cb0956207e DESTINATION=...\r\n\r\n2025-03-13T09:24:04Z [opencon] [i2p:info] Transient SAM session 35ad67f343 created\r\n2025-03-13T09:24:04Z [opencon] [i2p] -> STREAM CONNECT ID=35ad67f343 DESTINATION=...\r\n\r\nAfter:\r\n\r\n2025-03-13T17:08:58Z [opencon] [i2p:info] Transient SAM session 16098cd4ea created\r\n2025-03-13T17:09:34Z [opencon] [i2p] -> STREAM CONNECT ID=16098cd4ea DESTINATION=...\r\n\r\n2025-03-13T17:09:38Z [opencon] [i2p:info] Transient SAM session 5d209bf1bc created\r\n2025-03-13T17:09:59Z [opencon] [i2p] -> STREAM CONNECT ID=5d209bf1bc DESTINATION=...\r\n\r\n2025-03-13T17:09:50Z [opencon] [i2p:info] Transient SAM session e78aa6d2e7 created\r\n2025-03-13T17:12:09Z [opencon] [i2p] -> STREAM CONNECT ID=e78aa6d2e7 DESTINATION=...\r\n\r\n---\r\n\r\nThis was suggested by @eyedeekay some time ago (in 2023 actually) and has been lingering in my TODO since then :eyes:. A further suggestion is to also add a time gap between the activity cease and the closing of the session. For this, when `CNode` is destroyed `CNode::m_i2p_sam_session` would have to be moved elsewhere and destroyed at a later time. cc @zzzi2p",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2025-03-14T08:29:59Z",
+      "updated_at": "2025-10-24T19:08:05Z",
+      "comments": 17,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32065",
+      "labels": [
+        "P2P",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32065.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [zzzi2p](https://github.com/bitcoin/bitcoin/pull/32065#issuecomment-2725369358), [eyedeekay](https://github.com/bitcoin/bitcoin/pull/32065#issuecomment-2726907987), [1440000bytes](https://github.com/bitcoin/bitcoin/pull/32065#issuecomment-2726286747) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32983](https://github.com/bitcoin/bitcoin/pull/32983) (rpc: refactor: use string_view in Arg/MaybeArg by stickies-v)\n* [#32394](https://github.com/bitcoin/bitcoin/pull/32394) (net: make m_nodes_mutex non-recursive by vasild)\n* [#32015](https://github.com/bitcoin/bitcoin/pull/32015) (net: replace manual reference counting of CNode with shared_ptr by vasild)\n* [#30988](https://github.com/bitcoin/bitcoin/pull/30988) (Split CConnman by vasild)\n* [#30951](https://github.com/bitcoin/bitcoin/pull/30951) (net: option to disallow v1 connection on ipv4 and ipv6 peers by stratospher)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-03-14T08:30:03Z"
+        },
+        {
+          "user": "zzzi2p",
+          "body": "Thanks for CC'ing me. I also asked eyedeekay and orignal from i2pd to take a look.\r\n\r\n10 standby sessions is a lot, except maybe at startup. If your I2P connections limit is 10, then you're doubling your network resource usage. 2 or 3 is probably enough, depending on how fast your connections churn and how long is long enough for a unused session to be up to give you the anonymity you're looking for.\r\n\r\nA couple of alternatives:\r\n\r\n```c\r\nint max = MAX_UNUSED_I2P_SESSIONS_SIZE;\r\nif (uptime() > 15 minutes) max /= 3;\r\n```\r\n\r\nor\r\n\r\n```c\r\nint max = min(MAX_UNUSED_I2P_SESSIONS_SIZE,  3 + MAX_I2P_SESSIONS - current_i2p_sessions.size());\r\n```\r\n\r\nHowever, I'm also concerned about starting a whole bunch of sessions at once, especially at startup, and if the user started his router when he started bitcoin.  If this change will double or triple or more the session-creation rate at startup, that's probably too fast. The  Java router has some tunnel build rate-limiting that may kick in. I won't attempt any pseudocode for it, but some rate limiting in AddI2PSessionsIfNeeded() or some other special case for the first few minutes after startup is probably desirable.\r\n\r\n\r\nConcept ACK.\r\n\r\n",
+          "created_at": "2025-03-14T17:45:02Z"
+        },
+        {
+          "user": "1440000bytes",
+          "body": "Concept ACK ",
+          "created_at": "2025-03-15T06:44:07Z"
+        },
+        {
+          "user": "eyedeekay",
+          "body": "I agree with zzz, the concept ACK is fine but I'm very concerned about having the session bank be 10 sessions long. I think the best method of managing the session bank sort of depends on the rate at which you'll need them.\r\n\r\nIf you're creating sessions fast enough to need a bank of 10 sessions, then I think at some point you have no choice but to keep the sessions alive longer and re-use them more. On the other hand, if you aren't creating them fast enough to need a bank of 10 sessions, then keeping a bank of 10 of them is pretty wasteful. How you solve it is going to depend on the actual rates you expect people to need sessions. If the need for sessions is too unpredictable, then maybe the bank size limit needs to change size based on need from a very small number to a larger number and back.\r\n\r\nI'm going to take a closer look at the code here and try to make some more concrete suggestions.",
+          "created_at": "2025-03-15T18:16:46Z"
+        },
+        {
+          "user": "vasild",
+          "body": "A few notes:\r\n\r\n* Bitcoin Core would try to maintain up to 12 outbound connections to peers from all networks that are reachable (IPv4, IPv6, Tor, I2P, CJDNS). From these usually just a few are I2P. So, it is reasonable to assume that from 2,3,4 to 12 I2P connections will be needed. But the case with 12 is when I2P is the only reachable network which is not advisable because of the increased Sybil likelihood.\r\n\r\n* This PR is not going to create a storm of I2P sessions creation at startup because new session creation is not being done in a tight loop, deliberately. See the timings in the logs below.\r\n\r\n* The lifetime of an I2P connection varies a lot. I would like to avoid adding assumptions about that. How often I2P connections are needed depends on the lifetime + whether a randomly selected address from the address database for the new connection will be I2P.\r\n\r\n* Session reuse would degrade privacy because Bitcoin Core would connect to >1 peer from the same I2P source address. This is when transient sessions are used, affected by this PR. Note that there is another less-private mode if Bitcoin Core is listening and accepting new I2P connections. Then a single persistent I2P session is used - it accepts new connections to its permanent address and makes all outgoing connections from that address (= a single I2P session), this PR is not changing that.\r\n\r\n* The code before this PR would keep a session for later if it cannot use it for connecting to the given I2P peer (`NAMING LOOKUP` returns an error). I chose `10` for `MAX_UNUSED_I2P_SESSIONS_SIZE` arbitrarily to avoid a broken runaway code from filling all of the Bitcoin Core's memory with unused sessions. I think in practice the number of stored sessions is always `0` or `1` in `master`, before this PR.\r\n\r\nBelow is some data for when sessions are created, used and how long do they live. From startup to about 10 minutes after that, with this PR. It is just an example from my node. I guess timings will vary a lot between runs and in different environments. `t0` is the startup time.\r\n\r\n`MAX_UNUSED_I2P_SESSIONS_SIZE=10`:\r\n```\r\nt0 +  18 seconds: made new session upfront, used 93 seconds after being created, still active after 622 seconds\r\nt0 +  19 seconds: made new session upfront, used 177 seconds after being created, still active after 621 seconds\r\nt0 +  22 seconds: made new session upfront, used 297 seconds after being created, still active after 618 seconds\r\nt0 +  26 seconds: made new session upfront, used 397 seconds after being created, still active after 614 seconds\r\nt0 +  36 seconds: made new session upfront, not used in 604 seconds\r\nt0 +  44 seconds: made new session upfront, not used in 596 seconds\r\nt0 +  52 seconds: made new session upfront, not used in 588 seconds\r\nt0 +  60 seconds: made new session upfront, not used in 580 seconds\r\nt0 +  66 seconds: made new session upfront, not used in 574 seconds\r\nt0 +  69 seconds: made new session upfront, not used in 571 seconds\r\nt0 + 244 seconds: made new session upfront, not used in 396 seconds\r\n```\r\n\r\n`MAX_UNUSED_I2P_SESSIONS_SIZE=4`:\r\n```\r\nt0 +  20 seconds: made new session upfront, used 469 seconds after being created, still active after 699 seconds\r\nt0 +  25 seconds: made new session upfront, used 588 seconds after being created, still active after 694 seconds\r\nt0 +  30 seconds: made new session upfront, used 82 seconds after being created, lifetime: 125 seconds\r\nt0 +  43 seconds: made new session upfront, used 201 seconds after being created, lifetime: 121 seconds\r\nt0 + 244 seconds: made new session upfront, not used in 475 seconds\r\nt0 + 366 seconds: made new session upfront, not used in 353 seconds\r\n```\r\n\r\nGiven the above, I changed `MAX_UNUSED_I2P_SESSIONS_SIZE` from `10` to `4` in `42f98c9dfa...a22a3b3c4c`.\r\n",
+          "created_at": "2025-03-18T11:27:54Z"
+        },
+        {
+          "user": "vasild",
+          "body": "I wonder what happens after the 10 minutes? For example, if a client does `SESSION CREATE` to acquire a session id and then waits for 12 minutes and does `STREAM CONNECT` with that session id. Is a new tunnel established by the I2P router immediately and transparently to the client at the 10th minute, or when the session is actually used at the 12th minute?\r\n\r\nThinking about this more, given that opening of new connections is done serially, one after another (not in parallel), and occasionally (except during startup) maybe it would be best to pre-create just one session?",
+          "created_at": "2025-03-19T17:14:08Z"
+        },
+        {
+          "user": "zzzi2p",
+          "body": "Tunnels get built when the SAM session is opened, and are automatically rebuilt when they expire, the router does that for you as long as the SAM session stays open. A session is just a pool of inbound and outbound tunnels. I assume that's what you are trying to do here, have the session open and ready before it's needed.",
+          "created_at": "2025-03-19T18:16:16Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`a22a3b3c4c...48a636cdde`: rebase due to conflicts and reduce the pre-created sessions to 1, given the above. Some logs from running this:\r\n\r\n```\r\n974be1f338 startup +129s: made new session\r\n974be1f338 startup +290s, 161s after creation: connect failed\r\n974be1f338 startup +372s, 243s after creation: connect failed\r\n974be1f338 startup +678s, 549s after creation: connect ok, connection duration: 1305s, destroyed after that\r\n\r\n55723ba1fc startup +1385s: made new session\r\n55723ba1fc startup +1441s, 56s after creation: connect ok, connection duration: 62s, destroyed after that\r\n\r\n1177c0761e startup +1469s: made new session\r\n1177c0761e startup +1853s, 384s after creation: connect ok, still active after 2786s\r\n\r\nf9a6456088 startup +1860s: made new session\r\nf9a6456088 startup +2282s, 422s after creation: connect ok, connection duration: 90s, destroyed after that\r\n\r\n832d073906 startup +2362s: made new session\r\n832d073906 startup +2367s, 5s after creation: connect failed\r\n832d073906 startup +2444s, 82s after creation: connect ok, connection duration: 1s, destroyed after that\r\n\r\nc7e68ca962 startup +2449s: made new session\r\nc7e68ca962 startup +2487s, 38s after creation: connect ok, connection duration: 2s, destroyed after that\r\n\r\nc936c53d2b startup +2453s: made new session\r\nc936c53d2b startup +2724s, 271s after creation: connect ok, still active after 1802s\r\n\r\n7f96d02e16 startup +2727s: made new session\r\n7f96d02e16 startup +2765s, 38s after creation: connect failed\r\n7f96d02e16 startup +2798s, 71s after creation: connect ok, still active after 1528s\r\n\r\n38d3bccdd4 startup +2884s: made new session\r\n38d3bccdd4 startup +3261s, 377s after creation: connect failed\r\n38d3bccdd4 startup +4253s, 1369s after creation: connect ok, connection duration: 2s, destroyed after that\r\n```",
+          "created_at": "2025-03-20T12:05:45Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/39105567001</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-20T13:59:53Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`48a636cdde...859c259092`: fix CI",
+          "created_at": "2025-03-20T14:03:49Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`859c259092...632eb1a3c9`: rebase due to conflicts",
+          "created_at": "2025-05-21T11:45:49Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Somehow I hadn't seen this PR yet.\r\n\r\nIf I understand correctly, this change is only for if a node is configured with `-i2pacceptincoming=0` to not accept inbound I2P connections?",
+          "created_at": "2025-05-26T18:53:42Z"
+        },
+        {
+          "user": "vasild",
+          "body": "Yes. That is because if it is accepting incoming connections (has a permanent listening I2P address) then there is just one I2P session which is associated with that address and that session is used for all incoming and outgoing connections.",
+          "created_at": "2025-05-30T12:37:09Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`632eb1a3c9...a42449cb30`: rebase due to conflicts",
+          "created_at": "2025-09-29T12:56:19Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`a42449cb30...fc1ba52a4d`: rebase due to conflicts",
+          "created_at": "2025-10-02T13:48:41Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`fc1ba52a4d...539d8b474e`: rebase due to conflicts",
+          "created_at": "2025-10-07T09:15:44Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-10-24T19:08:05Z"
+        }
+      ]
+    },
+    {
+      "number": 32064,
+      "title": "build: Remove manpages when making MacOS app",
+      "body": "When creating the MacOS app, the only file that should be in `Bitcoin-Qt.app/Contents/MacOS` is `Bitcoin-Qt`. Since #31844, there was also a `share/` containing the manpage for bitcoin-qt. This manpage is not useful to app users, and it is also causing code signing issues. Thus the directory should be removed when making the app.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/32052#issuecomment-2723007926",
+      "state": "closed",
+      "user": "achow101",
+      "created_at": "2025-03-14T01:09:09Z",
+      "updated_at": "2025-03-17T02:13:53Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32064",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32064.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fanquake](https://github.com/bitcoin/bitcoin/pull/32064#pullrequestreview-2683941479) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-14T01:09:12Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "post-merge tested ACK\r\n\r\nsuccessful guix build, code sign, and signature attach from current master, ran signed Qt and bitcoind on arm64/macos.\r\nDidn't test x86: https://github.com/pinheadmz/bitcoin-detached-sigs/tree/master-698f86964c",
+          "created_at": "2025-03-14T13:38:28Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Having the man files in the `.tar.gz` release, where `bitcoind` and `bitcoin-cli` live, should be enough.",
+          "created_at": "2025-03-14T16:19:27Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Backported in #32062",
+          "created_at": "2025-03-17T02:12:34Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32068,
+      "title": "depends: capnp build ignores config_opts",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nIt seems that when building capnp via depends the `config_opts` in `capnp.mk` are ignored, i.e. `-DBUILD_TESTING=OFF`, `-DWITH_OPENSSL=OFF` and `-DWITH_ZLIB=OFF`.\n\nThis can be seen in the depends build log by e.g. `Built target capnp-heavy-tests`, a target that should be skipped entirely. It becomes a problem during the `cmake -B build --toolchain ...` step, because it will complain about not finding OpenSSL and zlib, both of which it shouldn't need. \n\n### Expected behaviour\n\nDon't build test target and, more importantly, don't look for OpenSSL.\n\n### Steps to reproduce\n\n```sh\ngit clean -dfx\nmake -C depends NO_QT=1 NO_USDT=1 NO_ZMQ=1 NO_BDB=1 MULTIPROCESS=1\ncmake -B build --toolchain /Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/toolchain.cmake\n...\n  Could NOT find OpenSSL, try to set the path to OpenSSL root folder in the\n```\n\n### Relevant log output\n\nDepends build with `V=1`: https://gist.github.com/Sjors/4e851f2455c67372ad40a8382432acf5\n\nIt looks like it does set `-DBUILD_TESTING=OFF -DWITH_OPENSSL=OFF -DWITH_ZLIB=OFF` for the native build:\n\n```\n{ cd /Users/sjors/dev/bitcoin/depends/work/build/aarch64-apple-darwin24.3.0/native_capnp/1.1.0-c8c5a5f0b88/.; export     PKG_CONFIG_LIBDIR=/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/lib/pkgconfig PKG_CONFIG_PATH=/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/share/pkgconfig PKG_CONFIG_SYSROOT_DIR=/ CMAKE_MODULE_PATH=/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/lib/cmake PATH=\"/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/bin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/Users/sjors/.nvm/versions/node/v16.20.2/bin:/Users/sjors/.local/bin:/Users/sjors/.pyenv/shims:/Users/sjors/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/Users/sjors/.rbenv/shims:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/Library/Apple/usr/bin:/usr/local/MacGPG2/bin:/opt/podman/bin:/Users/sjors/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities\";   env CC=\"/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\" CFLAGS=\"  -I/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/include          \" CXX=\"/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -isysroot/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\" CXXFLAGS=\"  -I/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/include          \" LDFLAGS=\"  -L/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/lib    \" cmake -G \"Unix Makefiles\" -DCMAKE_INSTALL_PREFIX:PATH=\"/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native\" -DCMAKE_AR=`which /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ar` -DCMAKE_NM=`which /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/nm` -DCMAKE_RANLIB=`which /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ranlib` -DCMAKE_INSTALL_LIBDIR=lib/ -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_VERBOSE_MAKEFILE:BOOL=1 -DBUILD_TESTING=OFF -DWITH_OPENSSL=OFF -DWITH_ZLIB=OFF        -DCMAKE_INSTALL_RPATH:PATH=\"/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/lib\" .; }\n```\n\nBut not for the non-native(?) one:\n\n```\n{ cd /Users/sjors/dev/bitcoin/depends/work/build/aarch64-apple-darwin24.3.0/capnp/1.1.0-31298932310/.; export     PKG_CONFIG_LIBDIR=/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/lib/pkgconfig PKG_CONFIG_PATH=/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/share/pkgconfig PKG_CONFIG_SYSROOT_DIR=/ CMAKE_MODULE_PATH=/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/lib/cmake PATH=\"/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/native/bin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/Users/sjors/.nvm/versions/node/v16.20.2/bin:/Users/sjors/.local/bin:/Users/sjors/.pyenv/shims:/Users/sjors/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/Users/sjors/.rbenv/shims:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/Library/Apple/usr/bin:/usr/local/MacGPG2/bin:/opt/podman/bin:/Users/sjors/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities\";   env CC=\"/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\" CFLAGS=\"  -I/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/include     -pipe -std=c11 -mmacos-version-min=13.0 -arch arm64 -O2    \" CXX=\"/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -stdlib=libc++ -isysroot/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\" CXXFLAGS=\"  -I/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/include     -pipe -std=c++20 -mmacos-version-min=13.0 -arch arm64 -O2    \" LDFLAGS=\"-Wl,-platform_version,macos,13.0,14.0  -L/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0/lib    \" cmake -G \"Unix Makefiles\" -DCMAKE_INSTALL_PREFIX:PATH=\"/Users/sjors/dev/bitcoin/depends/aarch64-apple-darwin24.3.0\" -DCMAKE_AR=`which /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ar` -DCMAKE_NM=`which /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/nm` -DCMAKE_RANLIB=`which /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ranlib` -DCMAKE_INSTALL_LIBDIR=lib/ -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_VERBOSE_MAKEFILE:BOOL=1        .; }\n```\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nmaster@698f86964c68041d938aaf54fdd39466266c371c\n\n### Operating system and version\n\nmacOS 15.3.2\n\n### Machine specifications\n\nM4 Mac\n\nXCode 16.2\ncmake version 3.31.4\n\n```\nxcode-select -p\n/Applications/Xcode.app/Contents/Developer\n```",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-03-14T13:22:53Z",
+      "updated_at": "2025-05-17T08:58:22Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32068",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "Sjors",
+          "body": "The macOS native builds don't use depends, so #30975 would not pick this is up.\n\ncc @ryanofsky",
+          "created_at": "2025-03-14T13:44:59Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "I can also reproduce this on Intel macOS 13.7.4 with Xcode 15.2.",
+          "created_at": "2025-03-14T14:02:27Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Not sure if I can reproduce this locally. At least if I run `make -C depends NO_QT=1 NO_USDT=1 NO_ZMQ=1 NO_BDB=1 MULTIPROCESS=1 capnp V=1` I do see cmake being called with `-DBUILD_TESTING=OFF -DWITH_OPENSSL=OFF -DWITH_ZLIB=OFF`.\n\nDiffing the native and non-native packages though, I wonder if there's a chance this could caused by syntax affecting older version of make, because the non-native package seems to have an extra := following the define. Could try:\n\n```diff\n--- a/depends/packages/capnp.mk\n+++ b/depends/packages/capnp.mk\n@@ -5,7 +5,7 @@ $(package)_download_file=$(native_$(package)_download_file)\n $(package)_file_name=$(native_$(package)_file_name)\n $(package)_sha256_hash=$(native_$(package)_sha256_hash)\n \n-define $(package)_set_vars :=\n+define $(package)_set_vars\n   $(package)_config_opts := -DBUILD_TESTING=OFF\n   $(package)_config_opts += -DWITH_OPENSSL=OFF\n   $(package)_config_opts += -DWITH_ZLIB=OFF\ndiff --git a/depends/packages/libmultiprocess.mk b/depends/packages/libmultiprocess.mk\nindex a181e05100bb..bf705ddb9e7e 100644\n@@ -8,7 +8,7 @@ ifneq ($(host),$(build))\n $(package)_dependencies += native_capnp\n endif\n \n-define $(package)_set_vars :=\n+define $(package)_set_vars\n ifneq ($(host),$(build))\n $(package)_config_opts := -DCAPNP_EXECUTABLE=\"$$(native_capnp_prefixbin)/capnp\"\n $(package)_config_opts += -DCAPNPC_CXX_EXECUTABLE=\"$$(native_capnp_prefixbin)/capnpc-c++\"\n```",
+          "created_at": "2025-03-14T14:05:18Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Both macs have GNU Make 3.81\n\nTrying your modification. If it works, it's yet another reason to migrate depends to cmake...?\n\n",
+          "created_at": "2025-03-14T14:35:23Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "That did the trick.",
+          "created_at": "2025-03-14T14:58:33Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Opened #32070 to fix it.",
+          "created_at": "2025-03-14T15:16:10Z"
+        }
+      ]
+    },
+    {
+      "number": 32067,
+      "title": "doc: Mempool Policy documentation Outdated since TRUC",
+      "body": "Checking the [policy documentation](https://github.com/bitcoin/bitcoin/tree/master/doc/policy) I think I noticed that some things are outdated since Version 3 transaction relay / TRUC.\n\nSome sentences [like](https://github.com/bitcoin/bitcoin/blob/master/doc/policy/packages.md#package-fees-and-feerate): \n\n> Note: Package feerate cannot be used to meet the minimum relay feerate (-minrelaytxfee) requirement. For example, if the mempool minimum feerate is 5sat/vB and the minimum relay feerate is set to 5satvB, a 1sat/vB parent transaction with a high-feerate child will not be accepted, even if submitted as a package.\n\nAre no longer true. If I'm not wrong, in this specific case, you can now submit 0 feerate transactions and still be accepted.\n\nProbably there's more documentation outdated on this section worth to review.",
+      "state": "closed",
+      "user": "polespinasa",
+      "created_at": "2025-03-14T12:22:27Z",
+      "updated_at": "2025-09-03T14:08:13Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32067",
+      "labels": [
+        "Docs",
+        "TX fees and policy",
+        "Mempool"
+      ],
+      "comment_list": [
+        {
+          "user": "fanquake",
+          "body": "cc @glozow ",
+          "created_at": "2025-03-17T01:51:20Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "You are correct that this no longer holds with TRUC. The caveat can be added.",
+          "created_at": "2025-07-31T07:30:21Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Right, this ended up in [BIP431](https://github.com/bitcoin/bips/blob/master/bip-0431.mediawiki#specification) but not our docs, which is not very clear.\n\n> An individual TRUC transaction is permitted to be below the mempool min relay feerate, assuming it is considered within a package that meets the mempool's feerate requirements.\n\nHappy to review a pull or I can open one",
+          "created_at": "2025-07-31T13:06:30Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "Went ahead and opened a PR https://github.com/bitcoin/bitcoin/pull/33220 as draft to not create much noise.\n@glozow feel free to review and suggest text :)",
+          "created_at": "2025-08-19T18:46:18Z"
+        }
+      ]
+    },
+    {
+      "number": 32066,
+      "title": "intermittent issue in wallet_reorgsrestore.py in test_reorg_handling_during_unclean_shutdown: FailedToStartError: [node 0] bitcoind exited with status 1 during initialization. Error: Cannot obtain a lock on directory",
+      "body": "https://cirrus-ci.com/task/4809537674280960?logs=ci#L2287:\n\n```\n[04:43:25.506]  test  2025-03-14T08:43:24.312000Z TestFramework.utils (DEBUG): Deleting leftover cookie file \n[04:43:25.506]  test  2025-03-14T08:43:24.315000Z TestFramework.node0 (DEBUG): bitcoind started, waiting for RPC to come up \n[04:43:25.506]  test  2025-03-14T08:43:24.576000Z TestFramework (ERROR): Unexpected exception caught during testing \n[04:43:25.506]                                    Traceback (most recent call last):\n[04:43:25.506]                                      File \"/ci_container_base/test/functional/test_framework/test_framework.py\", line 135, in main\n[04:43:25.506]                                        self.run_test()\n[04:43:25.506]                                      File \"/ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/test/functional/wallet_reorgsrestore.py\", line 216, in run_test\n[04:43:25.506]                                        self.test_reorg_handling_during_unclean_shutdown()\n[04:43:25.506]                                      File \"/ci_container_base/ci/scratch/build-x86_64-pc-linux-gnu/test/functional/wallet_reorgsrestore.py\", line 121, in test_reorg_handling_during_unclean_shutdown\n[04:43:25.506]                                        self.start_node(0)\n[04:43:25.506]                                      File \"/ci_container_base/test/functional/test_framework/test_framework.py\", line 567, in start_node\n[04:43:25.506]                                        node.wait_for_rpc_connection()\n[04:43:25.506]                                      File \"/ci_container_base/test/functional/test_framework/test_node.py\", line 275, in wait_for_rpc_connection\n[04:43:25.506]                                        raise FailedToStartError(self._node_msg(\n[04:43:25.506]                                    test_framework.test_node.FailedToStartError: [node 0] bitcoind exited with status 1 during initialization. Error: Cannot obtain a lock on directory /ci_container_base/ci/scratch/test_runner/test_runner_₿_🏃_20250314_083240/wallet_reorgsrestore_195/node0/regtest. Bitcoin Core is probably already running.\n[04:43:25.506]                                    ************************\n[04:43:25.506]  test  2025-03-14T08:43:24.579000Z TestFramework (DEBUG): Closing down network thread \n[04:43:25.506]  test  2025-03-14T08:43:24.663000Z TestFramework (INFO): Not stopping nodes as test failed. The dangling processes will be cleaned up later. \n[04:43:25.506]  test  2025-03-14T08:43:24.663000Z TestFramework (WARNING): Not cleaning up dir /ci_container_base/ci/scratch/test_runner/test_runner_₿_🏃_20250314_083240/wallet_reorgsrestore_195 \n[04:43:25.506]  test  2025-03-14T08:43:24.663000Z TestFramework (ERROR): Test failed. Test logging available at /ci_container_base/ci/scratch/test_runner/test_runner_₿_🏃_20250314_083240/wallet_reorgsrestore_195/test_framework.log \n[04:43:25.506]  test  2025-03-14T08:43:24.663000Z TestFramework (ERROR): \n[04:43:25.506]  test  2025-03-14T08:43:24.664000Z TestFramework (ERROR): Hint: Call /ci_container_base/test/functional/combine_logs.py '/ci_container_base/ci/scratch/test_runner/test_runner_₿_🏃_20250314_083240/wallet_reorgsrestore_195' to consolidate all logs \n[04:43:25.506]  test  2025-03-14T08:43:24.664000Z TestFramework (ERROR): \n[04:43:25.506]  test  2025-03-14T08:43:24.664000Z TestFramework (ERROR): If this failure happened unexpectedly or intermittently, please file a bug and provide a link or upload of the combined log. \n[04:43:25.506]  test  2025-03-14T08:43:24.664000Z TestFramework (ERROR): https://github.com/bitcoin/bitcoin/issues \n[04:43:25.506]  test  2025-03-14T08:43:24.664000Z TestFramework (ERROR): \n[04:43:25.506] \n[04:43:25.506]  node0 stderr Error: Cannot obtain a lock on directory /ci_container_base/ci/scratch/test_runner/test_runner_₿_🏃_20250314_083240/wallet_reorgsrestore_195/node0/regtest. Bitcoin Core is probably already running. \n[04:43:25.518] ",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-03-14T08:51:58Z",
+      "updated_at": "2025-03-16T16:59:53Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32066",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "https://cirrus-ci.com/task/4579981042384896?logs=ci#L2285",
+          "created_at": "2025-03-14T11:40:43Z"
+        },
+        {
+          "user": "furszy",
+          "body": "#32069 attempts to fix it.",
+          "created_at": "2025-03-14T14:36:35Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 6,
+    "issues": 3
+  }
+}

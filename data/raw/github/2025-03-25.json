@@ -1,0 +1,382 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:27:39.114239+00:00",
+  "date": "2025-03-25",
+  "pull_requests": [
+    {
+      "number": 32141,
+      "title": "fuzz: extract unsequenced operations with side-effects",
+      "body": "https://github.com/bitcoin/bitcoin/pull/30746#discussion_r1817851827 introduced unsequenced operations with side-effects - which is undefined behavior, i.e. the right hand side can be evaluated before the left hand side, which happens to mutate it.\r\n\r\n<details>\r\n<summary>Tried to find other occurrences</summary>\r\n\r\n```bash\r\nclang++ --analyze -std=c++20 -I./src -I./src/test -I./src/test/fuzz src/test/fuzz/base_encode_decode.cpp src/psbt.cpp\r\n```\r\nbut it didn't warn about UB.\r\n\r\nGrepped for similar ones, but could find any other one in the codebase:\r\n```bash\r\n> grep -rnE --include='*.cpp' --include='*.h' '\\b(\\w+)\\(([^)]*\\b(\\w+)\\b[^)]*)\\)\\s*==\\s*\\3\\.' .\r\n\r\n./src/test/arith_uint256_tests.cpp:373:    BOOST_CHECK(R1L.GetHex() == R1L.ToString());\r\n./src/test/arith_uint256_tests.cpp:374:    BOOST_CHECK(R2L.GetHex() == R2L.ToString());\r\n./src/test/arith_uint256_tests.cpp:375:    BOOST_CHECK(OneL.GetHex() == OneL.ToString());\r\n./src/test/arith_uint256_tests.cpp:376:    BOOST_CHECK(MaxL.GetHex() == MaxL.ToString());\r\n./src/test/fuzz/cluster_linearize.cpp:565:        assert(depgraph.FeeRate(best_anc.transactions) == best_anc.feerate);\r\n./src/test/fuzz/cluster_linearize.cpp:646:        assert(depgraph.FeeRate(found.transactions) == found.feerate);\r\n./src/test/fuzz/cluster_linearize.cpp:765:            assert(depgraph.FeeRate(chunk_info.transactions) == chunk_info.feerate);\r\n./src/test/fuzz/base_encode_decode.cpp:95:    assert(DecodeBase64PSBT(psbt, random_string, error) == error.empty());\r\n./src/test/fuzz/key.cpp:102:        assert(pubkey.data() == pubkey.begin());\r\n./src/test/skiplist_tests.cpp:42:        BOOST_CHECK(vIndex[from].GetAncestor(0) == vIndex.data());\r\n./src/script/signingprovider.cpp:535:                   ComputeTapbranchHash(node.sub[1]->hash, node.sub[1]->hash) == node.hash) {\r\n./src/pubkey.h:78:      return vch.size() > 0 && GetLen(vch[0]) == vch.size();\r\n./src/cluster_linearize.h:881:            Assume(elem.inc.feerate.IsEmpty() == elem.pot_feerate.IsEmpty());\r\n```\r\n\r\n</details>\r\n\r\nHodlinator deduced the UB on Windows in https://github.com/bitcoin/bitcoin/issues/32135#issuecomment-2751723855\r\n\r\nFixes #32135",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-03-25T20:35:56Z",
+      "updated_at": "2025-10-30T13:59:47Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32141",
+      "labels": [
+        "Tests",
+        "Fuzzing"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32141.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hodlinator](https://github.com/bitcoin/bitcoin/pull/32141#pullrequestreview-2715349904), [marcofleon](https://github.com/bitcoin/bitcoin/pull/32141#pullrequestreview-2717999056), [brunoerg](https://github.com/bitcoin/bitcoin/pull/32141#pullrequestreview-2718050537), [maflcko](https://github.com/bitcoin/bitcoin/pull/32141#issuecomment-2756976842) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-25T20:35:59Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I've also added an optional `PSBT_MAGIC_BYTES` prefix, otherwise the the fuzzer couldn't even crack this condition https://github.com/bitcoin/bitcoin/blob/master/src/psbt.h#L1043 in time.\r\n> After this change the fuzzer is finally stressing the `PartiallySignedTransaction` deserialization.\r\n\r\nIf a fuzz engine can't crack a 5-byte constant byte literal, then something must be wrong.\r\n\r\nAccording to https://drahtbot.space/host_reports/DrahtBot/reports/coverage_fuzz/monotree/dfb7d58108daf372/c62dc520e0c7caee/fuzz.coverage/src/psbt.h.gcov.html it is already covered.\r\n\r\nWhat are the exact steps to reproduce that you took to confirm it isn't covered and unreachable?",
+          "created_at": "2025-03-25T20:45:51Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> What are the exact steps to reproduce that you took to confirm it isn't covered and unreachable?\r\n\r\nNot unreachable, just \"couldn't even crack this condition [...] in time.\"\r\n\r\n```C++\r\n\t// PartiallySignedTransaction\r\n    inline void Unserialize(Stream& s) {\r\n        // Read the magic bytes\r\n        uint8_t magic[5];\r\n        s >> magic;\r\n        if (!std::equal(magic, magic + 5, PSBT_MAGIC_BYTES)) {\r\n            throw std::ios_base::failure(\"Invalid PSBT magic bytes\");\r\n        }\r\n\r\n        throw \"MAGIC!\"; // Added to see failure\r\n```\r\nfails basically immediately with the added magic prefix:\r\n```bash\r\nINFO: A corpus is not provided, starting from an empty corpus\r\n#2      INITED cov: 55 ft: 55 corp: 1/1b exec/s: 0 rss: 34Mb\r\n#3      NEW    cov: 60 ft: 60 corp: 2/3b lim: 4 exec/s: 0 rss: 34Mb L: 2/2 MS: 1 CopyPart-\r\n#4      NEW    cov: 61 ft: 61 corp: 3/4b lim: 4 exec/s: 0 rss: 34Mb L: 1/2 MS: 1 ChangeBinInt-\r\n#25     NEW    cov: 69 ft: 69 corp: 4/6b lim: 4 exec/s: 0 rss: 34Mb L: 2/2 MS: 1 CopyPart-\r\nlibc++abi: terminating due to uncaught exception of type char const*\r\n==9147== ERROR: libFuzzer: deadly signal\r\nNOTE: libFuzzer has rudimentary signal handlers.\r\n      Combine libFuzzer with AddressSanitizer or similar for better crash reports.\r\nSUMMARY: libFuzzer: deadly signal\r\n```\r\nbut the original:\r\n```C++\r\nFUZZ_TARGET(psbt_base64_decode)\r\n{\r\n    const std::string random_string{buffer.begin(), buffer.end()};\r\n```\r\nworks a lot on the prefix (instead of the rest of the PSBT format):\r\n```bash\r\nINFO: Running with entropic power schedule (0xFF, 100).\r\nINFO: Seed: 1756400214\r\nINFO: Loaded 1 modules   (570750 inline 8-bit counters): 570750 [0x10206c000, 0x1020f757e), \r\nINFO: Loaded 1 PC tables (570750 PCs): 570750 [0x1020f7580,0x1029acd60), \r\nINFO: -max_len is not provided; libFuzzer will not generate inputs larger than 4096 bytes\r\nINFO: A corpus is not provided, starting from an empty corpus\r\n#2      INITED cov: 37 ft: 37 corp: 1/1b exec/s: 0 rss: 34Mb\r\n#4      NEW    cov: 38 ft: 38 corp: 2/3b lim: 4 exec/s: 0 rss: 34Mb L: 2/2 MS: 2 ChangeBinInt-InsertByte-\r\n#7      NEW    cov: 38 ft: 39 corp: 3/6b lim: 4 exec/s: 0 rss: 34Mb L: 3/3 MS: 3 InsertByte-ChangeByte-InsertByte-\r\n#15     NEW    cov: 42 ft: 44 corp: 4/10b lim: 4 exec/s: 0 rss: 34Mb L: 4/4 MS: 3 InsertByte-ShuffleBytes-InsertByte-\r\n#124    NEW    cov: 43 ft: 45 corp: 5/14b lim: 4 exec/s: 0 rss: 34Mb L: 4/4 MS: 4 EraseBytes-InsertByte-ChangeBit-InsertByte-\r\n#231    NEW    cov: 45 ft: 47 corp: 6/18b lim: 4 exec/s: 0 rss: 34Mb L: 4/4 MS: 2 ChangeBit-CrossOver-\r\n#390    NEW    cov: 47 ft: 50 corp: 7/22b lim: 4 exec/s: 0 rss: 34Mb L: 4/4 MS: 4 ShuffleBytes-ChangeBit-CopyPart-CopyPart-\r\n#459    NEW    cov: 48 ft: 51 corp: 8/26b lim: 4 exec/s: 0 rss: 34Mb L: 4/4 MS: 4 ChangeByte-ChangeByte-ChangeBit-CopyPart-\r\n        NEW_FUNC[1/6]: 0x100cdbb54\r\n        NEW_FUNC[2/6]: 0x100d6f438\r\n#562    NEW    cov: 69 ft: 75 corp: 9/30b lim: 4 exec/s: 0 rss: 34Mb L: 4/4 MS: 3 ShuffleBytes-ChangeBit-ChangeByte-\r\n#611    NEW    cov: 69 ft: 77 corp: 10/34b lim: 4 exec/s: 0 rss: 34Mb L: 4/4 MS: 4 ChangeBit-EraseBytes-ChangeBit-CrossOver-\r\n#826    NEW    cov: 69 ft: 78 corp: 11/39b lim: 6 exec/s: 0 rss: 34Mb L: 5/5 MS: 5 ShuffleBytes-ChangeBinInt-ChangeByte-EraseBytes-InsertRepeatedBytes-\r\n#856    NEW    cov: 70 ft: 79 corp: 12/43b lim: 6 exec/s: 0 rss: 34Mb L: 4/5 MS: 5 ShuffleBytes-ChangeBit-ChangeBinInt-EraseBytes-CopyPart-\r\n#1380   NEW    cov: 70 ft: 80 corp: 13/52b lim: 11 exec/s: 0 rss: 34Mb L: 9/9 MS: 4 ChangeBinInt-CrossOver-ChangeByte-InsertByte-\r\n#1642   NEW    cov: 72 ft: 86 corp: 14/60b lim: 11 exec/s: 0 rss: 34Mb L: 8/9 MS: 2 CrossOver-CopyPart-\r\n#2263   NEW    cov: 72 ft: 90 corp: 15/76b lim: 17 exec/s: 0 rss: 34Mb L: 16/16 MS: 1 CopyPart-\r\n#2274   NEW    cov: 72 ft: 91 corp: 16/93b lim: 17 exec/s: 0 rss: 34Mb L: 17/17 MS: 1 InsertRepeatedBytes-\r\n#2360   NEW    cov: 72 ft: 92 corp: 17/109b lim: 17 exec/s: 0 rss: 34Mb L: 16/17 MS: 1 ChangeByte-\r\n#3174   NEW    cov: 75 ft: 95 corp: 18/132b lim: 25 exec/s: 0 rss: 34Mb L: 23/23 MS: 4 CrossOver-InsertRepeatedBytes-EraseBytes-InsertRepeatedBytes-\r\n#3180   NEW    cov: 76 ft: 96 corp: 19/156b lim: 25 exec/s: 0 rss: 35Mb L: 24/24 MS: 1 CrossOver-\r\n#3589   NEW    cov: 76 ft: 99 corp: 20/180b lim: 29 exec/s: 0 rss: 35Mb L: 24/24 MS: 4 ChangeBinInt-ChangeBit-CopyPart-InsertRepeatedBytes-\r\n#4068   NEW    cov: 76 ft: 100 corp: 21/213b lim: 33 exec/s: 0 rss: 35Mb L: 33/33 MS: 4 CopyPart-ShuffleBytes-ChangeBit-InsertRepeatedBytes-\r\n#5524   NEW    cov: 76 ft: 102 corp: 22/253b lim: 43 exec/s: 0 rss: 35Mb L: 40/40 MS: 1 InsertRepeatedBytes-\r\n#6161   NEW    cov: 76 ft: 104 corp: 23/297b lim: 48 exec/s: 0 rss: 35Mb L: 44/44 MS: 2 ChangeByte-InsertRepeatedBytes-\r\n#8191   NEW    cov: 77 ft: 105 corp: 24/364b lim: 68 exec/s: 0 rss: 35Mb L: 67/67 MS: 5 CopyPart-ChangeByte-ShuffleBytes-EraseBytes-InsertRepeatedBytes-\r\n#8249   NEW    cov: 78 ft: 106 corp: 25/428b lim: 68 exec/s: 0 rss: 35Mb L: 64/67 MS: 3 ShuffleBytes-ChangeByte-InsertRepeatedBytes-\r\n#9017   REDUCE cov: 78 ft: 106 corp: 25/426b lim: 74 exec/s: 0 rss: 35Mb L: 65/65 MS: 3 ChangeBit-CopyPart-EraseBytes-\r\n#10248  NEW    cov: 78 ft: 107 corp: 26/498b lim: 86 exec/s: 0 rss: 35Mb L: 72/72 MS: 1 InsertRepeatedBytes-\r\n#14613  NEW    cov: 79 ft: 108 corp: 27/626b lim: 128 exec/s: 0 rss: 36Mb L: 128/128 MS: 5 CMP-CrossOver-ChangeByte-InsertRepeatedBytes-CopyPart- DE: \">\\000\\000\\000\\000\\000\\000\\000\"-\r\n#16905  NEW    cov: 79 ft: 109 corp: 28/754b lim: 149 exec/s: 0 rss: 36Mb L: 128/128 MS: 2 InsertByte-CopyPart-\r\n#17031  NEW    cov: 79 ft: 110 corp: 29/890b lim: 149 exec/s: 0 rss: 36Mb L: 136/136 MS: 1 InsertRepeatedBytes-\r\n#17497  REDUCE cov: 79 ft: 110 corp: 29/886b lim: 149 exec/s: 0 rss: 36Mb L: 68/136 MS: 1 EraseBytes-\r\n#19999  REDUCE cov: 79 ft: 110 corp: 29/882b lim: 170 exec/s: 0 rss: 36Mb L: 64/136 MS: 2 EraseBytes-InsertByte-\r\n#22675  REDUCE cov: 79 ft: 110 corp: 29/878b lim: 191 exec/s: 0 rss: 36Mb L: 12/136 MS: 1 EraseBytes-\r\n#23730  NEW    cov: 79 ft: 111 corp: 30/1072b lim: 198 exec/s: 0 rss: 36Mb L: 194/194 MS: 5 ChangeByte-ChangeBit-InsertByte-InsertRepeatedBytes-InsertRepeatedBytes-\r\n#25064  REDUCE cov: 79 ft: 113 corp: 31/1272b lim: 205 exec/s: 0 rss: 36Mb L: 200/200 MS: 4 ShuffleBytes-InsertRepeatedBytes-CrossOver-CopyPart-\r\n#25331  REDUCE cov: 79 ft: 113 corp: 31/1268b lim: 205 exec/s: 0 rss: 36Mb L: 36/200 MS: 2 EraseBytes-CrossOver-\r\n#33104  NEW    cov: 79 ft: 114 corp: 32/1543b lim: 277 exec/s: 0 rss: 37Mb L: 275/275 MS: 3 InsertRepeatedBytes-ChangeBit-InsertRepeatedBytes-\r\n#34774  REDUCE cov: 79 ft: 114 corp: 32/1529b lim: 293 exec/s: 0 rss: 37Mb L: 261/261 MS: 5 ShuffleBytes-CopyPart-ChangeByte-EraseBytes-InsertRepeatedBytes-\r\n#38904  NEW    cov: 79 ft: 115 corp: 33/1852b lim: 333 exec/s: 38904 rss: 37Mb L: 323/323 MS: 5 InsertRepeatedBytes-CopyPart-CopyPart-CrossOver-InsertRepeatedBytes-\r\n#49627  REDUCE cov: 79 ft: 115 corp: 33/1840b lim: 437 exec/s: 49627 rss: 37Mb L: 188/323 MS: 3 EraseBytes-ShuffleBytes-CrossOver-\r\n#52714  REDUCE cov: 79 ft: 115 corp: 33/1835b lim: 461 exec/s: 52714 rss: 37Mb L: 256/323 MS: 2 ShuffleBytes-EraseBytes-\r\n#55990  REDUCE cov: 79 ft: 115 corp: 33/1831b lim: 493 exec/s: 55990 rss: 37Mb L: 132/323 MS: 1 EraseBytes-\r\n#65018  NEW    cov: 80 ft: 116 corp: 34/1839b lim: 580 exec/s: 65018 rss: 37Mb L: 8/323 MS: 3 InsertByte-ShuffleBytes-CrossOver-\r\n#77187  NEW    cov: 80 ft: 117 corp: 35/2498b lim: 697 exec/s: 38593 rss: 37Mb L: 659/659 MS: 4 ChangeBinInt-CrossOver-CopyPart-InsertRepeatedBytes-\r\n#100174 REDUCE cov: 80 ft: 117 corp: 35/2495b lim: 922 exec/s: 50087 rss: 37Mb L: 656/656 MS: 2 CopyPart-CrossOver-\r\n#127395 REDUCE cov: 80 ft: 117 corp: 35/2487b lim: 1190 exec/s: 42465 rss: 37Mb L: 180/656 MS: 1 CrossOver-\r\n#131072 pulse  cov: 80 ft: 117 corp: 35/2487b lim: 1220 exec/s: 43690 rss: 37Mb\r\n#132743 REDUCE cov: 80 ft: 118 corp: 36/3083b lim: 1240 exec/s: 44247 rss: 37Mb L: 596/656 MS: 3 CrossOver-CopyPart-CopyPart-\r\n#133641 REDUCE cov: 80 ft: 118 corp: 36/3082b lim: 1240 exec/s: 44547 rss: 37Mb L: 322/656 MS: 3 CopyPart-ChangeByte-EraseBytes-\r\n#149165 REDUCE cov: 80 ft: 119 corp: 37/4314b lim: 1390 exec/s: 37291 rss: 37Mb L: 1232/1232 MS: 4 CopyPart-InsertRepeatedBytes-EraseBytes-CopyPart-\r\n#152496 REDUCE cov: 80 ft: 119 corp: 37/4310b lim: 1420 exec/s: 38124 rss: 37Mb L: 176/1232 MS: 1 EraseBytes-\r\n#158323 REDUCE cov: 80 ft: 119 corp: 37/4242b lim: 1470 exec/s: 39580 rss: 37Mb L: 528/1232 MS: 2 ShuffleBytes-EraseBytes-\r\n#160032 REDUCE cov: 80 ft: 119 corp: 37/4104b lim: 1480 exec/s: 40008 rss: 37Mb L: 1094/1094 MS: 4 ChangeByte-ChangeByte-CrossOver-CrossOver-\r\n#165774 REDUCE cov: 80 ft: 119 corp: 37/4046b lim: 1530 exec/s: 41443 rss: 37Mb L: 598/1094 MS: 2 ChangeByte-EraseBytes-\r\n#171841 REDUCE cov: 80 ft: 119 corp: 37/4042b lim: 1590 exec/s: 42960 rss: 37Mb L: 172/1094 MS: 2 CrossOver-EraseBytes-\r\n#176498 REDUCE cov: 80 ft: 119 corp: 37/4022b lim: 1630 exec/s: 44124 rss: 37Mb L: 578/1094 MS: 2 InsertRepeatedBytes-EraseBytes-\r\n#187724 REDUCE cov: 80 ft: 119 corp: 37/4021b lim: 1740 exec/s: 37544 rss: 37Mb L: 321/1094 MS: 1 EraseBytes-\r\n#198026 REDUCE cov: 80 ft: 119 corp: 37/4009b lim: 1840 exec/s: 39605 rss: 37Mb L: 516/1094 MS: 2 ShuffleBytes-EraseBytes-\r\n#199185 REDUCE cov: 80 ft: 119 corp: 37/4007b lim: 1850 exec/s: 39837 rss: 37Mb L: 192/1094 MS: 4 ChangeByte-InsertRepeatedBytes-EraseBytes-InsertByte-\r\n#262144 pulse  cov: 80 ft: 119 corp: 37/4007b lim: 2468 exec/s: 37449 rss: 37Mb\r\n#268590 REDUCE cov: 80 ft: 119 corp: 37/4002b lim: 2534 exec/s: 38370 rss: 37Mb L: 1089/1089 MS: 5 InsertRepeatedBytes-CrossOver-ChangeBinInt-CMP-EraseBytes- DE: \"\\001\\026\"-\r\n#285269 REDUCE cov: 80 ft: 120 corp: 38/6337b lim: 2699 exec/s: 40752 rss: 37Mb L: 2335/2335 MS: 4 CrossOver-ShuffleBytes-CrossOver-CrossOver-\r\n#288545 REDUCE cov: 80 ft: 120 corp: 38/6200b lim: 2721 exec/s: 41220 rss: 37Mb L: 2198/2198 MS: 1 EraseBytes-\r\n#323534 REDUCE cov: 80 ft: 120 corp: 38/6199b lim: 3062 exec/s: 40441 rss: 38Mb L: 320/2198 MS: 4 ChangeBinInt-CrossOver-CMP-EraseBytes- DE: \"\\002\\000\\000\\000\\000\\000\\000\\000\"-\r\n#379377 REDUCE cov: 80 ft: 120 corp: 38/6155b lim: 3612 exec/s: 37937 rss: 38Mb L: 2154/2154 MS: 3 InsertByte-ShuffleBytes-EraseBytes-\r\n#396676 REDUCE cov: 80 ft: 120 corp: 38/6154b lim: 3777 exec/s: 39667 rss: 38Mb L: 577/2154 MS: 4 PersAutoDict-ChangeBinInt-ChangeBinInt-EraseBytes- DE: \"\\002\\000\\000\\000\\000\\000\\000\\000\"-\r\n#430453 REDUCE cov: 80 ft: 120 corp: 38/6153b lim: 4096 exec/s: 39132 rss: 38Mb L: 576/2154 MS: 2 CopyPart-EraseBytes-\r\n#471934 REDUCE cov: 80 ft: 120 corp: 38/6122b lim: 4096 exec/s: 39327 rss: 38Mb L: 2123/2123 MS: 1 EraseBytes-\r\n#524288 pulse  cov: 80 ft: 120 corp: 38/6122b lim: 4096 exec/s: 37449 rss: 38Mb\r\n#770383 REDUCE cov: 80 ft: 120 corp: 38/6120b lim: 4096 exec/s: 38519 rss: 38Mb L: 2121/2121 MS: 4 ChangeBit-ChangeBinInt-CrossOver-EraseBytes-\r\n#800683 REDUCE cov: 80 ft: 120 corp: 38/6119b lim: 4096 exec/s: 38127 rss: 38Mb L: 1088/2121 MS: 5 CopyPart-ShuffleBytes-InsertRepeatedBytes-InsertRepeatedBytes-EraseBytes-\r\n#1048576        pulse  cov: 80 ft: 120 corp: 38/6119b lim: 4096 exec/s: 37449 rss: 38Mb\r\n#2097152        pulse  cov: 80 ft: 120 corp: 38/6119b lim: 4096 exec/s: 38130 rss: 38Mb\r\n#2185901        REDUCE cov: 80 ft: 120 corp: 38/6118b lim: 4096 exec/s: 37687 rss: 38Mb L: 2120/2120 MS: 3 InsertRepeatedBytes-PersAutoDict-EraseBytes- DE: \"\\002\\000\\000\\000\\000\\000\\000\\000\"-\r\n#2396085        REDUCE cov: 80 ft: 120 corp: 38/6112b lim: 4096 exec/s: 38033 rss: 38Mb L: 2114/2114 MS: 4 InsertByte-CopyPart-ChangeByte-CrossOver-\r\n#3730734        REDUCE cov: 80 ft: 120 corp: 38/6110b lim: 4096 exec/s: 38068 rss: 38Mb L: 2112/2112 MS: 4 InsertByte-EraseBytes-InsertRepeatedBytes-CrossOver-\r\n#4194304        pulse  cov: 80 ft: 120 corp: 38/6110b lim: 4096 exec/s: 37786 rss: 38Mb\r\n#5041825        REDUCE cov: 80 ft: 120 corp: 38/6106b lim: 4096 exec/s: 37908 rss: 38Mb L: 512/2112 MS: 1 EraseBytes-\r\n#8388608        pulse  cov: 80 ft: 120 corp: 38/6106b lim: 4096 exec/s: 37786 rss: 38Mb\r\n#8388608        pulse  cov: 80 ft: 120 corp: 38/6106b lim: 4096 exec/s: 37786 rss: 38Mb\r\n#16777216       pulse  cov: 80 ft: 120 corp: 38/6106b lim: 4096 exec/s: 37957 rss: 38Mb\r\n#33554432       pulse  cov: 80 ft: 120 corp: 38/6106b lim: 4096 exec/s: 38043 rss: 38Mb\r\n```\r\n\r\nEdit:\r\n> According to [drahtbot.space/host_reports/DrahtBot/reports/coverage_fuzz/monotree/dfb7d58108daf372/c62dc520e0c7caee/fuzz.coverage/src/psbt.h.gcov.html](https://drahtbot.space/host_reports/DrahtBot/reports/coverage_fuzz/monotree/dfb7d58108daf372/c62dc520e0c7caee/fuzz.coverage/src/psbt.h.gcov.html) it is already covered.\r\n\r\nSweet, do we save every input that ever makes new progress to the coverage corpora automatically? I'm surprised it was able to crack the whole format, that's pretty neat (especially since I don't see that locally)",
+          "created_at": "2025-03-25T21:33:14Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Running fuzzing in a single thread, for less than 4 minutes, with an empty fuzz input folder isn't representative.\r\n\r\nMy recommendation would be to run in in more threads, for longer time, and with the existing fuzz inputs.\r\n\r\nIf you really want to start with an empty folder, you can try `-use_value_profile=1`.\r\n\r\nIf you want to help the fuzz engine with the encoding, it seems best to do over the whole input and not only the prefix.\r\n\r\nIn any case, I don't see why this should be bundled in this pull request, which is a bugfix that probably should be backported.",
+          "created_at": "2025-03-25T21:45:52Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> In any case, I don't see why this should be bundled in this pull request, which is a bugfix that probably should be backported.\r\n\r\nIt's not that important, I dropped that commit",
+          "created_at": "2025-03-25T21:52:56Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK b1de59e8965354fff5a149bc0fe61ed0704aea7a",
+          "created_at": "2025-03-27T07:17:36Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Backported in #32136",
+          "created_at": "2025-03-28T18:34:54Z"
+        }
+      ]
+    },
+    {
+      "number": 32140,
+      "title": "contrib: Add external RPC code generator with unit tests",
+      "body": "## Description\r\n\r\nThis pull request introduces an external tool for generating RPC client code based on the\r\nBitcoin Core RPC schema. The tool is implemented in Python using Jinja2 templates and can\r\ngenerate code for both C++ and Python clients. In addition, unit tests have been added to\r\nverify that the generator produces the expected output given a sample schema.\r\n\r\n## Changes Included\r\n\r\n- **`contrib/codegen/generate_client.py`**  \r\n  A script that retrieves the latest RPC schema (via bitcoin-cli) and renders language-\r\n  specific templates.\r\n- **`contrib/codegen/templates/`**  \r\n  - `cpp_client.jinja2` – Template for generating a C++ RPC client header.\r\n  - `python_client.jinja2` – Template for generating a Python RPC client.\r\n- **`contrib/codegen/tests/test_generate_client.py`**  \r\n  Unit tests to ensure the code generator works as expected for both C++ and Python output.\r\n\r\n## Rationale\r\n\r\nThis tool provides a convenient way for developers to automatically update external client\r\nlibraries when the RPC schema changes. It improves maintainability by reducing manual\r\neffort and potential errors. As a non-core developer utility, it is placed under the\r\n`contrib/` directory to keep it separate from the core runtime.\r\n\r\n## Testing and Verification\r\n\r\n- The generated client code for both C++ and Python has been compiled (for C++) and run in a\r\n  test harness.\r\n- Unit tests verify that, given a sample schema, the output contains the expected method\r\n  declarations and syntax.\r\n- The tool automatically retrieves the latest schema using the `bitcoin-cli schema` RPC.\r\n\r\nPlease see the accompanying README in `contrib/codegen/` for detailed usage instructions.\r\n",
+      "state": "closed",
+      "user": "enirox001",
+      "created_at": "2025-03-25T19:16:19Z",
+      "updated_at": "2025-06-02T20:53:46Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32140",
+      "labels": [
+        "Scripts and tools",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32140.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n",
+          "created_at": "2025-03-25T19:16:22Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/39395957729</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-25T19:29:58Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "`/schema.json` probably wasn't intended to be in this PR.",
+          "created_at": "2025-03-26T04:05:02Z"
+        },
+        {
+          "user": "enirox001",
+          "body": "> `/schema.json` probably wasn't intended to be in this PR.\r\n\r\nYes, redundant now that latest schema is retrieved each time, pushed the change",
+          "created_at": "2025-03-26T11:04:45Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Are you still working on this, or can it be closed?",
+          "created_at": "2025-06-02T13:16:13Z"
+        },
+        {
+          "user": "enirox001",
+          "body": "> Are you still working on this, or can it be closed?\r\n\r\nNo, not working on this at the moment, can be closed. Will probably look into it in the future, but not at the moment. ",
+          "created_at": "2025-06-02T20:51:44Z"
+        }
+      ]
+    },
+    {
+      "number": 32139,
+      "title": "test: remove strict restrictions on rpc_deprecated test",
+      "body": "Removed the wallet restrictions for `rpc_deprecated.py` and added specific test case for the current deprecated rpc. \r\n`skip_test_if_missing_module` will skip the whole test when the wallet is missing, even if a part of the test is non-wallet related. This PR ensures that other tests not related to wallet can be ran and only this specific test will be skipped if there's no wallet \r\n\r\nFor more context check https://github.com/bitcoin/bitcoin/pull/31278#discussion_r2011661090",
+      "state": "closed",
+      "user": "polespinasa",
+      "created_at": "2025-03-25T18:43:49Z",
+      "updated_at": "2025-06-09T19:10:27Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32139",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32139.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32139#issuecomment-2770517523), [rkrux](https://github.com/bitcoin/bitcoin/pull/32139#pullrequestreview-2734996217) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31668](https://github.com/bitcoin/bitcoin/pull/31668) (Added rescan option for import descriptors by saikiran57)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-25T18:43:52Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 459807d566cfddad12b2953a506fd07a129145d8",
+          "created_at": "2025-04-01T19:45:16Z"
+        }
+      ]
+    },
+    {
+      "number": 32138,
+      "title": "wallet, rpc: remove settxfee and paytxfee",
+      "body": "**Summary**\r\n\r\nThis PR removes the settxfee RPC and paytxfee setting (Bitcoin Core 31.0).\r\nThese two features were deprecated in https://github.com/bitcoin/bitcoin/pull/31278.",
+      "state": "open",
+      "user": "polespinasa",
+      "created_at": "2025-03-25T18:30:56Z",
+      "updated_at": "2026-01-13T09:38:18Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32138",
+      "labels": [
+        "Wallet",
+        "RPC/REST/ZMQ",
+        "Needs release note"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32138.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [theStack](https://github.com/bitcoin/bitcoin/pull/32138#issuecomment-3710657732) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34075](https://github.com/bitcoin/bitcoin/pull/34075) (fees: Introduce Mempool Based Fee Estimation to reduce overestimation by ismaelsadeeq)\n* [#34049](https://github.com/bitcoin/bitcoin/pull/34049) (rpc: Disallow captures in RPCMethodImpl by ajtowns)\n* [#32636](https://github.com/bitcoin/bitcoin/pull/32636) (Split `CWallet::Create()` into `CreateNew` and `LoadExisting` by davidgumberg)\n* [#19461](https://github.com/bitcoin/bitcoin/pull/19461) (multiprocess: Add bitcoin-gui -ipcconnect option by ryanofsky)\n* [#19460](https://github.com/bitcoin/bitcoin/pull/19460) (multiprocess: Add bitcoin-wallet -ipcconnect option by ryanofsky)\n* [#17783](https://github.com/bitcoin/bitcoin/pull/17783) (common: Disallow calling IsArgSet() on ALLOW_LIST options by ryanofsky)\n* [#17581](https://github.com/bitcoin/bitcoin/pull/17581) (refactor: Remove settings merge reverse precedence code by ryanofsky)\n* [#17580](https://github.com/bitcoin/bitcoin/pull/17580) (refactor: Add ALLOW_LIST flags and enforce usage in CheckArgFlags by ryanofsky)\n* [#17493](https://github.com/bitcoin/bitcoin/pull/17493) (util: Forbid ambiguous multiple assignments in config file by ryanofsky)\n* [#10102](https://github.com/bitcoin/bitcoin/pull/10102) (Multiprocess bitcoin by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible typos and grammar issues:\n\n- deprected -> deprecated [spelling error in release notes; \"deprected\" should be \"deprecated\"]\n\n\n\n\nPossible places where named args for integral literals may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- self.nodes[2].sendtoaddress(address, 10, \"\", \"\", False, fee_rate=fee_rate_sat_vb) in test/functional/wallet_basic.py\n- self.nodes[2].sendtoaddress(address, 10, \"\", \"\", True, fee_rate=fee_rate_sat_vb) in test/functional/wallet_basic.py\n- self.nodes[2].sendmany('', {address: 10}, 0, \"\", [], fee_rate=fee_rate_sat_vb) in test/functional/wallet_basic.py\n- self.nodes[2].sendmany('', {address: 10}, 0, \"\", [address], fee_rate=fee_rate_sat_vb) in test/functional/wallet_basic.py\n\n\n\n<sup>2026-01-07</sup>\n",
+          "created_at": "2025-03-25T18:30:59Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/39393296960</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-25T18:43:22Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "Note to self: re-check all tests",
+          "created_at": "2025-03-25T18:56:10Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Please leave this in draft. 31.0 is half a year out, so starting review on this is questionable and won't help to get it merged earlier anyway",
+          "created_at": "2025-03-25T19:10:13Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "Will re-open closer to 31.0 release",
+          "created_at": "2025-06-24T07:25:31Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Seems fine to pick this up now, if you want.",
+          "created_at": "2025-08-26T11:18:07Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "5ba260ca74 Rebased on top of master  6ca6f3b37b",
+          "created_at": "2025-08-26T18:08:03Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/48937774714</sub>\n<sub>LLM reason (✨ experimental): Lint failure caused by an invalid Python shebang in test/functional/wallet_txn_clone.py (syntax error).</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-08-26T18:11:40Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "What is the point of keeping `m_pay_tx_fee`. It is just dead code now, no?",
+          "created_at": "2025-08-28T08:48:12Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": " > It is just dead code now, no?\r\n\r\n@maflcko I think you're right.\r\nWill squash after review, think it's easier this way.",
+          "created_at": "2025-08-28T18:17:20Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Will squash after review, think it's easier this way.\r\n\r\nI'd say to either squash now, or create meaningful separate commits. E.g:\r\n\r\n* First, remove from rpc (settxfee, paytxfee result)\r\n* Then, remove from cli (-paytxfee, tests only)\r\n* Then, remove from cli (-paytxfee, code, and remaining leftovers)",
+          "created_at": "2025-09-01T14:43:31Z"
+        },
+        {
+          "user": "theStack",
+          "body": "Concept ACK\r\n\r\nThis should have a release note, and IIUC, the following part of the PR description doesn't apply anymore:\r\n> This PR does not remove the internal implementation of the default value of paytxfee=0 but removes the option for users to modify it.",
+          "created_at": "2026-01-05T14:27:24Z"
+        }
+      ]
+    },
+    {
+      "number": 32136,
+      "title": "[29.x] backports and 29.0rc3",
+      "body": "Backports + final changes for 29.0rc3.\r\n\r\nBackports:\r\n- #32057\r\n- #32122\r\n- #32141 \r\n- #32027 \r\n- #31849",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2025-03-25T14:36:10Z",
+      "updated_at": "2025-04-01T12:31:04Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32136",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32136.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/32136#pullrequestreview-2732238387), [fanquake](https://github.com/bitcoin/bitcoin/pull/32136#pullrequestreview-2732448443) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-25T14:36:15Z"
+        }
+      ]
+    },
+    {
+      "number": 32134,
+      "title": "descriptors: Multipath/PR 22838 follow-ups",
+      "body": "Follows up on unresolved suggestions from #22838. In order of priority:\r\n\r\n1. Fixes a couple of typos [^1][^2] and indentation to conform to Markdown.\r\n2. Solves `for`-loop nit [^3] and also limits variable scope.\r\n3. Clarifies data relationships [^4][^5] by introducing `struct` rather than comments.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/22838#discussion_r1713711352\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/22838#discussion_r1735039600\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/22838#discussion_r1735041704\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/22838#discussion_r1715150336\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/22838#discussion_r1715151078",
+      "state": "closed",
+      "user": "hodlinator",
+      "created_at": "2025-03-25T08:10:46Z",
+      "updated_at": "2025-03-31T21:00:28Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32134",
+      "labels": [
+        "Descriptors"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32134.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Prabhat1308](https://github.com/bitcoin/bitcoin/pull/32134#issuecomment-2764219862), [l0rinc](https://github.com/bitcoin/bitcoin/pull/32134#pullrequestreview-2727715824), [mabu44](https://github.com/bitcoin/bitcoin/pull/32134#issuecomment-2764269830), [rkrux](https://github.com/bitcoin/bitcoin/pull/32134#pullrequestreview-2728250898) |\n| Stale ACK | [glozow](https://github.com/bitcoin/bitcoin/pull/32134#pullrequestreview-2725971903) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-25T08:10:49Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "CC @glozow & @jonatack since these follow-ups are mostly based on your comments in the original PR (see references in PR description).\r\n\r\nI ran into the broken formatting and 2/3 typo while looking at another PR and traced them back to 22838. Don't feel strongly about the two refactoring commits. Fine with dropping either/both to not hold the doc-commit hostage.",
+          "created_at": "2025-03-25T08:18:24Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Re: https://github.com/bitcoin/bitcoin/pull/32134#pullrequestreview-2713105661\r\n\r\nIn the docs file, I would keep the `3` though. Explicitly stating the count of descriptors it will expand to is helpful.",
+          "created_at": "2025-03-25T12:42:18Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK bd34c6008aa455d5b294db8977be471d1bc837df - not yet sure about the last commit, let's see what others think",
+          "created_at": "2025-03-25T20:44:23Z"
+        },
+        {
+          "user": "Prabhat1308",
+          "body": "re-ACK [`56f271e`](https://github.com/bitcoin/bitcoin/pull/32134/commits/56f271e9b9c82f40054d63d4b638584bd2faef00)",
+          "created_at": "2025-03-29T19:50:16Z"
+        },
+        {
+          "user": "mabu44",
+          "body": "tACK 56f271e9b9c82f40054d63d4b638584bd2faef00\r\n\r\n<details>\r\n<summary>Testing procedure</summary>\r\n\r\n```bash\r\n./bitcoind -regtest\r\n```\r\n```bash\r\n./bitcoin-cli createwallet pr32134 false true\r\n```\r\n```bash\r\n./bitcoin-cli importdescriptors '[{\"desc\":\"wpkh(tprv8ZgxMBicQKsPdGJed5SjAaeKBLjKoYKbp4E8855hsG3HNiFuaHNprjb4UmuovVsvAQ7Hwa2MdBsrgyhePCyVgMPnTgQdigFFZLCJTkNm7CK/<0;1>/*)#p5mvj4c3\",\"timestamp\":0,\"range\":[0,999],\"active\":true}]'\r\n```\r\nOutput:\r\n```bash\r\n[\r\n  {\r\n    \"success\": true\r\n  }\r\n]\r\n```\r\n```bash\r\n./bitcoin-cli listdescriptors\r\n```\r\nOutput:\r\n```bash\r\n{\r\n  \"wallet_name\": \"pr32134\",\r\n  \"descriptors\": [\r\n    {\r\n      \"desc\": \"wpkh(tpubD6NzVbkrYhZ4WjLSWj7KZzJRkNFFxsWWPMpuQb81HXqgDCWgCgCR3ECvetieSgGdd4DWgzikbbG8jHHSxkrVD1TjpaRoBHuJaXQibLpF5qQ/0/*)#979qycjr\",\r\n      \"timestamp\": 1,\r\n      \"active\": true,\r\n      \"internal\": false,\r\n      \"range\": [\r\n        0,\r\n        999\r\n      ],\r\n      \"next\": 0,\r\n      \"next_index\": 0\r\n    },\r\n    {\r\n      \"desc\": \"wpkh(tpubD6NzVbkrYhZ4WjLSWj7KZzJRkNFFxsWWPMpuQb81HXqgDCWgCgCR3ECvetieSgGdd4DWgzikbbG8jHHSxkrVD1TjpaRoBHuJaXQibLpF5qQ/1/*)#52qpedzm\",\r\n      \"timestamp\": 1,\r\n      \"active\": true,\r\n      \"internal\": true,\r\n      \"range\": [\r\n        0,\r\n        999\r\n      ],\r\n      \"next\": 0,\r\n      \"next_index\": 0\r\n    }\r\n  ]\r\n}\r\n```\r\nAlso moved some regtest coins around and it works as expected.\r\n</details>",
+          "created_at": "2025-03-29T22:40:30Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32142,
+      "title": "Feature Request: testmempoolaccept with an argument to ignore nLocktime/nSequence time-locking",
+      "body": "### Please describe the feature you'd like to see added.\n\nExecute `testmempoolaccept` in a way that will ignore the time/block-height validations of the transactions' `nSequence` and `nLocktime`.\n\n### Is your feature related to a problem, if so please describe it.\n\n`testmempoolaccept` is a very useful tool to verify transactions that aren't supposed to be broadcasted immediately - for example, for emergency recovery in case the seed is lost.\n`nLocktime` is also useful in such case, to prevent the recovery transaction from being broadcasted too early. However, after signing a transaction with a future `nLocktime`, I couldn't be sure that it is indeed valid: `testmempoolaccept` considers this transaction as `non-final` because of its future `nLocktime`, without explaining whether it has other problems (i.e. invalid signatures etc.).\n\n### Describe the solution you'd like\n\nA third optional parameter to `testmempoolaccept` (after `rawtxs` and `maxfeerate`) called `ignoretimelocks`, that will be a boolean.\n\n### Describe any alternatives you've considered\n\nI've tried writing code that would parse the transaction and, given the current mempool utxos, verify its scripts. This becomes complicated to implement in multisig and segwit transactions, and doesn't give me the guarantees that I want for such long-term transaction.\n\nAnother suggestion is that `testmempoolaccept` will accumulate all the reasons a transaction is unacceptable, and not exit after the first reason.\n\n### Please leave any additional context\n\n`nSequence` is a bitfield with multiple purposes, like RBF, and possibly other features in the future. My suggestion only regards BIP-68 validations of `nSequence` and not other features.",
+      "state": "open",
+      "user": "oren-z0",
+      "created_at": "2025-03-25T23:07:46Z",
+      "updated_at": "2026-01-05T10:32:38Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32142",
+      "labels": [
+        "Feature",
+        "RPC/REST/ZMQ",
+        "Mempool"
+      ],
+      "comment_list": [
+        {
+          "user": "darosior",
+          "body": "Have you seen the discussion about this at https://github.com/bitcoin/bitcoin/pull/25434?",
+          "created_at": "2025-03-26T20:02:13Z"
+        },
+        {
+          "user": "oren-z0",
+          "body": "Thanks @darosior , no I did not see that discussion before (only searched for related issues, not related PRs).\nIn the other discussion, the main use case for the feature  is to simplify the development of L2 layers - which use scripts with pre-known structure.\nIn my use case, I'm building a service that could broadcast future recovery-transactions uploaded by customers, and I want to verify in advance that these transactions could indeed be broadcasted when the time comes (unless, of course, the customer has spent the UTXOs after uploading the recovery-transactions). In this case the transaction could theoretically use any script that the customer wants.\n\nI understand the worry that the code of `testmempoolaccept` will diverge from the code of `sendrawtransaction` and some bug will cause an invalid transaction to appear as accepted by `testmempoolaccept`. A more generic alternative could be that `testmempoolaccept` will collect all the reasons a transaction appears to be invalid, without breaking on the first reason (unless this is a very basic failure like invalid transaction structure, that make the other verifications irrelevant).\n\nTherefore I would like to keep this issue open for debate.",
+          "created_at": "2025-03-27T10:15:34Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "This idea bubbled up again on the mailinglist recently: https://groups.google.com/g/bitcoindev/c/K1NpJp9_BYk/m/6PknOXFPBAAJ\n\nI think it's useful for users to be able to reassure themselves that their pre-signed time/height locked transaction will indeed be valid in the future. RPC methods like `walletcreatefundedpsbt` are able to create such transactions.\n\nI would suggest requiring a specific height / MTP argument, rather ignoring it. That lets you catch accidental timelock mixing.\n\nAn additional place where this might be useful is on an offline signing node, which might not be synced to the tip (though you'll have to sync it eventually if you want to spend change).\n\nI vibe-coded an implementation in https://github.com/Sjors/bitcoin/commits/2026/01/timelock/ but it needs polishing. I don't have time for it now, so consider it up for grabs.",
+          "created_at": "2026-01-05T10:32:38Z"
+        }
+      ]
+    },
+    {
+      "number": 32137,
+      "title": ".",
+      "body": "### Please describe the feature you'd like to see added.\n\nBelow, I present a reflection on Bitcoin Core as mirrored through its \"ex mere negativis nihil sequitur; ex mere particularibus nihil sequitur\"\n\n[NIST.FIPS.205.ipd.pdf](https://github.com/user-attachments/files/19434960/NIST.FIPS.205.ipd.pdf)\n\n The content is divided into three core sections: Purpose, Concrete Mathematical Proof, and Use Case. This exploration addresses the switch from SHA-256 to SHA-512, the concept of resonance energy—defined as yielding a final value of 10 from the ratio N/Z in miners’ activity—and incorporates mathematical rigor with references to the Bitcoin whitepaper, culminating in cryptographic constructs.\n\nI. Purpose\nBitcoin emerges not merely as a technological artifact but as a profound accedence proposition, a testament to humanity’s quest for autonomy, trust, and the redefinition of value in a decentralized. Invites contemplation—not as a mere technical shift, but as an evolution echoing Bitcoin’s intrinsic adaptability and resilience. Why such a change? Fundamentally, SHA-512, with its 512-bit output, extends the cryptographic horizon beyond SHA-256’s 256-bit domain, amplifying resistance to collision vulnerabilities that, while presently remote, may loom larger with advancing computational paradigms, such as quantum threats—though both remain within SHA-2’s vulnerability sphere. Yet, the purpose transcends security alone; it embraces efficiency. On modern 64-bit architectures, SHA-512 processes data in 64-bit words, potentially outpacing SHA-256’s 32-bit operations, thus reducing energy per hash—a nod to ecological mindfulness amid Bitcoin’s energy-intensive mining tapestry. Philosophically, this shift mirrors Bitcoin’s dialectic: a balance between enduring principles and the imperative to evolve, ensuring its relevance in an ever-shifting technological landscape. Referencing Nakamoto’s whitepaper, the foundational aim—to secure a system “based on cryptographic proof instead of trust”—finds renewed vigor in this adaptation, aligning with the relentless progression of hardware and cryptographic science (Nakamoto, 2008) & (Cypherpunk, Deplore at Cryptographic rules, 9 March 1993)\n\n[2502.20510v2.pdf](https://github.com/user-attachments/files/19433595/2502.20510v2.pdf)\n\n.\n\nII. Concrete Mathematical Proof\nAt Bitcoin’s heart pulses the proof-of-work mechanism, a cryptographic dance where miners vie to solve hash-based riddles, securing transactions and appending blocks to the chain. This process, governed by a difficulty adjustment every 2016 blocks, targets an average block time of 10 minutes—a temporal rhythm Nakamoto enshrined as the network’s heartbeat (Nakamoto, 2008, Section 4). Mathematically, this is modeled via the Poisson distribution, apt for capturing the stochastic nature of block discoveries. Let the number of blocks found in time ( t ) be denoted ( k) / P(K=k)=(λ)kk!e−λ λ=RD×t\n\n\n\n Here, resonance energy emerges as a philosophical and mathematical construct: the optimal state where λ=1\\lambda = 1\\lambda = 1\n over t=600t = 600t = 600\n seconds (10 minutes), yielding an expected block count of 1—thus. The user’s stipulation that resonance energy reflects a final value of 10 from N/ZN/ZN/Z\n in miners’ activity suggests ( N ) as hashes computed and ( Z ) as energy expended, yet contextually aligns with the whitepaper’s block time goal. Adjusting N/ZN/ZN/Z\n to yield 10 may imply a derived efficiency metric, but here, we interpret it through the lens of block frequency stability. The Poisson sum, C=∑fiC = \\sum f_iC = \\sum f_i\n, where fi=P(i)f_i = P(i)f_i = P(i)\n, aggregates probabilities, reinforcing the system’s security against double-spending, as Nakamoto calculated for an attacker’s lag (e.g., z=10z = 10z = 10\n blocks, where probability diminishes to 0.1%) (Nakamoto, 2008, Section 11). From Roman numerals—CM (900) + XLI (41) + X (10) = 951 for Metaphors in the form of encrypted Bit—this transitions to a block’s integrity, historically checksummed but here reimagined with SHA-512’s robust output, eschewing MD5’s frailty despite the user’s conflation of ML DSA with it.\n\nIII. Use Case\nEnvision a Bitcoin ecosystem where SHA-512 supplants SHA-256 in proof-of-work, a shift rippling through miners’ silicon domains. On 64-bit systems, this could enhance computational efficiency, diminishing joules per hash and fostering a greener mining ethos—crucial as global scrutiny of Bitcoin’s energy footprint intensifies. Miners, leveraging this advantage, might elevate hash rates without proportional energy hikes, democratizing participation by easing entry for smaller operators, thus fortifying decentralization—a core tenet of Nakamoto’s vision (Nakamoto, 2008). Security amplifies too; SHA-512’s expansive hash space further thwarts collision risks, a speculative safeguard against future cryptographic assaults. Resonance energy here manifests practically: maintaining the 10-minute block cadence ensures network synchrony, a balance miners tune via difficulty adjustments modeled by Poisson dynamics. Transaction signatures, currently ECDSA-based, persist unchanged, though the user’s ML DSA notion—perhaps a misnomer for DSA or a checksum fantasy—prompts exploration of alternatives; yet, ECDSA’s elliptic curve strength prevails. Integrates this shift, its integrity verifiable across nodes. Rationalizing N/Z=10N/Z = 10N/Z = 10\n, if ( N ) is hashes and ( Z ) energy :\nD=R×600D = R \\times 600D = R \\times 600\nE[N]=1\n\nAlligns with optimizing efficiency, though the whitepaper anchors us to block time resonance. \n\n\n\n### Is your feature related to a problem, if so please describe it.\n\nPoisson Sum between the costs that the State bridges so that citizens continue to double spend, Satoshi Nakamoto hasn't solved this yet but I'm not talking about Double Spending but rather the Resonance Energy move set from Roman to Arabic num Analogic * 2^256 or switch to SHA 512.\n\nWhen rotation back to the beginning of the principle, Bit must start from 0 this makes block hash reset for theoretical or practical if experienced in the Blockchain Analyst job.\n\nThe problem I solved was the overhaul of the Poisson Sum between the different i++ -> z - K (1- PoW) + r/n. I overhauled to Resonance Energy Poisson Sum C=∑fi.\n\n### Describe the solution you'd like\n\nThe formula C=∑fi quantifies cumulative frequencies, such as transaction patterns or hash iterations, which can be fed into ML DSA to refine signature verification. For instance, fif_if_i\n might denote the frequency of specific bit patterns in SHA-512 hashes, training the machine learning model to enhance checksum efficiency. The Poisson sum, S=∑k=0∞P(k)=1S = \\sum_{k=0}^{\\infty} P(k) = 1S = \\sum_{k=0}^{\\infty} P(k) = 1\n, ensures probabilistic completeness, but Resonance Energy focuses on derived stability metrics—such as the N/Z ratio’s terminal digit—culminating in 10. This convergence, rooted in Bitcoin’s 10-minute block time, underscores the mathematical harmony between SHA-512’s technical prowess and the network’s operational ethos.\n\nCommutative Law: a) p V p = p\n\n∈ 210.000 -> q=0.1 × r/n × (z=4 P=0.0034552), C=∑fi When 'r' it's Resilience on Blockchain and 'n' it's Nitrous Sustainable \n\n\n\n![Image](https://github.com/user-attachments/assets/fee196e4-3802-42fb-ae37-3615fca0c552)\n\n![Image](https://github.com/user-attachments/assets/a953472f-9543-4238-a37a-ecd20a1dc9c4)\n\n### Describe any alternatives you've considered\n\n![Image](https://github.com/user-attachments/assets/46e491c7-4a26-432a-974b-bd2ae3dc155b)\n\n![Image](https://github.com/user-attachments/assets/b23dd4b2-58c6-4fe8-b94d-ba711d88ee0c)\n\n![Image](https://github.com/user-attachments/assets/d7240229-dc88-4416-bcbd-85b6c9a5cdf6)\n\n![Image](https://github.com/user-attachments/assets/91f03efc-84db-4344-a13f-664c3a25b456)\n\n![Image](https://github.com/user-attachments/assets/4898fcd6-6e15-41c0-8996-d78482f609ef)\n\n### Please leave any additional context\n\n_No response_",
+      "state": "closed",
+      "user": "Kotarou10",
+      "created_at": "2025-03-25T14:40:42Z",
+      "updated_at": "2025-03-27T01:27:10Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32137",
+      "labels": []
+    },
+    {
+      "number": 32135,
+      "title": "fuzz: psbt_base64_decode fails on Windows",
+      "body": "https://github.com/bitcoin/bitcoin/actions/runs/14046520411/job/39356515207\n\n```\n\nAssertion failed: DecodeBase64PSBT(psbt, random_string, error) == error.empty(), file D:\\a\\bitcoin\\bitcoin\\src\\test\\fuzz\\base_encode_decode.cpp, line 95\nError processing input \"D:\\\\a\\\\_temp\\\\qa-assets\\\\fuzz_corpora\\\\psbt_base64_decode\\\\0041ae3fba09a33e18a330c95acce904552b7114\"",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-03-25T09:41:50Z",
+      "updated_at": "2025-04-23T08:52:10Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32135",
+      "labels": [
+        "Windows",
+        "Tests",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "I pushed https://github.com/bitcoin-core/qa-assets/commit/c62dc520e0c7caee3e50c9ba8a88056c7f4d357f to temporarily unbreak the CI.\n\nIt would be good if someone on Windows helped here to track this down.",
+          "created_at": "2025-03-25T10:56:42Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "cc @hebasto ",
+          "created_at": "2025-03-25T13:02:57Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Been debugging this, and I suspect the issue is down to unspecified/differing evaluation order. I suspect MSVC is sometimes evaluating the RHS of the `==`-expression before the `LHS`.\n```C++\nassert(DecodeBase64PSBT(psbt, random_string, error) == error.empty());\n```\nBreaking out fixes the issue locally for me, probably by introducing a sequence-point.\n```C++\nbool success = DecodeBase64PSBT(psbt, random_string, error);\nassert(success == error.empty());\n```\nEdit: Tried things like breaking out both sides into lambdas which log messages to prove evaluation order, but cannot reproduce the failure, so it seems to be specific conditions causing the evaluation order to reverse.",
+          "created_at": "2025-03-25T15:48:07Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "@hodlinator Thanks! When the evaluation order isn't specified by the standard, it is unspecified. Mind submitting a fix?",
+          "created_at": "2025-03-25T16:37:59Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks a lot for checking @hodlinator!\n\nAccording to https://timsong-cpp.github.io/cppwp/n4861/basic.exec#intro.execution-10:\n> evaluations of operands of individual operators [...] are unsequenced. [...] If a side effect on a memory location [...] is unsequenced relative to [...] a value computation using the value of any object in the same memory location [...], the behavior is undefined\n\nIt seems that because the operands of `==` are unsequenced, side effects can lead to undefined behavior - my bad, it didn't even occur to me that this was UB - and makes me wonder how many other cases we have, if none of the linters were complaining.\n@hodlinator I can push a PR with your email - I introduced the faulure, I should fix it.",
+          "created_at": "2025-03-25T17:48:56Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Since I introduced the [idea](https://github.com/bitcoin/bitcoin/pull/30746#discussion_r1817851827) to write the code like this, I'm happy to be part of resolving it. And happy to review your PR.",
+          "created_at": "2025-03-25T19:57:07Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "I have opened https://github.com/bitcoin/bitcoin/pull/32141 - but still [can't fuzz properly on mac](https://github.com/bitcoin/bitcoin/pull/32084#issuecomment-2752412513), so would appreciate if someone could run it for a few minutes (especially on Windows).",
+          "created_at": "2025-03-25T20:40:36Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 6,
+    "issues": 3
+  }
+}

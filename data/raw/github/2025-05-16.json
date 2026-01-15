@@ -1,0 +1,802 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:42:59.701279+00:00",
+  "date": "2025-05-16",
+  "pull_requests": [
+    {
+      "number": 32539,
+      "title": "init: Configure reachable networks before we start the RPC server",
+      "body": "Closes https://github.com/bitcoin/bitcoin/issues/32433\r\n\r\n`MaybeFlipIPv6toCJDNS()` relies on `g_reachable_nets` to distinguish between CJDNS addresses and other IPv6 addresses. In particular, [RFC4193](https://www.rfc-editor.org/rfc/rfc4193#section-3.1) address or \"Unique Local Address\" with the L-bit unset also begins with the `fc` prefix. #32433 highlights a use case for these addresses that have nothing to do with CJDNS.\r\n\r\nOn master we don't parse init flags like `-cjdnsreachable` until *after* the HTTP server has started, causing conflicts with `-rpcallowip` because CJDNS doesn't support subnets.\n\nThis PR ensures that `NET_CJDNS` is only present in the reachable networks list if set by `-cjdnsreachable` *before* `-rpcallowip` is checked. If it is set all `fc` addresses are assumed to be CJDNS, can not have subnets, and can't be set for `-rpcallowip`.\r\n\r\nI also noted this specific parameter interaction in the init help as well as the error message if configured incorrectly.\r\n\r\nThis can be tested locally:\r\n\r\n`bitcoind -regtest -rpcallowip=fc00:dead:beef::/64 -rpcuser=u -rpcpassword=p`\r\n\r\nOn master this will just throw an error that doesn't even mention IPv6 at all.\r\n\r\nOn the branch, this will succeed and can be tested by adding the ULA to a local interface.\r\n\r\nOn linux: `sudo ip -6 addr add fc00:dead:beef::1/64 dev lo`\r\n\r\nOn macos: `sudo ifconfig lo0 inet6 fc00:dead:beef::1/128 add`\r\n\r\nthen: `curl -v -g -6 --interface fc00:dead:beef::1 u:p@[::1]:18443 --data '{\"method\":\"getblockcount\"}'`\r\n\r\nIf the `rpcallowip` option is removed, the RPC request will fail to authorize.\r\n\r\nFinally, adding `-cjdnsreachable` to the start up command will throw an error and specify the incompatibility:\r\n\r\n> RFC4193 is allowed only if -cjdnsreachable=0. \r\n\r\n\r\n",
+      "state": "closed",
+      "user": "pinheadmz",
+      "created_at": "2025-05-16T19:58:11Z",
+      "updated_at": "2025-06-06T22:31:58Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32539",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32539.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [tapcrafter](https://github.com/bitcoin/bitcoin/pull/32539#pullrequestreview-2848348655), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/32539#pullrequestreview-2854992208), [willcl-ark](https://github.com/bitcoin/bitcoin/pull/32539#pullrequestreview-2900716660), [achow101](https://github.com/bitcoin/bitcoin/pull/32539#issuecomment-2950964098) |\n| Concept ACK | [jonatack](https://github.com/bitcoin/bitcoin/pull/32539#issuecomment-2945122017) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T19:58:15Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Concept ACK, will review",
+          "created_at": "2025-06-05T16:09:16Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 12ff4be9c724c752fe67835419be3ff4d0e65990",
+          "created_at": "2025-06-06T22:25:18Z"
+        }
+      ]
+    },
+    {
+      "number": 32538,
+      "title": "restrict std::cerr to errors; use std::cout for warnings and info",
+      "body": "Warning messages were previously sent to `stderr`, which could cause them to\r\nbe misinterpreted as actual errors. This change redirects warning and informational\r\nmessages to `stdout` instead, making it explicit that they are not errors and\r\npreventing unintended `stderr` handling.\r\n\r\nTo verify this behavior, added a test case triggering the simplest init warning I could find\r\n(one that was actually not previously covered by tests): the `-bind` \"bad-port\" message.\r\nSo, running the test commit on master (without the fix) causes the test framework to fail\r\nduring shutdown due to a non-empty `stderr` buffer (treated as an error). With the fix\r\napplied, the warning is correctly handled via `stdout`, and the test passes as expected.",
+      "state": "closed",
+      "user": "furszy",
+      "created_at": "2025-05-16T18:42:53Z",
+      "updated_at": "2025-05-17T10:20:10Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32538",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32538.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/32538#pullrequestreview-2847419694) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T18:42:56Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Warning messages were previously sent to `stderr`, which could cause them to\r\n> be misinterpreted as actual errors.\r\n\r\nNot sure.\r\n\r\n* When something literally starts with `Warning: ...`, I fail to see how it can be misinterpreted.\r\n* This change means that warnings may be missed in tests/CI or elsewhere (see the failing CI).\r\n* Sending warnings to stderr is normal and expected. See for example `python -c 'print(b\"\\p\")'`",
+          "created_at": "2025-05-16T19:00:29Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "> This change means that warnings may be missed in tests/CI or elsewhere (see the failing CI).\r\n\r\nThat's my concern with this approach.",
+          "created_at": "2025-05-16T19:03:16Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> When something literally starts with Warning: ..., I fail to see how it can be misinterpreted.\r\n\r\nIt is actually being misinterpreted by our own test framework. The framework does not look\r\nat the stderr content, it only checks whether there is something inside stderr or not during\r\nshutdown, failing when finds something there.\r\n\r\n> This change means that warnings may be missed in tests/CI or elsewhere (see the failing CI).\r\n\r\nThat's ok. That's what the PR is proposing. To redirect them to stdout. I just missed to update\r\nsome test cases that are working around the stderr issue during cleanup by manually skipping\r\nwarning msgs during shutdown.\r\n\r\n> Sending warnings to stderr is normal and expected. See for example python -c 'print(b\"\\p\")'\r\n\r\nThis is the most compelling argument of the three. You got me there. Closing..",
+          "created_at": "2025-05-16T19:24:32Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > When something literally starts with Warning: ..., I fail to see how it can be misinterpreted.\r\n> \r\n> It is actually being misinterpreted by our own test framework. The framework does not look at the stderr content, it only checks whether there is something inside stderr or not during shutdown, failing when finds something there.\r\n\r\nThat's intentional. We want the tests to fail when there is any warning or error (from Bitcoin Core or any other tool/sanitizer/lib) that is not accounted for, so that they are properly documented, investigated and accounted for.",
+          "created_at": "2025-05-17T06:19:43Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> We want the tests to fail when there is any warning or error (from Bitcoin Core or any other tool/sanitizer/lib) that is not accounted for\r\n\r\nOpened #32542 in relation to this.",
+          "created_at": "2025-05-17T10:20:09Z"
+        }
+      ]
+    },
+    {
+      "number": 32537,
+      "title": "Set minimum supported Windows version to 1903 (May 2019 Update)",
+      "body": "This PR sets the minimum supported Windows version to 1903 (May 2019 Update).\r\n\r\nThis version is the minimum [required](https://learn.microsoft.com/en-us/windows/apps/design/globalizing/use-utf8-code-page#set-a-process-code-page-to-utf-8) to support the UTF-8 code page (CP_UTF8), which is necessary for https://github.com/bitcoin/bitcoin/pull/32380.\r\n\r\nAdditionally, the `symbol-check.py` script has been amended to verify application manifests for supported OS value.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-05-16T16:32:45Z",
+      "updated_at": "2025-05-20T07:57:16Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32537",
+      "labels": [
+        "Windows",
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32537.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [laanwj](https://github.com/bitcoin/bitcoin/pull/32537#issuecomment-2890660965) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32431](https://github.com/bitcoin/bitcoin/pull/32431) (deps: Bump lief to 0.16.5 by davidgumberg)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T16:32:48Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "My Guix build:\r\n```\r\naarch64\r\ndb31eebbbd5ed99567eea6d1e692130815e0b6e6c7041e8fe20918eb743ce3db  guix-build-4748c63c1d0f/output/aarch64-linux-gnu/SHA256SUMS.part\r\n05ad41b64f57a027124138e3e5baf3325e4bcb433c851e9086526568068694f2  guix-build-4748c63c1d0f/output/aarch64-linux-gnu/bitcoin-4748c63c1d0f-aarch64-linux-gnu-debug.tar.gz\r\nf230295bc79a313acaa16090609b28c6df6021213b8bd8dea9938b8e48037f17  guix-build-4748c63c1d0f/output/aarch64-linux-gnu/bitcoin-4748c63c1d0f-aarch64-linux-gnu.tar.gz\r\nacc5897b77f8ae9067b48b1fa906383b05aa7b8a913e62823833e88dce37ae28  guix-build-4748c63c1d0f/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n25eb773eb9e07d3509dbbcfa238150bf60776a3510b36adc311fe5f6b3593d0b  guix-build-4748c63c1d0f/output/arm-linux-gnueabihf/bitcoin-4748c63c1d0f-arm-linux-gnueabihf-debug.tar.gz\r\n4edf81fa7c6a138f538036b83b51dd111e1958e61592395f94c2b311672c4ed6  guix-build-4748c63c1d0f/output/arm-linux-gnueabihf/bitcoin-4748c63c1d0f-arm-linux-gnueabihf.tar.gz\r\n296e0143264a41a690c74ea2ee41a9d01145459b79d80b97e7f69b0759920add  guix-build-4748c63c1d0f/output/arm64-apple-darwin/SHA256SUMS.part\r\nb2f2e2f4470eec8ee2f1e33ef22d9b1444fa18360dcd8efedf1a34cc89e1d905  guix-build-4748c63c1d0f/output/arm64-apple-darwin/bitcoin-4748c63c1d0f-arm64-apple-darwin-codesigning.tar.gz\r\n5029eb4e92bcced26e002a1ec9a2a8604eded79e250c8f69b76455334c80de7f  guix-build-4748c63c1d0f/output/arm64-apple-darwin/bitcoin-4748c63c1d0f-arm64-apple-darwin-unsigned.tar.gz\r\n992e548f04795d8566080582543cfb54b0629fa354134b0d1236e4c85c035ec5  guix-build-4748c63c1d0f/output/arm64-apple-darwin/bitcoin-4748c63c1d0f-arm64-apple-darwin-unsigned.zip\r\nf4eb629a80c80d1dd4c66d36d44b55f9122e2bb51fe0bc30949a88550299b733  guix-build-4748c63c1d0f/output/dist-archive/bitcoin-4748c63c1d0f.tar.gz\r\n4c5222ccbaebc02bf0fd77b666676b0f473fdbbb20d78d424aeef1292c36c726  guix-build-4748c63c1d0f/output/powerpc64-linux-gnu/SHA256SUMS.part\r\nc6950145e4020b1798e8f627d4c4b0c2d2b19f35570f93f5b89b9c64bb822af9  guix-build-4748c63c1d0f/output/powerpc64-linux-gnu/bitcoin-4748c63c1d0f-powerpc64-linux-gnu-debug.tar.gz\r\n0ea0475e2fa4f7f0d9eefc71882c4e35a4913e3e0aa9ec92ad52c9e030ec0d4d  guix-build-4748c63c1d0f/output/powerpc64-linux-gnu/bitcoin-4748c63c1d0f-powerpc64-linux-gnu.tar.gz\r\nb31c156f49b45b96637df4059e8d554486e34279f8eaf0fc2cfeec46825a2f38  guix-build-4748c63c1d0f/output/riscv64-linux-gnu/SHA256SUMS.part\r\n9c645dce362afd8f2e54036a7601534aee568fe19eb643268c0b2cc6862b004f  guix-build-4748c63c1d0f/output/riscv64-linux-gnu/bitcoin-4748c63c1d0f-riscv64-linux-gnu-debug.tar.gz\r\n6cf9399171c0b873f96b8ea9d6fb1acec4bfebe84476de54af299c0a2d99b9e0  guix-build-4748c63c1d0f/output/riscv64-linux-gnu/bitcoin-4748c63c1d0f-riscv64-linux-gnu.tar.gz\r\n29e27f06b107e4f7c44eca43c815a530b65739f5b6c7c6180f7cba7f8835fee1  guix-build-4748c63c1d0f/output/x86_64-apple-darwin/SHA256SUMS.part\r\ne97404f1c4fe7bd20bc392fd391dd1acb8e3297c33b847e5fb2077a40597eb3e  guix-build-4748c63c1d0f/output/x86_64-apple-darwin/bitcoin-4748c63c1d0f-x86_64-apple-darwin-codesigning.tar.gz\r\nc35827eca5e43bd235dbd156a9022a55da6de9a3ab5d0782fc60c9633d46c85e  guix-build-4748c63c1d0f/output/x86_64-apple-darwin/bitcoin-4748c63c1d0f-x86_64-apple-darwin-unsigned.tar.gz\r\nd3e33ff9b9495707b9dabc3ae12a74d4185f0d25d3dc49e00c424459f954b7e5  guix-build-4748c63c1d0f/output/x86_64-apple-darwin/bitcoin-4748c63c1d0f-x86_64-apple-darwin-unsigned.zip\r\n256d3a1ece59f2546559486b1601f0b0d92c9cbe3b4b71d2ab069353da6d1e54  guix-build-4748c63c1d0f/output/x86_64-linux-gnu/SHA256SUMS.part\r\n5995534433c36db6662fbc4e88976cc2f905c928a54d55a31d939a55273110be  guix-build-4748c63c1d0f/output/x86_64-linux-gnu/bitcoin-4748c63c1d0f-x86_64-linux-gnu-debug.tar.gz\r\n5c501c4097aa365f33a31e67c672e6f23a002014696faf8d444f9927d7a04e10  guix-build-4748c63c1d0f/output/x86_64-linux-gnu/bitcoin-4748c63c1d0f-x86_64-linux-gnu.tar.gz\r\n016f9b06f1e08267fdb3534bbf111d9bbd13341cc91b26d2c2e03d451d17dd4a  guix-build-4748c63c1d0f/output/x86_64-w64-mingw32/SHA256SUMS.part\r\ne5d474b0a6c3be42694e970b6b83b9822ec34ea617f2ecc57bd01223e92ee749  guix-build-4748c63c1d0f/output/x86_64-w64-mingw32/bitcoin-4748c63c1d0f-win64-codesigning.tar.gz\r\n0914ef733a526f2309445e11d7c7ebd17edd61717c93d20e2ff6ade43ac41bc7  guix-build-4748c63c1d0f/output/x86_64-w64-mingw32/bitcoin-4748c63c1d0f-win64-debug.zip\r\n7f52f6ab37d3a1d8410e0204eb97775b2d9118f16434333a4f07fb297eb6e61e  guix-build-4748c63c1d0f/output/x86_64-w64-mingw32/bitcoin-4748c63c1d0f-win64-setup-unsigned.exe\r\n8f6f83d4a6667f67b1f045fdc9fd14e58fe5ef3dcaa3df8e46edf3f6c4fe1640  guix-build-4748c63c1d0f/output/x86_64-w64-mingw32/bitcoin-4748c63c1d0f-win64-unsigned.zip\r\n```",
+          "created_at": "2025-05-16T16:33:24Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Friendly ping @laanwj @davidgumberg @hodlinator @sipsorcery :)",
+          "created_at": "2025-05-19T11:09:42Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "Concept ACK. We already require Windows 10, and running a version from more than 5 years ago seems a really bad idea (and unlikely, given how automatic updates work nowadays).",
+          "created_at": "2025-05-19T11:28:27Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> ... a version from more than 5 years ago...\r\n\r\n6 :)\r\n",
+          "created_at": "2025-05-19T14:07:36Z"
+        }
+      ]
+    },
+    {
+      "number": 32535,
+      "title": "rev_32343_wip_nomerge_ci",
+      "body": "pls ignore this is just a #32524 playground",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-05-16T16:04:18Z",
+      "updated_at": "2025-05-23T06:28:24Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32535",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32535.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31349](https://github.com/bitcoin/bitcoin/pull/31349) (ci: detect outbound internet traffic generated while running tests by vasild)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T16:04:22Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `previous releases, depends DEBUG`: https://github.com/bitcoin/bitcoin/runs/42457460003</sub>\n<sub>LLM reason (✨ experimental): The CI failure is due to a compiler error related to array bounds in `cluster_linearize.cpp`.\n</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-05-19T08:02:55Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "(take 2 :sob: )",
+          "created_at": "2025-05-20T12:54:45Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "The failure remains, when triggered, so it would be good to investigate this. Let's continue discussion in https://github.com/bitcoin/bitcoin/issues/32524",
+          "created_at": "2025-05-23T06:09:19Z"
+        }
+      ]
+    },
+    {
+      "number": 32534,
+      "title": "Update leveldb subtree to latest upstream",
+      "body": "Pulls in \r\n* https://github.com/bitcoin-core/leveldb-subtree/pull/51\r\n\r\nRemove the related warning suppression.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-05-16T15:15:19Z",
+      "updated_at": "2025-05-17T09:02:05Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32534",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32534.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32534#issuecomment-2887030315), [hebasto](https://github.com/bitcoin/bitcoin/pull/32534#pullrequestreview-2848190649) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31507](https://github.com/bitcoin/bitcoin/pull/31507) (build: Use clang-cl to build on Windows natively by hebasto)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T15:15:23Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "utACK 7015052eba23368539dcd1a9b4217ce1cacd2999\r\n\r\nFor the record, there are other `LevelDB` changes that could use some reviews: https://github.com/bitcoin-core/leveldb-subtree/pulls",
+          "created_at": "2025-05-16T15:20:13Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Guix Build\r\n```bash\r\na12f2290f4e5267f2ba9ad9da0d95e7990ea3e5772d7658a133d607a25afe7b4  guix-build-7015052eba23/output/aarch64-linux-gnu/SHA256SUMS.part\r\n6232c5017a17753b33c62f32def946a72f70ce63b76b55dc9a8fa8c8e75229fe  guix-build-7015052eba23/output/aarch64-linux-gnu/bitcoin-7015052eba23-aarch64-linux-gnu-debug.tar.gz\r\nc702cf46c5c463ccd08ec97f3858cf1a1ce612e0c92836f6dedc94d1f6ad16f3  guix-build-7015052eba23/output/aarch64-linux-gnu/bitcoin-7015052eba23-aarch64-linux-gnu.tar.gz\r\na0e2e6f5198c435c100c12d0dc7084a154d2d4b26dae6cbcc5e41a67228859cb  guix-build-7015052eba23/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n201368fa6020d2230375f872ba0d85ede0e679d8b4a3f51a357d469504e512c1  guix-build-7015052eba23/output/arm-linux-gnueabihf/bitcoin-7015052eba23-arm-linux-gnueabihf-debug.tar.gz\r\nc9e1c1bcc2869cd157c8673e561bf5a5d51ec493132819e3b93d562ce3b6fcd1  guix-build-7015052eba23/output/arm-linux-gnueabihf/bitcoin-7015052eba23-arm-linux-gnueabihf.tar.gz\r\n9390475fa064672eabbab5e0e514c4c46a859458074c2d8caac87ed43e93db18  guix-build-7015052eba23/output/arm64-apple-darwin/SHA256SUMS.part\r\nb22b26e3db1e9eb589609ec47e7fa6a546f1c3616a484619c8e3604cd927fa18  guix-build-7015052eba23/output/arm64-apple-darwin/bitcoin-7015052eba23-arm64-apple-darwin-codesigning.tar.gz\r\n17babf69caa4c37558359ab1d5de06cd293674a7a03cf3aefd950a5bdc6be4a2  guix-build-7015052eba23/output/arm64-apple-darwin/bitcoin-7015052eba23-arm64-apple-darwin-unsigned.tar.gz\r\nd9a279d7089e57b26d9535dabb92be68be1f097f1d7feedf1b8595977f75a9bd  guix-build-7015052eba23/output/arm64-apple-darwin/bitcoin-7015052eba23-arm64-apple-darwin-unsigned.zip\r\nf04ac246fc18745a3666beae943356be73c80d373e4c321a4981ef3aac6a7349  guix-build-7015052eba23/output/dist-archive/bitcoin-7015052eba23.tar.gz\r\n3eeed0b25e7538a73ac57568d1c0309c116774a06ca103a1b05c15c3a5ce6976  guix-build-7015052eba23/output/powerpc64-linux-gnu/SHA256SUMS.part\r\na3cfec5dd137d30f49c1b125acbf1fcb5f8c882f41c8875658a7339bb964eac2  guix-build-7015052eba23/output/powerpc64-linux-gnu/bitcoin-7015052eba23-powerpc64-linux-gnu-debug.tar.gz\r\n50b37b3fa183247c706e13cb6fabf7e0d648e7ccf1b491fc2f9ec3b4e3357e90  guix-build-7015052eba23/output/powerpc64-linux-gnu/bitcoin-7015052eba23-powerpc64-linux-gnu.tar.gz\r\n4ae3f8aaaf3e57a1249323babb12afd0f97e4ba5e4dd86359d6f7ddabeecb3c2  guix-build-7015052eba23/output/riscv64-linux-gnu/SHA256SUMS.part\r\nb714e51c9b593adc32a35c3dcaac66798c50124d0524f4b07d04244a58bc1bbb  guix-build-7015052eba23/output/riscv64-linux-gnu/bitcoin-7015052eba23-riscv64-linux-gnu-debug.tar.gz\r\n6a2beb9f94debf061b334c5116be55afcd636b62ef2cf27f97eedf4f6baea435  guix-build-7015052eba23/output/riscv64-linux-gnu/bitcoin-7015052eba23-riscv64-linux-gnu.tar.gz\r\n64303cf64172efe2029c1891f83a72832396a40535f1060bec9d22679c40ae6a  guix-build-7015052eba23/output/x86_64-apple-darwin/SHA256SUMS.part\r\n88f64cac07974c831bf2fe54302edbcf1f1c8a39cfbcc5e319ef67150a87f41b  guix-build-7015052eba23/output/x86_64-apple-darwin/bitcoin-7015052eba23-x86_64-apple-darwin-codesigning.tar.gz\r\n332b1b0bb76419a0ea4ed1666e6559e8241731759efb68095b7307fe9f737983  guix-build-7015052eba23/output/x86_64-apple-darwin/bitcoin-7015052eba23-x86_64-apple-darwin-unsigned.tar.gz\r\nc5a912893d85c8b6def93a87107d2460535004140037a08c2822360ad3470ade  guix-build-7015052eba23/output/x86_64-apple-darwin/bitcoin-7015052eba23-x86_64-apple-darwin-unsigned.zip\r\na7ee2e0e43d2c484d18dd4301283b5eb3cdc2aa52a7570ef3986370976c47bbd  guix-build-7015052eba23/output/x86_64-linux-gnu/SHA256SUMS.part\r\nbbbaf34a936bbadf482ffbb7f911c8e696516f63431848d3d64d5e7ff84deb30  guix-build-7015052eba23/output/x86_64-linux-gnu/bitcoin-7015052eba23-x86_64-linux-gnu-debug.tar.gz\r\n54611e97f8f865a7f75608177e499ce33345e240d123dda994156ee568d2ffe9  guix-build-7015052eba23/output/x86_64-linux-gnu/bitcoin-7015052eba23-x86_64-linux-gnu.tar.gz\r\nbab8079fefb8bc0e30e3d28fa252a5afc5baacc3ee9f04523ed8f95f176e4c7e  guix-build-7015052eba23/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n1f2b18b7a390eec8320f4b4a379203fc50092984787deb08b9d1cdf4ecf2914f  guix-build-7015052eba23/output/x86_64-w64-mingw32/bitcoin-7015052eba23-win64-codesigning.tar.gz\r\nb87e2ea92a90098e6c6eeef286c789b4cf5f6d6017a41eb70ce02db166bf9325  guix-build-7015052eba23/output/x86_64-w64-mingw32/bitcoin-7015052eba23-win64-debug.zip\r\n70db0ddf211b2e6bebd70f15f68873c2fca78bd6614bd736676ea103965302ac  guix-build-7015052eba23/output/x86_64-w64-mingw32/bitcoin-7015052eba23-win64-setup-unsigned.exe\r\n8b0e45314539e5c36aece6e199470f0156e39c8eadd847ef0e325a5b23ca8ab3  guix-build-7015052eba23/output/x86_64-w64-mingw32/bitcoin-7015052eba23-win64-unsigned.zip\r\n```",
+          "created_at": "2025-05-16T17:07:12Z"
+        }
+      ]
+    },
+    {
+      "number": 32533,
+      "title": "test: properly check for per-tx sigops limit",
+      "body": "Currently the per-tx sigops limit standardness check (bounded by `MAX_STANDARD_TX_SIGOPS_COST`, throwing \"bad-txns-too-many-sigops\" if exceeded):\r\nhttps://github.com/bitcoin/bitcoin/blob/3f83c744ac28b700090e15b5dda2260724a56f49/src/validation.cpp#L925-L927\r\n\r\nis only indirectly tested with the much higher per-block consensus limit (`MAX_BLOCK_SIGOPS_COST`):\r\nhttps://github.com/bitcoin/bitcoin/blob/3f83c744ac28b700090e15b5dda2260724a56f49/test/functional/data/invalid_txs.py#L236-L242\r\n\r\nI.e. an increase in the per-tx limit up to the per-block one would still pass all of our tests. Refine that by splitting up the invalid tx template `TooManySigops` in a per-block and a per-tx template.\r\n\r\nThe involved functional tests taking use of these templates are `feature_block.py` and `p2p_invalid_txs.py`. Can be tested by applying e.g.\r\n```diff\r\ndiff --git a/src/policy/policy.h b/src/policy/policy.h\r\nindex 2151ec13dd..e5766d2a55 100644\r\n--- a/src/policy/policy.h\r\n+++ b/src/policy/policy.h\r\n@@ -37,7 +37,7 @@ static constexpr unsigned int MIN_STANDARD_TX_NONWITNESS_SIZE{65};\r\n /** Maximum number of signature check operations in an IsStandard() P2SH script */\r\n static constexpr unsigned int MAX_P2SH_SIGOPS{15};\r\n /** The maximum number of sigops we're willing to relay/mine in a single tx */\r\n-static constexpr unsigned int MAX_STANDARD_TX_SIGOPS_COST{MAX_BLOCK_SIGOPS_COST/5};\r\n+static constexpr unsigned int MAX_STANDARD_TX_SIGOPS_COST{MAX_BLOCK_SIGOPS_COST/5 + 4};\r\n /** Default for -incrementalrelayfee, which sets the minimum feerate increase for mempool limiting or replacement **/\r\n static constexpr unsigned int DEFAULT_INCREMENTAL_RELAY_FEE{1000};\r\n /** Default for -bytespersigop */\r\ndiff --git a/test/functional/mempool_accept.py b/test/functional/mempool_accept.py\r\n```\r\nwhere the tests succeed on master, but fail on this PR.\r\n\r\n(Found by diving deeper into the jungle of current sig-ops limit, as preparation for reviewing the [BIP 54](https://github.com/bitcoin/bips/blob/master/bip-0054.md) draft and related preparatory PRs like #32521).",
+      "state": "closed",
+      "user": "theStack",
+      "created_at": "2025-05-16T14:50:05Z",
+      "updated_at": "2025-05-22T23:16:20Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32533",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32533.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [tapcrafter](https://github.com/bitcoin/bitcoin/pull/32533#pullrequestreview-2848800587), [darosior](https://github.com/bitcoin/bitcoin/pull/32533#pullrequestreview-2851706605), [fjahr](https://github.com/bitcoin/bitcoin/pull/32533#issuecomment-2901192518), [instagibbs](https://github.com/bitcoin/bitcoin/pull/32533#pullrequestreview-2861227732) |\n| Concept ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/32533#issuecomment-2890768586) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T14:50:08Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Concept ACK\r\n\r\nIt would be nice to also have a test (against an accidental soft fork) that fails if you change:\r\n\r\n`MAX_STANDARD_TX_SIGOPS_COST{MAX_BLOCK_SIGOPS_COST/5 - 4};`\r\n\r\nAnd maybe one that covers witness sigops.",
+          "created_at": "2025-05-19T12:07:15Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "Concept ACK",
+          "created_at": "2025-05-19T13:03:47Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> against an accidental soft fork\r\n\r\nYou mean against a tightening of the rules, which in the context of standardness is harder than a loosening of the rules? :p",
+          "created_at": "2025-05-19T18:53:14Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "I was thinking ahead to when BIP54 is activated, but yes, \"tightening\". ",
+          "created_at": "2025-05-20T07:45:08Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "tACK 7bc64a8859c3644fdf2eeff59f72a778ae60ea3f\r\n\r\nConfirmed that the test fails if the limit is not exceeded.",
+          "created_at": "2025-05-22T13:15:27Z"
+        }
+      ]
+    },
+    {
+      "number": 32532,
+      "title": "Short-circuit `GetLegacySigOpCount` for known scripts",
+      "body": "It is an optimization PR for `GetSigOpCount`, covered heavily with new tests, benchmarks and small refactorings.\r\n\r\nThe changes were split out to https://github.com/bitcoin/bitcoin/pull/32729 (refactors only for now).\r\n\r\n-------\r\n\r\n### Context\r\n\r\nTest coverage was thin for this code path that suddenly became popular for different reasons (https://github.com/bitcoin/bitcoin/pull/31624 and https://github.com/bitcoin/bitcoin/pull/32521 and https://github.com/bitcoin/bitcoin/pull/32533) highlighting the need for better code coverage.\r\n\r\nThe PR now splits out the common `PUSHDATA` length/bounds reads and error checks and covers its corner cases with unit tests and benchmarks.\r\n\r\n### Testing\r\n\r\n* added unit tests covering every standard script type (and a historical `OP_RETURN … OP_CHECKSIG` oddity);\r\n* added fuzz-style test that compares the refactored implementation against the *exact* legacy algorithm on random scripts - also ran it continuously for 25 hours without divergence;\r\n* reindexed to height 897,000 [comparing the outputs of the old and the new implementation](https://gist.github.com/l0rinc/ff6347164b3c502a9643ba7be171860e) without incidents.",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-05-16T13:59:35Z",
+      "updated_at": "2025-06-29T10:49:37Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32532",
+      "labels": [
+        "Consensus"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32532.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [darosior](https://github.com/bitcoin/bitcoin/pull/32532#pullrequestreview-2851775828) |\n| Concept ACK | [tapcrafter](https://github.com/bitcoin/bitcoin/pull/32532#pullrequestreview-2849025458), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/32532#pullrequestreview-2897452412) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32673](https://github.com/bitcoin/bitcoin/pull/32673) (clang-tidy: Apply modernize-deprecated-headers by maflcko)\n* [#32554](https://github.com/bitcoin/bitcoin/pull/32554) (bench: replace embedded raw block with configurable block generator by l0rinc)\n* [#32521](https://github.com/bitcoin/bitcoin/pull/32521) (policy: make pathological transactions packed with legacy sigops non-standard by darosior)\n* [#31989](https://github.com/bitcoin/bitcoin/pull/31989) (BIP-119 (OP_CHECKTEMPLATEVERIFY) (regtest only) by jamesob)\n* [#31682](https://github.com/bitcoin/bitcoin/pull/31682) ([IBD] specialize CheckBlock's input & coinbase checks by l0rinc)\n* [#29060](https://github.com/bitcoin/bitcoin/pull/29060) (Policy: Report reason inputs are non standard by ismaelsadeeq)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T13:59:39Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I can't tell from the pull description, but is there a end-user visible performance difference? If yes, how much?",
+          "created_at": "2025-05-19T06:08:19Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks for the observations @tapcrafter, addressed your concerns in the latest push, adding you as a co-author in one of the commits.\r\n\r\n@maflcko, to clarify the effect on the overall behavior, I slimmed down the `DeserializeAndCheckBlockTest` similarly to https://github.com/bitcoin/bitcoin/pull/32457 and added the results to the PR's description.\r\n\r\n---\r\n\r\nI ran\r\n\r\n```bash\r\ncmake -B build -DBUILD_BENCH=ON -DCMAKE_BUILD_TYPE=Release\r\ncmake --build build -j$(nproc)\r\nbuild/bin/bench_bitcoin -filter='CheckBlockBench' --min-time=10000\r\n```\r\nseveral times before and after the SigOp fast-path.\r\n\r\nTo isolate the remaining hot-spots I also:\r\n* split the former `DeserializeAndCheckBlockTest` into a pure‐serialization (optimized independetly) and a pure `CheckBlock` benchmark;\r\n* switched to block 784,588 (contains every modern script type) - see https://github.com/bitcoin/bitcoin/pull/32457;\r\n* included another related optimization (special-cases the coinbase & duplicate-input checks - https://github.com/bitcoin/bitcoin/pull/31682).\r\n\r\nBefore (ef73758d5bd0ef32749d2cefc475bb84e4e6d11e - bench: measure behavior of a more representative block):\r\n```\r\n|            ns/block |             block/s |    err% |       ins/block |       cyc/block |    IPC |      bra/block |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|        1,077,514.54 |              928.06 |    0.0% |    8,231,717.91 |    3,867,061.18 |  2.129 |   1,234,943.74 |    2.5% |     11.00 | `CheckBlockBench`\r\n|        1,077,039.60 |              928.47 |    0.1% |    8,231,717.76 |    3,865,853.67 |  2.129 |   1,234,943.80 |    2.5% |     11.01 | `CheckBlockBench`\r\n|        1,077,973.36 |              927.67 |    0.1% |    8,231,717.62 |    3,869,437.50 |  2.127 |   1,234,943.75 |    2.5% |     11.01 | `CheckBlockBench`\r\n```\r\n\r\nBefore (9d719108bef902590aa55bf61f979dbcfa152020 - specialize CheckBlock's input & coinbase checks):\r\n```\r\n|            ns/block |             block/s |    err% |       ins/block |       cyc/block |    IPC |      bra/block |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          836,899.54 |            1,194.89 |    0.1% |    6,618,933.87 |    3,003,330.32 |  2.204 |     847,006.84 |    2.4% |     10.77 | `CheckBlockBench`\r\n|          838,135.14 |            1,193.13 |    0.0% |    6,618,933.87 |    3,008,503.94 |  2.200 |     847,006.84 |    2.4% |     10.78 | `CheckBlockBench`\r\n|          835,303.73 |            1,197.17 |    0.1% |    6,618,933.87 |    2,997,539.89 |  2.208 |     847,006.84 |    2.4% |     10.77 | `CheckBlockBench`\r\n```\r\n\r\nAfter (ddc82fdb6fae77ba299104ed03c33ea9dd0e2e05 - script: short-circuit `GetLegacySigOpCount` for known scripts):\r\n```\r\n|            ns/block |             block/s |    err% |       ins/block |       cyc/block |    IPC |      bra/block |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          753,774.48 |            1,326.66 |    0.0% |    5,224,278.78 |    2,705,172.05 |  1.931 |     597,353.76 |    3.4% |     10.70 | `CheckBlockBench`\r\n|          753,337.59 |            1,327.43 |    0.0% |    5,224,278.78 |    2,704,108.71 |  1.932 |     597,353.76 |    3.4% |     10.70 | `CheckBlockBench`\r\n|          749,374.04 |            1,334.45 |    0.0% |    5,224,278.78 |    2,690,235.39 |  1.942 |     597,353.75 |    3.4% |     10.69 | `CheckBlockBench`\r\n```\r\n\r\n~11.4% additional validation speed-up thanks to short-circuit SigOp counting (the two changes together result in a ~43.7% validation speedup for the given block).\r\nNote that instruction count also dropped from 6,6M to 5.2M, branch executions from 0.8M to 0.6M.\r\n",
+          "created_at": "2025-05-19T09:25:40Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Ah, ok. So from extrapolating the previous comment and https://github.com/bitcoin/bitcoin/pull/31682#issuecomment-2606765689, the IBD speedup should be around 1%?",
+          "created_at": "2025-05-19T09:41:57Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Might also help to add all the benchmark and test changes and simpler improvements like inlining in a separate PR, so it's a more clear how tricky the sensitive changes here are, and if the sensitive changes are really worth making.",
+          "created_at": "2025-05-19T19:58:05Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "@ryanofsky, @darosior, thank you for expressing your concerns.\r\nI have removed the optimization part, I understand why that can be considered risky. The new rebase only contains extraction of the common script parts to avoid some work duplication and to help with understanding this part of the codebase better. It's also covered extensively with deterministic and random tests, comparing against fixed values, non-standard scripts, and completely random ones compared against the original implementation. We can reconsider the optimizations if this gets accepted.\r\n\r\nAlso note that the optimizations weren't there for IBD necessarily, but as the `checkblock` bench states:\r\n```\r\n// These are the two major time-sinks which happen after we have fully received\r\n// a block off the wire, but before we can relay the block on to peers using\r\n// compact block relay.\r\n```\r\n",
+          "created_at": "2025-05-21T13:40:45Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/43633911782</sub>\n<sub>LLM reason (✨ experimental): The CI failure is due to a lint check failure caused by improper include syntax in source files.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-06-06T17:38:13Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> @darosior, this change isn't about IBD, it was mostly about block connect time optimization originally - now it's rather meant as a cleanup and flooding it with tests and benchmarks to enable optimizations in follow-ups.\r\n\r\nThis further strengthens my [point](https://github.com/bitcoin/bitcoin/pull/32532#pullrequestreview-2851775828). I don't think we should make a ~~major~~ overhaul to tricky consensus-critical code that was never touched in 15 years just to \"make it nicer\" (and possibly enabling very marginal optimisations in the future).",
+          "created_at": "2025-06-06T18:10:12Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> I don't think we should make a major overhaul to tricky consensus-critical code that was never touched in 15 years\r\n\r\n@darosior I almost wonder if we are looking at the same PR. The current set of changes seem pretty trivial and are certainly not a major overhaul.\r\n\r\n@l0rinc since the general arguments darosior's making are worth taking seriously and apply to a wide variety of changes maybe including the changes made here, it could make sense to separate the concerns more by opening a different PR to only improve the benchmarks and tests and not refactor the script code.\r\n\r\nIMO, having now looked at the script changes, I think they are trivial and not risky, and they could be merged with the normal review process and 3 acks. But a conversation about raising the standard for changes like this could be worth having here or somewhere else. I do think a more productive way of raising the standard would be to do something like increase the number of expected acks, instead of relying on people to shoot down changes individually with nacks.\r\n\r\nIn a project like this it is rightfully very hard to argue on the side of taking any risk, but we should look out for places where risks are conserved and trying to reduce them one place increases them other places. IMO, it is important for changes like this to be able to progress with sufficient review so we are not put in a position of maintaining code that we are afraid to modify and that no remaining developers will have familiarity with. They also help test our review process and build confidence that it works and catches real issues. And at least in the past, they've been useful for deploying security fixes before revealing them publicly.\r\n\r\nA related question is how to decide what changes to spend time working on and reviewing given limited review and development bandwidth. I'm not sure there is an answer to this other than letting people individually decide for themselves, but I think if we want to shift attention different places, proactively asking for reviews and highlighting changes we want to encourage is probably also a better approach than trying to actively discourage other changes. \"Don't think of a pink elephant\" is not a wildly effective strategy.",
+          "created_at": "2025-06-06T20:02:20Z"
+        },
+        {
+          "user": "darosior",
+          "body": "@ryanofsky Maybe \"overhaul\" isn't the right term if it implies that a change is necessarily huge, and i should have used \"refactoring\" instead. Regardless, my point stands.",
+          "created_at": "2025-06-06T20:40:12Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks @ryanofsky, I have extracted the tests and benchmarks to https://github.com/bitcoin/bitcoin/pull/32729 - adding a few more test cases based on missing code and feature coverage I have observed since.\r\nThe non-test codes changes are either move only with tiny changes (e.g. `front()` instead of `(*this)[0]` ), separated to different commits to ease the review as much as possible.\r\n@darosior, you're also welcome to review or to ignore, up to you of course.\r\n\r\nEdit: Now that the testing part was extracted I'm closing this to avoid confusion",
+          "created_at": "2025-06-11T14:50:42Z"
+        }
+      ]
+    },
+    {
+      "number": 32530,
+      "title": "node: cap `-maxmempool` and `-dbcache` values for 32-bit",
+      "body": "32-bit architecture is limited to 4GiB of RAM, so it doesn't make sense to set a too high value. A too high value could cause an OOM unbeknownst to the user a while after startup as mempool / dbcache fills.",
+      "state": "closed",
+      "user": "darosior",
+      "created_at": "2025-05-16T13:19:49Z",
+      "updated_at": "2025-06-27T18:20:33Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32530",
+      "labels": [
+        "Settings"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32530.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/32530#issuecomment-2986089869), [dergoegge](https://github.com/bitcoin/bitcoin/pull/32530#pullrequestreview-2952838460), [glozow](https://github.com/bitcoin/bitcoin/pull/32530#pullrequestreview-2959312112), [instagibbs](https://github.com/bitcoin/bitcoin/pull/32530#issuecomment-3009000500) |\n| Concept ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/32530#pullrequestreview-2850636522) |\n| Stale ACK | [tapcrafter](https://github.com/bitcoin/bitcoin/pull/32530#pullrequestreview-2849067709) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#24539](https://github.com/bitcoin/bitcoin/pull/24539) (Add a \"tx output spender\" index by sstone)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T13:19:52Z"
+        },
+        {
+          "user": "sipa",
+          "body": "> Why would a 64 bit system care about the 32 bit limits?\r\n\r\nIt wouldn't. This PR only affects 32-bit systems.",
+          "created_at": "2025-05-16T18:54:53Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Can someone with permissions turn this into draft?",
+          "created_at": "2025-05-20T20:57:58Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Undrafted this and added a bit more motivation to OP. This is not a huge deal, but a too high value could lead to OOM after the node has run for some time, once mempool or dbcache fills up. This mitigates this by failing early instead.",
+          "created_at": "2025-06-18T16:31:31Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 9f8e7b0b3b787b873045a4a8194e77d0b0a2b3b6",
+          "created_at": "2025-06-19T00:09:13Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Should get a release note, and likely also going to be backported to `29.x`.",
+          "created_at": "2025-06-25T12:32:37Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "utACK 9f8e7b0b3b787b873045a4a8194e77d0b0a2b3b6",
+          "created_at": "2025-06-26T16:04:32Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #32810.",
+          "created_at": "2025-06-26T16:36:35Z"
+        }
+      ]
+    },
+    {
+      "number": 32529,
+      "title": "subprocess: replace `fs::directory_iterator` with `readdir`",
+      "body": "Alternate implementation of fd iteration for Linux.\r\n\r\nIt looks like `std::filesystem::directory_iterator`, introduced in #32343, has an intermittent issue that causes a hang of the CI (#32524). i have not been able to reproduce this locally, and the CI situation makes it difficult to get more details about the problem.\r\n\r\nSo to work around that, this PR replaces the use of `directory_iterator` with the equivalent POSIX `opendir`/`readdir`/`/closedir` usage. It is only slightly more verbose. In all testing up to now this appears to make the problem go away.",
+      "state": "closed",
+      "user": "laanwj",
+      "created_at": "2025-05-16T12:56:51Z",
+      "updated_at": "2025-05-19T10:50:53Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32529",
+      "labels": [
+        "Linux/Unix",
+        "Tests",
+        "Utils/log/libs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32529.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T12:56:55Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "~~ARM run failure is interesting:~~\r\n```\r\nfatal error: in \"system_tests/run_command\": subprocess::CalledProcessError: /proc/<pid>/fd iteration failed: No such file or directory (2)\r\n```\r\n~~(proabably `/proc` isn't mounted there, but why wasn't it erroring with the previous implementation)~~\r\n\r\nEdit: i think this was an implementation problem, according to the documentation on the horrors of POSIX, `errno` needs to be set to zero explicitly to be able to detect errors during `readdir`.",
+          "created_at": "2025-05-16T13:09:30Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `no wallet, libbitcoinkernel`: https://github.com/bitcoin/bitcoin/runs/42360298658</sub>\n<sub>LLM reason (✨ experimental): The CI failure is due to the \"system_tests\" failing.\n</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-05-16T16:00:12Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I haven't looked at the code, but the CI passed 50 times: https://cirrus-ci.com/task/6662743735926784",
+          "created_at": "2025-05-17T10:40:07Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "> I haven't looked at the code, but the CI passed 50 times: https://cirrus-ci.com/task/6662743735926784\r\n\r\nOkay. So unless the original code is using `directory_iterator` wrong (which i don't think so), we can be reasonably sure there's an intermittent bug in the implementation of it on at least some libc++ versions.\r\n\r\ni'll clean up the code ~monday and open it for review.",
+          "created_at": "2025-05-17T13:23:17Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "This isn't necessary if it's worked around some other way https://github.com/bitcoin/bitcoin/issues/32524#issuecomment-2890480867",
+          "created_at": "2025-05-19T10:50:52Z"
+        }
+      ]
+    },
+    {
+      "number": 32528,
+      "title": "rpc: Round verificationprogress to 1 for a recent tip",
+      "body": "Some users really seem to care about this. While it shouldn't matter much, the diff is so trivial that it is probably worth doing.\r\n\r\nFixes #31127\r\n\r\nOne could also consider to split the field into two dedicated ones (https://github.com/bitcoin/bitcoin/issues/28847#issuecomment-1807115357), but this is left for a more involved follow-up and may also be controversial.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-05-16T11:22:22Z",
+      "updated_at": "2025-05-28T07:00:37Z",
+      "comments": 20,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32528",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32528.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [pinheadmz](https://github.com/bitcoin/bitcoin/pull/32528#pullrequestreview-2871206816), [sipa](https://github.com/bitcoin/bitcoin/pull/32528#pullrequestreview-2871433824), [achow101](https://github.com/bitcoin/bitcoin/pull/32528#issuecomment-2914423148) |\n| Concept ACK | [jonatack](https://github.com/bitcoin/bitcoin/pull/32528#issuecomment-2886931577), [jasonribble](https://github.com/bitcoin/bitcoin/pull/32528#issuecomment-2892521248) |\n| Stale ACK | [polespinasa](https://github.com/bitcoin/bitcoin/pull/32528#pullrequestreview-2870288028) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#bitcoin-core/gui/870](https://github.com/bitcoin-core/gui/pull/870) ([DRAFT] Expose AssumeUTXO Load Snapshot Functionality To The GUI by D33r-Gee)\n* [#32566](https://github.com/bitcoin/bitcoin/pull/32566) (Use subprocess library for notifications by laanwj)\n* [#30595](https://github.com/bitcoin/bitcoin/pull/30595) (kernel: Introduce initial C header API by TheCharlatan)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T11:22:26Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Will this show `progress=1.000000` before the last block as well?\r\nI find that more confusing than `0.999999` for the last one.",
+          "created_at": "2025-05-16T14:26:02Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "> Will this show `progress=1.000000` before the last block as well?\r\n\r\nHow do you define \"last block\"? Or, more to the point, how does your full node \"know\" there are no more blocks out there? That's always been the UX issue, it's not accurate to ever claim we are 100% certain we are 100% synced.",
+          "created_at": "2025-05-16T14:35:50Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "So what does the percentage mean if there's no fixed target value in the first place?",
+          "created_at": "2025-05-16T14:38:18Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "After this PR, it will mean your chain tip's timestamp is within 2 hours of now. ",
+          "created_at": "2025-05-16T14:44:29Z"
+        },
+        {
+          "user": "jonatack",
+          "body": "Concept ACK",
+          "created_at": "2025-05-16T14:44:53Z"
+        },
+        {
+          "user": "sipa",
+          "body": "> After this PR, it will mean your chain tip's timestamp is within 2 hours of now.\r\n\r\nI think that's a worse cure than the disease. In case we **know** there are unprocessed blocks in the chain (because we have their headers), we shouldn't say progress: 1.",
+          "created_at": "2025-05-16T15:05:34Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > After this PR, it will mean your chain tip's timestamp is within 2 hours of now.\r\n> \r\n> I think that's a worse cure than the disease. In case we **know** there are unprocessed blocks in the chain (because we have their headers), we shouldn't say progress: 1.\r\n\r\nI don't think this is making anything worse. This is already possible on current master, when a miner sets the timestamp to a future one (compared to your time), even if there are still blocks ahead.\r\n\r\nEdit: In such cases we'd even return a value *larger* than 1. This was fixed in 2f5f7d6b135e4eab368bbafd9e6e979aa72398de",
+          "created_at": "2025-05-16T15:17:15Z"
+        },
+        {
+          "user": "jasonribble",
+          "body": "cACK",
+          "created_at": "2025-05-19T23:43:37Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "One thing that's a little weird about this is that when I open regtest after a few days...\r\n\r\n```\r\n--> bccli -regtest -getinfo\r\nChain: regtest\r\nBlocks: 202\r\nHeaders: 202\r\nVerification progress: ▒▒▒▒▒▒░░░░░░░░░░░░░░░ 27.7195%\r\n```\r\n\r\nOf course after generating 1 block at time=now, it snaps to 100%",
+          "created_at": "2025-05-21T18:09:35Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "Also this is somewhat pathalogical but...\r\n\r\n```\r\n\r\n--> bccli -regtest setmocktime 1719861124 # July 1, 2024\r\n--> bccli -regtest -getinfo\r\nChain: regtest\r\nBlocks: 203\r\nHeaders: 203\r\nVerification progress:  -0.7451%\r\n\r\n```",
+          "created_at": "2025-05-21T18:14:33Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "> when I open regtest after a few days...\r\n\r\nMaybe we should force this code to work only in mainnet? It doesn't make sense the time considerations for regtest. Maybe testnet and signet could still use it.",
+          "created_at": "2025-05-21T20:09:54Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "Approach ACK fa53098472 (still reviewing code changes around blocktip notifications)\r\n\r\nWith fresh brain this morning I think this is the best possible approach if we make any change at all. The regtest stuff I observed is expected behavior - if there's no block for 2 days then yes you are 288 blocks behind and progress should estimate that. The new chainparams define regtest as having an expected 0.001 tx/s which is approximately equal to one (coinbase) tx every ten minutes.\r\n\r\n\r\nExample catching up on mainnet looks good:\r\n\r\n```\r\n\r\ndate='2025-05-22T12:45:54Z' progress=0.999979\r\ndate='2025-05-22T12:47:48Z' progress=0.999981\r\ndate='2025-05-22T12:51:57Z' progress=0.999984\r\ndate='2025-05-22T13:01:53Z' progress=0.999986\r\ndate='2025-05-22T13:17:07Z' progress=0.999988\r\ndate='2025-05-22T13:31:46Z' progress=0.999991\r\ndate='2025-05-22T13:39:06Z' progress=0.999993\r\ndate='2025-05-22T13:46:58Z' progress=0.999995\r\ndate='2025-05-22T13:56:12Z' progress=0.999998\r\ndate='2025-05-22T14:01:13Z' progress=1.000000\r\n```",
+          "created_at": "2025-05-22T14:08:27Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Might warrant a release note: \"Verification progress will be 100% if all known blocks are verified and timestamped within the last two hours when previously a stale tip might result in progress < 100%\".\r\n\r\nI consider the changes here only stylistic (similar to changing the `bitcoin-cli -color=...` colours). No one should be relying on the informational-only value anyway.",
+          "created_at": "2025-05-24T11:51:38Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "> One thing that's a little weird about this is that when I open regtest after a few days...\r\n> \r\n> ```\r\n> --> bccli -regtest -getinfo\r\n> Chain: regtest\r\n> Blocks: 202\r\n> Headers: 202\r\n> Verification progress: ▒▒▒▒▒▒░░░░░░░░░░░░░░░ 27.7195%\r\n> ```\r\n> \r\n> Of course after generating 1 block at time=now, it snaps to 100%\r\n\r\nMaybe instead of not using this new approach on regtest (as I suggested here https://github.com/bitcoin/bitcoin/pull/32528#issuecomment-2899113774) we could just add a message so users can understand why this happens? \r\n\r\n\r\nThe actual result can be really confusing if you don't know how the % is calculated.",
+          "created_at": "2025-05-25T09:40:48Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I fail to see how showing a value lower than 1.0 on regtest if your tip is stale is \"really confusing\". Showing 1.0 for a stale tip is confusing and this pull fixes that. Also, if you exclude/special-case regtest, it will be more code and also harder/impossible to test.",
+          "created_at": "2025-05-25T12:04:53Z"
+        },
+        {
+          "user": "polespinasa",
+          "body": "> I fail to see how showing a value lower than 1.0 on regtest if your tip is stale is \"really confusing\".\r\n\r\nBecause normally you don't have a regtest environment running 24/7 mining blocks. You turn on and off the environment for testing. The use of timestamps doesn't make sense, there is no \"possible not known\" blocks to take into account.",
+          "created_at": "2025-05-26T10:13:01Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Regtest is only used for testing and heavily mockable, so one should be cautious to put too much meaning into a value that even on mainnet is informational-only at best. I am happy to drop commit faf6304bdfdf228354b4072b72f4c0ef90fdaade, if the test is too confusing. Also note, generally it is best to start a code-related discussion thread in the related piece of code inline. This ensures that discussion is bundled nicely in one thread, and can be resolved/skimmed/reopened independent of the main pull request thread.",
+          "created_at": "2025-05-26T10:41:26Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "If you reviewed the code by a commit hash, and you want to express your review, see [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process. (You'll have to include the commit hash in your review)\r\n\r\nI'll leave the regtest stuff to a follow-up, so that it can be evaluated independently. ",
+          "created_at": "2025-05-27T10:25:36Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK fab1e02086ceebd7d96417b7a386fe61158bfda9",
+          "created_at": "2025-05-27T23:24:59Z"
+        }
+      ]
+    },
+    {
+      "number": 32527,
+      "title": "test: Remove unused verify_flags suppression",
+      "body": "`static bool verify_flags(unsigned)` was removed in commit 80f8b92f4f2311b9e9a25361c9dd973244e6f95c",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-05-16T09:20:17Z",
+      "updated_at": "2025-05-16T11:27:48Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32527",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32527.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fanquake](https://github.com/bitcoin/bitcoin/pull/32527#pullrequestreview-2846116986), [hebasto](https://github.com/bitcoin/bitcoin/pull/32527#pullrequestreview-2846209173) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T09:20:21Z"
+        }
+      ]
+    },
+    {
+      "number": 32526,
+      "title": "fuzz: Delete wallet_notifications",
+      "body": "The fuzz target has many issues:\r\n\r\n* It has never found a meaningful issue.\r\n* It is still slow, despite https://github.com/bitcoin/bitcoin/pull/28933 and https://github.com/bitcoin/bitcoin/pull/31238.\r\n* It is unmaintained, see https://github.com/bitcoin/bitcoin/pull/28882#issuecomment-1814654792 (missing meaningful coverage) or https://github.com/bitcoin/bitcoin/pull/31238#issuecomment-2460821784 (unstable) or https://github.com/bitcoin/bitcoin/pull/31467#issuecomment-2672649759 (fix slowness), etc ...\r\n\r\nSo remove it for now. It can be added back once one or all of the issues have been addressed.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-05-16T07:34:48Z",
+      "updated_at": "2025-10-30T13:58:42Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32526",
+      "labels": [
+        "Tests",
+        "Fuzzing"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32526.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fanquake](https://github.com/bitcoin/bitcoin/pull/32526#pullrequestreview-2846049871), [brunoerg](https://github.com/bitcoin/bitcoin/pull/32526#pullrequestreview-2846316142) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32430](https://github.com/bitcoin/bitcoin/pull/32430) (test: Add and use ElapseTime helper by maflcko)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T07:34:52Z"
+        }
+      ]
+    },
+    {
+      "number": 32525,
+      "title": "build: Revert \"Temporarily disable compiling `fuzz/utxo_snapshot.cpp` with MSVC",
+      "body": "Now that GitHub Actions has a fixed version and the Windows developers have updated their compiler, the workaround is no longer needed.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-05-16T06:44:33Z",
+      "updated_at": "2025-05-16T08:18:09Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32525",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32525.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32525#issuecomment-2885854792), [hodlinator](https://github.com/bitcoin/bitcoin/pull/32525#pullrequestreview-2845791215) |\n| Stale ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/32525#pullrequestreview-2845701454) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T06:44:36Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "ACK https://github.com/bitcoin/bitcoin/pull/32525/commits/fa0a4473a88017e525829ecd3db47f536c35fb62. \r\n\r\nI would be partial to disabling this for MSVC 17.12 in the vein of #32499, I mean if it is known to be broken, and it's documented that it's broken, one might as well just disable it?\r\n\r\nBut, edge case of an edge case, so this seems fine to me.",
+          "created_at": "2025-05-16T07:10:36Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "reACK https://github.com/bitcoin/bitcoin/pull/32525/commits/fa2c6623626719b338880f7bb097b902019d5956",
+          "created_at": "2025-05-16T07:13:44Z"
+        }
+      ]
+    },
+    {
+      "number": 32523,
+      "title": "wallet: Remove isminetypes",
+      "body": "The remaining isminetypes are `ISMINE_SPENDABLE` and `ISMINE_USED`.\r\n\r\n`ISMINE_USED` is only used as a filter for caching balances and is never actually returned from `IsMine`. Since we do still want this behavior, This PR changes the caching to utilize bools and explicit members variables to account for the avoid_reuse case. This allows us to remove `ISMINE_USED`.\r\n\r\n`ISMINE_SPENDABLE` and `ISMINE_NO` are the only things that are returned by `IsMine`. This is a bool, so it can be replaced as such.\r\n\r\nAfter removing `ISMINE_USED` and `ISMINE_SPENDABLE`, we are able to remove isminetypes altogether.",
+      "state": "closed",
+      "user": "achow101",
+      "created_at": "2025-05-16T01:53:31Z",
+      "updated_at": "2025-08-28T11:13:16Z",
+      "comments": 17,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32523",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32523.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [murchandamus](https://github.com/bitcoin/bitcoin/pull/32523#issuecomment-3202412412), [enirox001](https://github.com/bitcoin/bitcoin/pull/32523#pullrequestreview-3136742267), [jlest01](https://github.com/bitcoin/bitcoin/pull/32523#pullrequestreview-3137706983), [fjahr](https://github.com/bitcoin/bitcoin/pull/32523#issuecomment-3208236720), [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32523#issuecomment-3208497666) |\n| Stale ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/32523#pullrequestreview-3106462174), [rkrux](https://github.com/bitcoin/bitcoin/pull/32523#pullrequestreview-3123557714) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33218](https://github.com/bitcoin/bitcoin/pull/33218) (refactor: rename `fees.{h, cpp}` to `fees/block_policy_estimator{h, cpp}` by ismaelsadeeq)\n* [#31664](https://github.com/bitcoin/bitcoin/pull/31664) (Fees:  add Fee rate Forecaster Manager by ismaelsadeeq)\n* [#30157](https://github.com/bitcoin/bitcoin/pull/30157) (Fee Estimation via Fee rate Forecasters by ismaelsadeeq)\n* [#27865](https://github.com/bitcoin/bitcoin/pull/27865) (wallet: Track no-longer-spendable TXOs separately by achow101)\n* [#10102](https://github.com/bitcoin/bitcoin/pull/10102) (Multiprocess bitcoin by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-16T01:53:34Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `MSan, depends`: https://github.com/bitcoin/bitcoin/runs/42330203892</sub>\n<sub>LLM reason (✨ experimental): The CI failure is due to a thread safety error in `spend.cpp`.\n</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-05-16T02:28:17Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "```bash\r\n /home/runner/work/_temp/src/wallet/spend.cpp:474:12: error: calling function 'AvailableCoins' requires holding mutex 'wallet.cs_wallet' exclusively [-Werror,-Wthread-safety-analysis]\r\n  474 |     return AvailableCoins(wallet, coinControl, /*feerate=*/ std::nullopt, params);\r\n      |            ^\r\n1 error generated.\r\n```",
+          "created_at": "2025-05-16T10:56:41Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Rebased, ready for review.",
+          "created_at": "2025-05-21T17:51:43Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "This PR comes at a right time. I'm prioritising reviewing this one because it removes `isminetype`.\r\n\r\n#27286: The new wallet unspents model in memory is using `isminetype` currently and I'd prefer to not have it checked into master only to be removed subsequently. This PR changes should also ease the review of the other PR.\r\n\r\nhttps://github.com/bitcoin/bitcoin/pull/27286/commits/d637af8a9786e38f1ba140ed828a3d5009e62926#diff-d41d68c5a65d67956c91b33ca86da7df1981d84a0b15b4a186deea566563fed5R372",
+          "created_at": "2025-05-21T18:13:49Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> maybe the first 4 commits can be a separate PR that removes the watch only stuff separately\r\n\r\nI've split those commits into #32618",
+          "created_at": "2025-05-26T19:58:42Z"
+        },
+        {
+          "user": "achow101",
+          "body": "#32618 merged, ready for review now.",
+          "created_at": "2025-07-07T23:13:22Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Looking good mostly. One way I think the review can be made easier is by reordering the commits to make the `isminetype` enum changes appear together because the review is done in the order of the commits presented. Suggested order (builds fine at the second commit below on my system):\r\n\r\n- [interfaces, gui: Remove is_mine output parameter from getAddress](https://github.com/bitcoin/bitcoin/pull/32523/commits/db7729d368203ac1d622d4f84bc87c818ebaa7a0)\r\n- [wallet: Remove COutput::spendable and AvailableCoinsListUnspent](https://github.com/bitcoin/bitcoin/pull/32523/commits/4701a2a901f892d50650f3ce3b6ca7c6fe422254)\r\n- [wallet: Remove ISMINE_USED](https://github.com/bitcoin/bitcoin/pull/32523/commits/c37d61926f94eb46f1fbf8275e3a0e8445533f4e)\r\n- [wallet: Remove isminetype](https://github.com/bitcoin/bitcoin/pull/32523/commits/79a63bac1b427efc9f73ba14c42e9a1bb9c51794)\r\n\r\n\r\n",
+          "created_at": "2025-07-08T14:20:44Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> I believe that the PR title and more importantly the PR description should be updated to remove the stuff related to watch-only as that code removal was done in another PR. The last paragraph of the description can be kept.\r\n\r\nUpdated",
+          "created_at": "2025-07-08T18:19:19Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Reordered as suggested",
+          "created_at": "2025-07-08T18:42:04Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> I also found a few left-over mentions of isminetype(s) in comments: [fjahr@12a1b67](https://github.com/fjahr/bitcoin/commit/12a1b67460183556c2b9fac427efdef25c3c3a46) (could be fixed in a follow-up though if I am mistaken in my comment).\r\n\r\nI'm choosing to leave those comments in since they are specifically related to legacy wallet behavior",
+          "created_at": "2025-08-14T22:40:03Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "utACK 8fba2fafbd561d4a2b743bac0237e1260074cb1b",
+          "created_at": "2025-08-14T22:48:12Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> Non-blocking nit: wallet_migration.py still references ISMINE_SPENDABLE / ISMINE_NO in comments. Functionally the tests use the boolean ismine; could you briefly explain why you kept the enum names in the comments, or consider changing them to ismine == True / ismine == False for consistency?\r\n\r\nhttps://github.com/bitcoin/bitcoin/pull/32523#issuecomment-3190062828",
+          "created_at": "2025-08-19T18:11:29Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "re-ACK 620abe985e5150c3151192d08746b7845a69dbbf",
+          "created_at": "2025-08-19T20:25:35Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "ACK be776a1443fdf1a72e0d363c1566d71cb0cda8b5",
+          "created_at": "2025-08-19T22:16:36Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "reACK be776a1443fdf1a72e0d363c1566d71cb0cda8b5",
+          "created_at": "2025-08-20T22:13:42Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "crACK https://github.com/bitcoin/bitcoin/commit/be776a1443fdf1a72e0d363c1566d71cb0cda8b5",
+          "created_at": "2025-08-21T00:03:11Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32536,
+      "title": "cmake: Cannot find Qt 6 on SunOS / illumos (OpenIndiana Distribution)",
+      "body": "Qt 6 was installed as follows:\n```\n$ sudo pkg install library/qt6\n```\n\nAs a workaround, the `Qt6_DIR` CMake variable can be set manually:\n```\n$ cmake -B build -DBUILD_GUI=ON -DQt6_DIR=/usr/lib/qt/6.6/lib/amd64/cmake/Qt6\n```\n\nAlternatively, the [`Qt6_ROOT`](https://cmake.org/cmake/help/latest/variable/PackageName_ROOT.html) CMake or [environment](https://cmake.org/cmake/help/latest/envvar/PackageName_ROOT.html) variable can be used:\n```\n$ env Qt6_ROOT=/usr/lib/qt/6.6/lib/amd64 cmake -B build -DBUILD_GUI=ON\n```\n\nMoved from https://github.com/hebasto/bitcoin/issues/234.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-05-16T16:22:20Z",
+      "updated_at": "2025-12-17T11:41:20Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32536",
+      "labels": [
+        "Brainstorming",
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "purpleKarrot",
+          "body": "It sure is annoying when system packages are installed to a location where they cannot be found by default. On the other hand, package maintainers may have their reasons for doing that. There are probably multiple packages which depend on Qt6 and are built with CMake. It is very likely that package maintainers have their build environment set up for that.\n\nTrying to work around that \"issue\" creates a maintenance burden for us and potentially for package maintainers too, because our workaround may cause conflicts with their build environment setup. The most portable solution is to do - believe it or not - nothing at all.\n\nIf we want to provide binary packages for download on a website, we take the role of package maintainers. In packaging scripts, we need to setup a build environment so that all dependencies can be found. There are countless ways to do that. Two are mentioned above, other approaches are listed in the documentation of the [`find_package`](https://cmake.org/cmake/help/latest/command/find_package.html) command. Such build scripts ideally should be maintained separate from the project, like in a separate repository.",
+          "created_at": "2025-05-16T19:04:12Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> If we want to provide binary packages for download on a website, we take the role of package maintainers. In packaging scripts, we need to setup a build environment so that all dependencies can be found. There are countless ways to do that. \n\nThe only way we will produce anything binary, that would end up being distributed on our website, is via our Guix build; so any approach taken needs to happen inside Guix (all blobs/binaries must be reproducible).\n\n> Such build scripts ideally should be maintained separate from the project, like in a separate repository.\n\nCan you elaborate? I don't think I'd agree with splitting up our release scripts, into separate repositories.",
+          "created_at": "2025-05-17T10:25:10Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Are there any known users on this platform? Maybe this can be closed for now, until there are a few users. Then, a `build-*.md` can be added with any needed details. Whether or not to do a guix build can be decided then as well.",
+          "created_at": "2025-05-17T10:34:59Z"
+        }
+      ]
+    },
+    {
+      "number": 32531,
+      "title": "avoid using invalidateblock to directly test reorg behavior",
+      "body": "### Motivation\n\nWhile working on https://github.com/bitcoin/bitcoin/pull/32516 I found that for testing mempool entry from reorged blocks, directly using invalidateblock to trigger the reorg has at least a couple behaviors that don't match real reorgs:\n\n1) Only allows 10 deep reorg before it stops trying to re-enter things into the mempool\n2) doesn't respect descendant chain limits(Sets of PreChecks isn't run once per reorg but once per block, letting longer chains slip in)\n\nthe code paths greatly diverge from normal re-orgs, which makes this problematic for actual testing.\n\nThe setup being used:\n1) build blockchain of stuff you want re-entry for\n2) invalidatblock to the desired fork off point\n\nOne example to look at would be https://github.com/bitcoin/bitcoin/blob/3f83c744ac28b700090e15b5dda2260724a56f49/test/functional/mempool_ephemeral_dust.py#L350 or any other tests in `mempool_*.py` that use invalidateblock to simulate reorgs and mempool re-entry.\n\n\n### Possible solution\n\n\nWe should make sure that in our reorg/mempool tests spread across the codebase that we don't do it this way and instead:\n\n1) Prep fork chain of sufficient length\n2) invalidate the fork chain\n3) do normal test setup\n4) reconsiderblock the previously invalidated chain\n\nThis appears to match the intended test coverage.\n\n### Useful Skills\n\nUnderstanding of python test suite\n\n### Guidance for new contributors\n\nWant to work on this issue?\n\nFor guidance on contributing, please read [CONTRIBUTING.md](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md) before opening your pull request.\n",
+      "state": "closed",
+      "user": "instagibbs",
+      "created_at": "2025-05-16T13:54:49Z",
+      "updated_at": "2025-11-26T14:02:27Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32531",
+      "labels": [
+        "good first issue"
+      ],
+      "comment_list": [
+        {
+          "user": "mzumsande",
+          "body": "> We should make sure that in our reorg/mempool tests spread across the codebase that we don't do it this way and instead:\n> \n> 1. Prep fork chain of sufficient length\n> 2. invalidate the fork chain\n> 3. do normal test setup\n> 4. reconsiderblock the previously invalidated chain\n> \n> This appears to match the intended test coverage.\n\nWhy not simply submit the fork chain at the right point in time, provided it has more work - no invalidateblock / reconsiderblock involved at all. I always thought the reason for using those was just the simplicity of not having to prepare a longer chain to reorg to.",
+          "created_at": "2025-05-16T14:47:55Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "> Why not simply submit the fork chain at the right point in time\n\nSure, that works too, it just seemed easiest since you can use ~all the tooling to generate blockchains. e.g., if you want stuff in the fork blocks (and make as many blocks as you like) it's trivial to do via rpcs like generateblock.",
+          "created_at": "2025-05-16T14:50:19Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> > Why not simply submit the fork chain at the right point in time\n> \n> Sure, that works too, it just seemed easiest since you can use ~all the tooling to generate blockchains. e.g., if you want stuff in the fork blocks (and make as many blocks as you like) it's trivial to do via rpcs like generateblock.\n\nOh ok I see now, as in https://github.com/bitcoin/bitcoin/pull/32516/commits/16af944a547bfea8f1f910938491a8ad11a47de5.  Could also prepare the fork chain on a second node using whatever tooling, and connect the two at the right moment, but if you want to use just one node that works too.",
+          "created_at": "2025-05-16T15:13:34Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "> ### Motivation\n> While working on [#32516](https://github.com/bitcoin/bitcoin/pull/32516) I found that for testing mempool entry from reorged blocks, directly using invalidateblock to trigger the reorg has at least a couple behaviors that don't match real reorgs:\n> \n> 1. Only allows 10 deep reorg before it stops trying to re-enter things into the mempool\n> 2. doesn't respect descendant chain limits(Sets of PreChecks isn't run once per reorg but once per block, letting longer chains slip in)\n> \n> the code paths greatly diverge from normal re-orgs, which makes this problematic for actual testing.\n> \n> The setup being used:\n> \n> 1. build blockchain of stuff you want re-entry for\n> 2. invalidatblock to the desired fork off point\n> \n> ### Possible solution\n> We should make sure that in our reorg/mempool tests spread across the codebase that we don't do it this way and instead:\n> \n> 1. Prep fork chain of sufficient length\n> 2. invalidate the fork chain\n> 3. do normal test setup\n> 4. reconsiderblock the previously invalidated chain\n> \n> This appears to match the intended test coverage.\n\nThanks @instagibbs for identifying the issue, I have opened a draft PR to address this. Will notify once its ready for review!\n\n",
+          "created_at": "2025-05-22T13:30:34Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "Also wondering aloud how we can accurately test deep reorgs on real networks, like a mainnet node for performance testing. Anyone have suggestions on this?",
+          "created_at": "2025-05-22T13:32:54Z"
+        },
+        {
+          "user": "spikeyrock",
+          "body": "Maybe spin up two regtest nodes, mine a fork on one, and then connect them at just the right time to trigger the reorg. That way, the reorg happens \"naturally\" through P2P sync rather than forcing it.",
+          "created_at": "2025-05-24T08:20:46Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "I've opened a PR [#32587](https://github.com/bitcoin/bitcoin/pull/32587) to update the reorg pattern to the real one mentioned above — it's ready for review! If anyone’s interested in taking a look, your feedback would be most welcome and appreciated! \n\n@instagibbs @mzumsande ",
+          "created_at": "2025-06-09T05:07:18Z"
+        }
+      ]
+    },
+    {
+      "number": 32524,
+      "title": "intermittent issue in rpc_signer.py (enumeratesigners timeout) under GLIBCXX debug mode",
+      "body": "https://cirrus-ci.com/task/5094568045051904?logs=ci#L4419\n\n```\n[18:26:32.573] test_framework.authproxy.JSONRPCException: 'enumeratesigners' RPC took longer than 1200.000000 seconds. Consider using larger timeout for calls that take longer to return. (-344)\n```\n\nLooking at the full log, the test is just idle and then times out. However, there is no indication why the RPC does not proceed.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-05-16T06:36:57Z",
+      "updated_at": "2025-07-26T09:21:03Z",
+      "comments": 29,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32524",
+      "labels": [
+        "Brainstorming",
+        "CI failed"
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 14,
+    "issues": 3
+  }
+}

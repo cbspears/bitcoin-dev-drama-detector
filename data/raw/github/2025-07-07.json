@@ -1,0 +1,440 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:55:34.120113+00:00",
+  "date": "2025-07-07",
+  "pull_requests": [
+    {
+      "number": 32898,
+      "title": "POC: IPC tracing interface",
+      "body": "This a is proof-of-concept adding an IPC interface for tracing as discussed in https://github.com/bitcoin-core/libmultiprocess/issues/185. As mentioned there, this is a naive implementation that would need to be optimized to have good performance, but it does show an end-to-end demo of how tracing could work using IPC.\r\n\r\nThe can be tested by building with `-DENABLE_IPC=ON` and running:\r\n\r\n```bash\r\nbuild/bin/bitcoin-node -regtest -ipcbind=unix  # Start node listening on IPC socket\r\nbuild/bin/bitcoin-trace -regtest -debug        # Run bitcoin-trace and connect to socket\r\nbuild/bin/bitcoin-cli -regtest -generate       # Create a block to generate sample traces\r\n```",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-07-07T20:45:27Z",
+      "updated_at": "2025-07-08T13:20:06Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32898",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32898.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32575](https://github.com/bitcoin/bitcoin/pull/32575) (refactor: Split multithreaded case out of CheckInputScripts by fjahr)\n* [#32317](https://github.com/bitcoin/bitcoin/pull/32317) (kernel: Separate UTXO set access from validation functions by TheCharlatan)\n* [#32297](https://github.com/bitcoin/bitcoin/pull/32297) (bitcoin-cli: Add -ipcconnect option by ryanofsky)\n* [#31679](https://github.com/bitcoin/bitcoin/pull/31679) (cmake: Move internal binaries from bin/ to libexec/ by ryanofsky)\n* [#31132](https://github.com/bitcoin/bitcoin/pull/31132) (validation: fetch block inputs on parallel threads 10% faster IBD by andrewtoth)\n* [#30437](https://github.com/bitcoin/bitcoin/pull/30437) (ipc: add bitcoin-mine test program by ryanofsky)\n* [#29641](https://github.com/bitcoin/bitcoin/pull/29641) (scripted-diff: Use LogInfo over LogPrintf [WIP, NOMERGE, DRAFT] by maflcko)\n* [#29409](https://github.com/bitcoin/bitcoin/pull/29409) (multiprocess: Add capnp wrapper for Chain interface by ryanofsky)\n* [#29060](https://github.com/bitcoin/bitcoin/pull/29060) (Policy: Report reason inputs are non standard by ismaelsadeeq)\n* [#26966](https://github.com/bitcoin/bitcoin/pull/26966) (index: initial sync speedup, parallelize process by furszy)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-07T20:45:32Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Notes on current implementation of this:\r\n\r\n- The third commit f880817d54d9558938c697a37d0ef9acd4f34cf4 would be a lot simpler if it added a `Traces* g_traces` or similar global variable, which would be a reasonable thing to do. Initially, I wanted to avoid globals because they are hard to get rid of, and avoiding them could have benefits like being able to attach different tracers to different `CCoinsViewCache` instances, but this may not be worth extra complexity.\r\n- In the main commit 8e09fbe805fe77838363b7563d1dd0f2c934c1db, the duplication between [src/interfaces/tracing.h](https://github.com/bitcoin/bitcoin/blob/8e09fbe805fe77838363b7563d1dd0f2c934c1db/src/interfaces/tracing.h#L18-L40) and [src/ipc/capnp/tracing.capnp](https://github.com/bitcoin/bitcoin/blob/8e09fbe805fe77838363b7563d1dd0f2c934c1db/src/ipc/capnp/tracing.capnp#L17-L34)  isn't very nice. Maybe some code generation could be done to generate one file from the other. This would be difficult to do for general IPC calls but might be easier for simple tracing definitions.\r\n- In the main commit 8e09fbe805fe77838363b7563d1dd0f2c934c1db, I made the [`coins.cpp` traces](https://github.com/bitcoin/bitcoin/blob/8e09fbe805fe77838363b7563d1dd0f2c934c1db/src/coins.cpp#L112-L117) verbose and explicit for clarity, but a real implementation should replace all of that tracing code with single `Trace()` calls like ` Trace<&UtxoCache::add>(UtxoInfo{outpoint.hash, ...})` which would reduce verbosity, and could be optimized to avoid locking and blocking for efficiency.",
+          "created_at": "2025-07-08T02:35:30Z"
+        },
+        {
+          "user": "0xB10C",
+          "body": "Awesome, thanks! I'll play around with this over the next few weeks.",
+          "created_at": "2025-07-08T08:40:19Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> Awesome, thanks! I'll play around with this over the next few weeks.\r\n\r\nGreat! Will close this PR since I'm not planning to do more work on it, and we can continue to discuss in https://github.com/bitcoin-core/libmultiprocess/issues/185",
+          "created_at": "2025-07-08T13:20:06Z"
+        }
+      ]
+    },
+    {
+      "number": 32896,
+      "title": "wallet, rpc: add v3 transaction creation and wallet support",
+      "body": "This PR Implements the following:\r\n- If creating a v3 transaction, `AvailableCoins` doesn't return unconfirmed v2 utxos (and vice versa)\r\n- `AvailableCoins` doesn't return an unconfirmed v3 utxo if its transaction already has a child\r\n- If a v3 transaction is kicked out of the mempool by a sibling, mark the sibling as a mempool conflict\r\n- Throw an error if pre-selected inputs are of the wrong transaction version\r\n- Allow setting version to 3 manually in `createrawtransaction` (uses commits from #31936)\r\n- Limits a v3 transaction weight in coin selection\r\n\r\nCloses #31348\r\n\r\nTo-Do:\r\n- [x] Test a v3 sibling conflict kicking out one of our transactions from the mempool\r\n- [x] Implement separate size limit for TRUC children\r\n- [x] Test that we can't fund a v2 transaction when everything is v3 unconfirmed\r\n- [x] Test a v3 sibling conflict being removed from the mempool\r\n- [x] Test limiting v3 transaction weight in coin selection\r\n- [x] Simplify tests\r\n- [x] Add documentation \r\n- [x] Test that user-input max weight is not overwritten by truc max weight\r\n- [x] Test v3 in RPCs other than `createrawtransaction`",
+      "state": "closed",
+      "user": "ishaanam",
+      "created_at": "2025-07-07T20:13:59Z",
+      "updated_at": "2025-08-19T13:36:28Z",
+      "comments": 15,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32896",
+      "labels": [
+        "Wallet",
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32896.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [glozow](https://github.com/bitcoin/bitcoin/pull/32896#issuecomment-3192180547), [achow101](https://github.com/bitcoin/bitcoin/pull/32896#pullrequestreview-3125052290), [rkrux](https://github.com/bitcoin/bitcoin/pull/32896#pullrequestreview-3125713592) |\n| Concept ACK | [murchandamus](https://github.com/bitcoin/bitcoin/pull/32896#pullrequestreview-3040093165) |\n| Stale ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/32896#pullrequestreview-3117871770) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32983](https://github.com/bitcoin/bitcoin/pull/32983) (rpc: refactor: use string_view in Arg/MaybeArg by stickies-v)\n* [#32857](https://github.com/bitcoin/bitcoin/pull/32857) (wallet: allow skipping script paths by Sjors)\n* [#32523](https://github.com/bitcoin/bitcoin/pull/32523) (wallet: Remove isminetypes by achow101)\n* [#28201](https://github.com/bitcoin/bitcoin/pull/28201) (Silent Payments: sending by josibake)\n* [#27865](https://github.com/bitcoin/bitcoin/pull/27865) (wallet: Track no-longer-spendable TXOs separately by achow101)\n* [#21283](https://github.com/bitcoin/bitcoin/pull/21283) (Implement BIP 370 PSBTv2 by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-07T20:14:04Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/45505893140</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by a lint error due to a file permission issue with a Python script that has a shebang line but incorrect executable permissions.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-07T20:19:15Z"
+        },
+        {
+          "user": "ishaanam",
+          "body": "This PR is now ready for review.",
+          "created_at": "2025-07-14T14:46:42Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `macOS-cross, gui, no tests`: https://github.com/bitcoin/bitcoin/runs/46044194546</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by a linker error due to an undefined symbol in RPCHelpMan.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-15T23:39:31Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/46200015717</sub>\n<sub>LLM reason (✨ experimental): The failure is caused by lint errors detected by `ruff` due to unused imports in Python files.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-17T17:30:33Z"
+        },
+        {
+          "user": "ishaanam",
+          "body": "Thanks for the review @glozow! I've addressed your comments and also refactored a few of the functional tests.",
+          "created_at": "2025-07-17T18:08:04Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/46575305874</sub>\n<sub>LLM reason (✨ experimental): Lint errors caused by f-string syntax issues caused the CI failure.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-23T15:47:46Z"
+        },
+        {
+          "user": "ishaanam",
+          "body": "Thanks for the feedback @glozow and @achow101! I'm converting this to a draft while I work on some additional test cases, but otherwise the code is ready for review.",
+          "created_at": "2025-07-28T18:23:18Z"
+        },
+        {
+          "user": "ishaanam",
+          "body": "I have added more tests and this PR is ready for review.",
+          "created_at": "2025-07-30T16:11:11Z"
+        },
+        {
+          "user": "ishaanam",
+          "body": "@achow101 thanks for the review!\r\n> I think sendall is missing the weight check if the transaction is truc.\r\n\r\nI've added the weight check in sendall for truc txs (including those spending unconfirmed truc children) and I have added two additional test cases for this.",
+          "created_at": "2025-08-05T19:46:23Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> 3. A TRUC’s ancestor set (incl. itself) must be within TRUC_ANCESTOR_LIMIT\r\n\r\n> All of these rules (except the third one) are included in the added test file.\r\n\r\nAh true, the wallet should never select multiple unconfirmed TRUC outputs. We can test this by having 2 unconfirmed TRUC outputs to spend, neither able to fund the transaction fully, and checking you get \"insufficient funds.\"",
+          "created_at": "2025-08-12T13:32:07Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/47940439625</sub>\n<sub>LLM reason (✨ experimental): Linting errors caused the CI failure.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-08-12T20:23:05Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `tidy`: https://github.com/bitcoin/bitcoin/runs/48008323258</sub>\n<sub>LLM reason (✨ experimental): Failure due to clang-tidy reported an error in spend.cpp: unnecessary temporary object created while calling emplace_back.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-08-13T16:35:09Z"
+        },
+        {
+          "user": "glozow",
+          "body": "reACK 5c8bf7b39e9",
+          "created_at": "2025-08-15T16:59:54Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "> I'm not fully sold on the approach of choosing the highest value TRUC UTXO, but don't have any ideas on how to change that for this PR. Maybe @murchandamus has some thoughts on that.\r\n\r\nBeen pondering this a bit today. \r\n\r\n- In the first pass, we will always try to fund transactions only with confirmed UTXOs. If we are just requesting a new TRUC transaction, it will always get funded by confirmed UTXOs if we have sufficient confirmed funds.\r\n- If we are deliberately creating a child transaction, it’s probably because we want to CPFP an existing TRUC transaction and that already restricts the unconfirmed UTXOs to be created by the specific parent transaction. In that case, only other outputs from the same transactions are other eligible unconfirmed inputs.\r\n- This leaves only the case in which we are creating a TRUC transaction, but we do not have sufficient confirmed funds to pay for it. In that case, we can use one or several unconfirmed UTXOs from a single transaction in addition to any number of confirmed UTXOs.\r\n\r\nWe do have the `nDepth` member on `COutput`, so if we have several unconfirmed single outputs from transactions, we could keep track of whether we have selected an unconfirmed UTXO. Whenever we were to add a second unconfirmed UTXO, we could keep it or replace it with new one, depending on which has the greater effective value instead of adding it. Perhaps, just in case of creating TRUC transactions, we would create a new type of `OutputGroups` based on common parent transaction instead of common output script in that context. Because we can only use one `OutputGroup` that contains unconfirmed UTXOs, we could generate all subsets of a transaction’s outputs as separate OutputGroups, and thereby have those unconfirmed UTXOs appear multiple times in different configurations. We could only use that approach if there is a small number (<10?) of outputs to ourselves on the transaction as power sets grow exponentially. Either way, it  might be easier to have a dedicated algorithm for TRUC child transactions, that tracks the two pots separately, but all of that seems very complicated.\r\n\r\nGiven that it should be fairly uncommon to have all of your funds in flight and the complexity of alternatives, using the largest UTXO or group of UTXOs feels viable to me, although it could be improved in the future.",
+          "created_at": "2025-08-19T00:51:26Z"
+        }
+      ]
+    },
+    {
+      "number": 32895,
+      "title": "wallet: Prepare for future upgrades by recording versions of last client to open and decrypt",
+      "body": "When a wallet is automatically upgraded, we always do so in a way that allows the user to load their wallet in an older version. When the user loads their wallet into an upgraded version again, the wallet may not perform the automatic upgrade and end up with upgraded and non-upgraded material in the wallet.\r\n\r\nIf we write some information about the last client to open the wallet, we would be able to detect these upgrade-downgrade-upgrade situations and perform another upgrade if so. However, in order for this to work, we need to have implemented writing such information into versions prior to the ones which introduce new automatic upgrades.\r\n\r\nWe are already writing the CLIENT_VERSION into all wallets in a \"version\" record, although this record is not updated in the same way across all previous versions. Since v24.0, we are always updating the record when the client version differs, but prior to that, the record would only be updated when the client version is newer. Even so, we can use this record to store the last client version.\r\n\r\nThe first commit decouples the written client version from the node version. This aids in development of new features. The version is entirely decoupled from previous versions by requiring all versions to have bit 30 set, and the initial version being `0 | (1 << 30)`. The versions just need to be at least 299900, and forcing bit 30 to be set was an easy way to achieve this.\r\n\r\nHowever, using version numbers is not as flexible as feature flags, so the second commit introduces the concept of Wallet Client Features. These flags are distinct from the existing Wallet Feature Flags since they are conceptually different. These are written in a separate record, and the wallet client version is incremented to `(1 << 0) | (1 << 30)`.\r\n\r\nLastly, since some upgrades may need private keys and can only occur after the wallet is decrypted, the third commit also adds a last decrypted features flags record to record the features of the last client to decrypt the wallet.\r\n\r\nThe result is that we will now be able to detect a downgrade down to v24.0 and be able to implement in parallel multiple features that require automatic upgrades.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-07-07T20:13:08Z",
+      "updated_at": "2026-01-14T15:33:40Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32895",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32895.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [ryanofsky](https://github.com/bitcoin/bitcoin/pull/32895#issuecomment-3049244656) |\n| Stale ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/32895#pullrequestreview-3049112073) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33034](https://github.com/bitcoin/bitcoin/pull/33034) (wallet: Store transactions in a separate sqlite table by achow101)\n* [#33008](https://github.com/bitcoin/bitcoin/pull/33008) (wallet: support bip388 policy with external signer by Sjors)\n* [#32685](https://github.com/bitcoin/bitcoin/pull/32685) (wallet: Allow read-only database access for info and dump commands by PeterWrighten)\n* [#32636](https://github.com/bitcoin/bitcoin/pull/32636) (Split `CWallet::Create()` into `CreateNew` and `LoadExisting` by davidgumberg)\n* [#32489](https://github.com/bitcoin/bitcoin/pull/32489) (wallet: Add `exportwatchonlywallet` RPC to export a watchonly version of a wallet by achow101)\n* [#27865](https://github.com/bitcoin/bitcoin/pull/27865) (wallet: Track no-longer-spendable TXOs separately by achow101)\n* [#19461](https://github.com/bitcoin/bitcoin/pull/19461) (multiprocess: Add bitcoin-gui -ipcconnect option by ryanofsky)\n* [#19460](https://github.com/bitcoin/bitcoin/pull/19460) (multiprocess: Add bitcoin-wallet -ipcconnect option by ryanofsky)\n* [#10102](https://github.com/bitcoin/bitcoin/pull/10102) (Multiprocess bitcoin by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- “when a upgrade-downgrade-upgrade was performed” -> “when an upgrade-downgrade-upgrade was performed” [‘upgrade’ begins with a vowel sound, so needs “an”]\n- “LastClientFEatures” -> “LastClientFeatures” [capitalization typo in comment]\n\n<sup>drahtbot_id_4_m</sup>\n",
+          "created_at": "2025-07-07T20:13:13Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I wonder if this can be uncoupled from `CLIENT_VERSION`, because the coupling is confusing and makes testing harder:\r\n\r\n* It is confusing, because switching between versions that kept the wallet code the same will pretend that there was a relevant upgrade/downgrade, even though the wallet behavior is exactly identical.\r\n* `CLIENT_VERSION` on the development branch is changed every 6 months, not when a new wallet feature was added that needs to deal with un-upgraded material. I know that running from the master branch is not supported and devs will have to deal with un-upgraded material themselves, but it seems easy to fix (and cleaner) to just introduce a new variable in the wallet that is equal to the current `CLIENT_VERSION` and then handle it separately and explicitly from now on.",
+          "created_at": "2025-07-08T09:24:38Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Concept ACK. It shouldn't hurt to add more metadata to help detect when there might be a mix of old data in a newer format and new data in an older format in the same wallet.\r\n\r\nConceptually, I think we could always detect these cases by just scanning the entire wallet for data that needs to be upgraded on loading. But having this extra metadata is nice because it can avoid slowing down wallet loading by avoiding unnecessary upgrade rescans.\r\n\r\nOn the approach in e94ef51837daa5ec9552eb14e8ccc38d1b82b65b, I think it is ok, but would suggest some ways it might be improved:\r\n\r\n- I agree with Marco's [comment](https://github.com/bitcoin/bitcoin/pull/32895#issuecomment-3048078577) that it would be great to move away from CLIENT_VERSION and use something independent of the node version.\r\n  - A downside of this suggestion is that the PR might not be able to reuse the existing VERSION field and might need to introduce 2 new fields instead of 1. I think the tradeoff could be worth it though.\r\n- It would be nice to avoid version numbers altogether and use feature flags instead, defining new feature flags when new data fields are introduced, and writing supported feature flags to LAST_OPENED_FEATURES & LAST_DECRYPTED_FEATURES fields on wallet loading.\r\n  - This would not require introducing a new data type since we already have a [WalletFlags](https://github.com/bitcoin/bitcoin/blob/927055e42afbfd998b5d85108e9c5fe7c6ffb7aa/src/wallet/walletutil.h#L36-L78) enum. New internal and external features could just be new (nonmandatory) `WalletFlags` values.\r\n  - IMO, flags are better than version numbers because they decouple code that implements new features from the merge and release process. They also make code more readable and maintainable because checks like `if (last_opened_supported_specific_feature_x)` are more obvious than `if (last_opened_version > some_version_number_with_collection_of_features)`\r\n- I assume we don't care about detecting upgrades & downgrades to versions before v24.0 which wouldn't overwrite the `VERSION` field on opening. But if we did, it'd be possible to detect this by writing last_opened and last_decrypted metadata to a file alongside the wallet database instead of inside the wallet database, and touching the file whenever the database is flushed. This way, if the database file modification time was greater than metadata file modification time, you could infer that the database had been loaded by an older version in the meantime and needs to be upgraded. Wouldn't recommend this approach because it is more complicated, but wanted to mention it as an alternative to introducing new database fields.",
+          "created_at": "2025-07-08T14:42:25Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> I wonder if this can be uncoupled from CLIENT_VERSION, because the coupling is confusing and makes testing harder:\r\n\r\nDefinitely, however I'd like to be able to reuse the existing \"version\" record which mostly has the desired behavior since v24.0. The detection only works because of older versions overwriting the field with their CLIENT_VERSION. Introducing a new field now means that we cannot detect when an upgraded wallet was opened in any version older than v30.0 (assuming this is merged for the next release). The timeline would be too soon for any newly introduced features in say v31.0 or v32.0 (and I've got a few things in mind already that would utilize this). I'm already not particularly thrilled by the fact that the current implementation can only detect down to 24.0 as I expect that users doing upgrade-downgrade-upgrade with even older versions is commonplace.\r\n\r\n> Conceptually, I think we could always detect these cases by just scanning the entire wallet for data that needs to be upgraded on loading.\r\n\r\nI don't think that is actually viable as it would largely end up performing the upgrade on all loads regardless of whether the upgrade has already been done.",
+          "created_at": "2025-07-08T17:52:15Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Maybe I am missing something obvious, but my suggestion was not to introduce a new field/record. It was to re-use the existing field (and value) and manually handle the value going forward only when needed.\r\n\r\nThat is, old wallets will (obviously) continue to write their `CLIENT_VERSION` to the `version` record. Also, any new wallet will continue to write a value of the current `CLIENT_VERSION` to it, just like on the current development branch (this is unchanged as well). The only change is that for the next release, the wallet will *continue* to write the same value as today, unless a feature was added that requires bumping the version, in which case the version is bumped in the pull request introducing the feature.",
+          "created_at": "2025-07-08T18:28:50Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> Maybe I am missing something obvious, but my suggestion was not to introduce a new field/record. It was to re-use the existing field (and value) and manually handle the value going forward only when needed.\r\n\r\nSorry, I was responding to @ryanofsky's comment at the same time since they were very similar.\r\n\r\nI think that may be workable.",
+          "created_at": "2025-07-08T18:34:04Z"
+        },
+        {
+          "user": "achow101",
+          "body": "I've updated the PR to do a combination of @maflcko's and @ryanofsky's suggestions.\r\n\r\nThe new approach decouples `version` from CLIENT_VERSION. It also writes out a set of client specific feature flags into two new records: `lastopenedfeatures` and `lastdecryptedfeatures`. However, these feature flags are separate from the existing wallet feature flags.\r\n\r\nI believe this preserves the behavior of detecting downgrades down to v24.0, while also giving us the flexibility of a new field and feature flags.",
+          "created_at": "2025-07-08T20:53:32Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> nit: Commit [3662960](https://github.com/bitcoin/bitcoin/commit/3662960470d74850008b7b48b6820d02002f7a5d) appears to have CI failures.\r\n\r\nI believe that's only because the tasks were canceled by a new push.",
+          "created_at": "2025-07-23T21:30:03Z"
+        }
+      ]
+    },
+    {
+      "number": 32894,
+      "title": "FUZZ: Test that BnB finds best solution",
+      "body": "BnB’s solution is the input set with the lowest waste score, excluding any supersets of other solution candidates.\r\nThis fuzz test compares a brute force search with the BnB result to ensure that BnB succeeds.",
+      "state": "open",
+      "user": "murchandamus",
+      "created_at": "2025-07-07T17:34:08Z",
+      "updated_at": "2025-10-30T13:56:11Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32894",
+      "labels": [
+        "Tests",
+        "Fuzzing"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32894.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [yancyribbens](https://github.com/bitcoin/bitcoin/pull/32894#issuecomment-3063652119) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-07T17:34:13Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Thanks @maflcko, I fixed the sentence.",
+          "created_at": "2025-07-10T18:58:52Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "I'll take a closer look at this, although some quick feedback since I've implemented something similar.\r\n\r\n> This fuzz test compares a brute force search with the BnB result to ensure that BnB succeeds.\r\n\r\nI recently removed a similar automated test that used brute force.  The issue with using a brute solution I had was a) brute force is slow b) only works on a limited pool size of say 20 UTXOs (see a).  Instead of using brute force, I adopted a strategy where I generate two random UTXO sets.  Then, build a target from one of the two sets.  Finally merge the two sets and randomize.  Therefore there is for sure  a solution (unless iteration limit is hit) and the assertion asserts that BnB will find the solution (or that it doesn't due to some error condition like iteration limit reached).  I'm curious what you think of the pros and cons of your brute force strategy vs seeding a random solution and how it works with larger UTXO sets.\r\n",
+          "created_at": "2025-07-10T23:38:57Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Concept ACK adding a test that shows BnB finds the best solution (min waste).  The downside to this approach however is it limits solutions to 16 and theoretically BnB could find solutions of larger sets without hitting the maximum iteration limit.  Code looks good though otherwise.\r\n\r\nI think this should be prioritized to merge first over https://github.com/bitcoin/bitcoin/pull/32150 so that it can add more test safety to that refactor.",
+          "created_at": "2025-07-11T20:07:16Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Removed the duplicate definition of `coin_params.m_cost_of_change`.",
+          "created_at": "2025-07-21T19:21:14Z"
+        }
+      ]
+    },
+    {
+      "number": 32893,
+      "title": "doc: fix `BlockConnected` incorrect comment",
+      "body": "This is a simple PR  that fixes the `BlockConnected` validation interface notification comment, which incorrectly states that a vector of transactions removed from the mempool is as a parameter of the method.\r\n\r\nOriginally, this was the case when the method was first introduced in https://github.com/bitcoin/bitcoin/pull/9725\r\n\r\nHowever, the method has since changed, and this is no longer accurate. Keeping the outdated comment is now misleading.\r\n\r\nThis PR removes the information about the method parameters from the docstring, aligning it with the style of other notifications methods. As noticed in this PR, comments listing parameters can become stale and go uncorrected. \r\n\r\nTherefore, this PR simply removes the inaccurate comment without listing the current returned values.",
+      "state": "closed",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-07-07T17:23:35Z",
+      "updated_at": "2025-07-08T10:00:37Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32893",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32893.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32893#issuecomment-3046308815), [maflcko](https://github.com/bitcoin/bitcoin/pull/32893#issuecomment-3048091064) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-07T17:23:40Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Vector parameter was removed in https://github.com/bitcoin/bitcoin/commit/cdb893443cc16edf974f099b8485e04b3db1b1d7#diff-b169bd0694e8b0a87fd1097c8cfc1d6c8a926b49b375bb4141d37dcc624f975eL127-L131, the doc wasn't updated.\r\n\r\nACK 4e69aa5701a2dad3805ea26718e6a406adb8b748",
+          "created_at": "2025-07-07T19:33:38Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 4e69aa5701a2dad3805ea26718e6a406adb8b748",
+          "created_at": "2025-07-08T09:28:20Z"
+        }
+      ]
+    },
+    {
+      "number": 32892,
+      "title": "rpc: use anti-fee-sniping in send, sendall and walletcreatefundedpsbt",
+      "body": "If the user does not specify `locktime` for `send`, `sendall` and `walletcreatefundedpsbt`, enable anti-fee-sniping. Previously we would set `nLockTime` to 0.\r\n\r\nThis behavior matches the `sendtoaddress` RPC and the GUI wallet.\r\n\r\nBecause `sendall` doesn't use `CreateTransactionInternal` this PR refactors (and renames) `DiscourageFeeSniping` so that it checks input `nSequence` values and nLockTime by itself, and brings its own `FastRandomContext`. A subsequent commit then calls this from the `sendall` RPC.",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-07-07T14:55:06Z",
+      "updated_at": "2025-07-09T08:54:40Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32892",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32892.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32896](https://github.com/bitcoin/bitcoin/pull/32896) (wallet, rpc: add v3 transaction creation and wallet support by ishaanam)\n* [#32857](https://github.com/bitcoin/bitcoin/pull/32857) (wallet: allow skipping script paths by Sjors)\n* [#31936](https://github.com/bitcoin/bitcoin/pull/31936) (rpc: Support v3 raw transactions creation by Bue-von-hon)\n* [#28944](https://github.com/bitcoin/bitcoin/pull/28944) (wallet, rpc: add anti-fee-sniping to `send` and `sendall` by ishaanam)\n* [#21283](https://github.com/bitcoin/bitcoin/pull/21283) (Implement BIP 370 PSBTv2 by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-07T14:55:10Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Expanded the existing `test_anti_fee_sniping` case in `wallet_create_tx.py` to cover `send` `sendall`. Making `sendall` actually work required an additional refactor.",
+          "created_at": "2025-07-07T16:56:09Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Any chance this is a duplicate of #28944?",
+          "created_at": "2025-07-07T20:26:55Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@glozow thanks, I hadn't seen that one. Will take a look.",
+          "created_at": "2025-07-08T07:09:45Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Ok, so #28944 uses a completely different approach. It already has a lot of review, so I'll add mine there.",
+          "created_at": "2025-07-09T07:17:25Z"
+        }
+      ]
+    },
+    {
+      "number": 32891,
+      "title": "New SVG, Icons, PNGs and X PixMaps",
+      "body": "This PR clean up the old SVG, Icons, PNGs and X PixMaps by providing optimized much smaller file size versions while at the same time keeping resolutions untouched.\r\nShadows are removed from the files.\r\n\r\nPing: @jonasschnelli because he was the author of the previous files. Please check the PR.\r\n\r\nNew SVG source code:\r\n`<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<svg width=\"1024px\" height=\"1024px\" version=\"1.1\" viewBox=\"0 0 1024 1024\" xmlns=\"http://www.w3.org/2000/svg\">\r\n <g id=\"bitcoin\">\r\n  <path d=\"m1008.6 635.86c-68.383 274.29-346.19 441.22-620.51 372.82-274.21-68.383-441.14-346.21-372.72-620.48 68.352-274.32 346.16-441.26 620.4-372.88 274.3 68.383 441.21 346.24 372.83 620.54z\" fill=\"#f7931a\"/>\r\n  <path d=\"m343.53 598.23c-2.7852 6.9102-9.8398 17.277-25.746 13.344 0.5625 0.81641-40.832-10.191-40.832-10.191l-27.887 64.301 73.105 18.227c13.598 3.4062 26.926 6.9766 40.047 10.336l-23.246 93.344 56.109 14 23.023-92.352c15.328 4.1602 30.211 8 44.77 11.613l-22.945 91.922 56.176 14 23.25-93.168c95.793 18.129 167.82 10.816 198.14-75.824 24.43-69.762-1.2188-110-51.617-136.24 36.703-8.4648 64.352-32.609 71.727-82.48 10.195-68.129-41.68-104.75-112.61-129.18l23.008-92.289-56.176-14-22.402 89.855c-14.766-3.6797-29.934-7.1523-45.008-10.594l22.562-90.445-56.145-14-23.023 92.254c-12.227-2.7812-24.227-5.5352-35.875-8.4297l0.066406-0.28906-77.473-19.344-14.945 60s41.68 9.5508 40.801 10.145c22.754 5.6797 26.863 20.734 26.176 32.672m202.69 273.63c-17.359 69.758-134.82 32.047-172.89 22.59l30.848-123.66c38.078 9.5039 160.19 28.32 142.05 101.07zm17.379-180.99c-15.844 63.453-113.6 31.215-145.31 23.309l27.965-112.16c31.715 7.9062 133.84 22.656 117.35 88.852z\" fill=\"#fff\"/>\r\n </g>\r\n</svg>`\r\n\r\nThank you",
+      "state": "closed",
+      "user": "ghost",
+      "created_at": "2025-07-07T12:44:52Z",
+      "updated_at": "2025-07-11T16:00:07Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32891",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32891.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-07T12:44:59Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Closing for now:\r\n\r\n* Not sure if removing shadows is the right approach to save a few KB. This needs a stronger motivation and screenshots on all supported Systems.\r\n* Gui  pull request should be opened against the gui repo: github.com/bitcoin-core/gui\r\n* Please don't include the source code in the pull description. If anyone wanted to look at the source code, they could just look at it directly.\r\n* Please don't ping for reviewers in the pull description. Also, pinging people that have not been active in bitcoin core for a long time is unlikely to be useful.\r\n* Finally, you'd  have to squash your commits according to https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#squashing-commits",
+          "created_at": "2025-07-07T13:12:33Z"
+        },
+        {
+          "user": "ghost",
+          "body": "@maflcko Thanks, I will use github.com/bitcoin-core/gui to send a new PR. Also I will squash the commits. There is a not just a few KB saved with the PR but a lot and not because removed shadows but because the files are optimized. The current files in the bitcoin/bitcoin:master are very old and not optimized. ",
+          "created_at": "2025-07-07T13:28:49Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "They are optimized, see https://github.com/bitcoin-core/bitcoin-maintainer-tools/blob/main/optimize-pngs.py",
+          "created_at": "2025-07-07T13:52:54Z"
+        },
+        {
+          "user": "ghost",
+          "body": "@maflcko You mean this commit? https://github.com/bitcoin/bitcoin/commit/42f6a0c2b946af2cce86b721b349d35c4e21ce88\r\nYes the PNGs are optimized but not correctly, that's why you can see in my commit for example that my bitcoin.png is  -256 KB (16%) smaller than the current file in the repo. https://github.com/bitcoin/bitcoin/pull/32891/files#diff-5e43a57fa6d8a58177b80b3d7d608e6fffcda2a75078da2aa47bb4e447b44f81 also the script only optimized PNG files unlike my commit that optimized all bitcoin logo files including SVG, Icons (.ico), PNGs and X PixMaps",
+          "created_at": "2025-07-07T14:33:53Z"
+        }
+      ]
+    },
+    {
+      "number": 32890,
+      "title": "bench: Avoid tmp files in pwd",
+      "body": "It is a bit confusing that one bench run, when aborted, could leave behind temp files in the current working directory. It is similarly confusing to delete those files in the next run of bench.\r\n\r\nFix all issues by using `BasicTestingSetup`, which provides a proper temp folder to use and also cleans up after itself.\r\n\r\nCan be tested via:\r\n\r\n```\r\n( echo 'my file content' > streams_tmp ) && ls streams_tmp && ./bld-cmake/bin/bench_bitcoin --filter=FindByte && ls streams_tmp\r\n```\r\n\r\nPreviously the file would be deleted, now it is kept.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-07-07T11:12:55Z",
+      "updated_at": "2025-07-10T14:23:11Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32890",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32890.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [stickies-v](https://github.com/bitcoin/bitcoin/pull/32890#pullrequestreview-2994321094) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-07T11:12:59Z"
+        }
+      ]
+    },
+    {
+      "number": 32888,
+      "title": "ci: Use optimized Debug build type in test-each-commit",
+      "body": "An optimized debug build is mostly as fast as a release build, because hot loops of heavy debug-only code are rare. So use that setting in the test-each-commit CI, to enable more checks almost \"for free\".",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-07-07T08:25:02Z",
+      "updated_at": "2025-07-24T13:23:36Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32888",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32888.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Prabhat1308](https://github.com/bitcoin/bitcoin/pull/32888#issuecomment-3068203122), [willcl-ark](https://github.com/bitcoin/bitcoin/pull/32888#pullrequestreview-3033742204) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31802](https://github.com/bitcoin/bitcoin/pull/31802) (Add bitcoin-{node,gui} to release binaries for IPC by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-07T08:25:07Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Can we use `mold` as a linker in other Linux based system workflows ?\r\n\r\nSure, happy to review a follow-up. Only place to avoid it would probably the ci tasks that mirror the guix build (win-cross, mac-cross)",
+          "created_at": "2025-07-07T12:12:46Z"
+        },
+        {
+          "user": "theuni",
+          "body": "Is it necessary to use `-g` here? The output in #32829, for ex, doesn't show a backtrace. So at least in that case the debug symbols are just taking up space.",
+          "created_at": "2025-07-07T14:43:55Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "No, `-g` isn't needed for the CI itself. It is only there for developers who happen to run this locally in a container and want to reproduce something in a debugger without having to modify the script and re-compile. Storage is cheap/free, so I thought it can't hurt to have it, but no strong opinion. Anything should be fine for the setting.",
+          "created_at": "2025-07-07T14:50:42Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "To provide some numbers that the new checks really are roughly for free:\r\n\r\nThis ci run took `30min7sec` (https://github.com/bitcoin/bitcoin/actions/runs/16112781421/job/45459901801?pr=32888)\r\n\r\nPreviously (randomly last month) it took `30min14sec` (https://github.com/bitcoin/bitcoin/pull/32680/checks)",
+          "created_at": "2025-07-08T08:51:07Z"
+        },
+        {
+          "user": "Prabhat1308",
+          "body": "re-ACK [`faa3171`](https://github.com/bitcoin/bitcoin/pull/32888/commits/faa3171ff22fea1c001e5a9b01d964aa425a3387)",
+          "created_at": "2025-07-14T07:46:10Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "A run of the new job / flags here: https://github.com/bitcoin/bitcoin/actions/runs/16495974354/job/46641652091?pr=33044.",
+          "created_at": "2025-07-24T13:23:36Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32897,
+      "title": ".",
+      "body": "### Please describe the feature you'd like to see added.\n\nIn this new fork, only one wallet could be created for each physical persona, probably using a proof like the national identity number \"[NIN](https://en.wikipedia.org/wiki/National_identification_number)\" (e.g.: US+SSN, MX+CURP, etc.), and getting sure it's a living person (not yet registered as death). \n\nTo be able to carry out transactions with institutions, this could be done, through decentralized exchanges (DEXs).\n\nTo perform the fork migration, after the snapshot of the blockchain, the replication of the original bitcoins should be requested from the original Bitcoin wallet addressing the personal wallet in the new fork (Bitcoin Px).\nInstitutional Bitcoins could be replicated in to a personal wallet, but this replication should have a maximum congruent limit (maybe 10 or 20 times the average wealth of a global citizen).\n\nBitcoins that aren't reclaimed under the replication period (maybe 3 months), should be nonexistent in the new blockchain, so they are available to be mined as fresh new Bitcoins.\n\n### Is your feature related to a problem, if so please describe it.\n\nThe problem this issue would deal with, is the current centralization of the available money under the control of a few institutions, giving them power over society. Leaving once again the power of the whole/conjunct (democracy) at the mercy of the power of a few (oligarchy).\n\nNow that the efficiency of Bitcoin has been accepted even by institutions, maybe it's time to stop pandering those institutional whales, by creating an institution-proof Bitcoin replica, exclusively for physical persons. This could be a way to decentralize money in a second phase.\n\n### Describe the solution you'd like\n\nAs long as only humans are able to step inside this money platform, and institutions can be kept away, even   through false human agents, this could work also as a worldwide equity platform.\n\n### Describe any alternatives you've considered\n\nIf the proof method chosen is NIN's, for the citizens of countries without any trustful NIN system, a solution could be created in collaboration with other Bitcoin cycle agents (miners, nodes, etc).\n\nBiometrics, genome or blood could be an alternative to NIN's, but would add a huge layer of complexity.\n\nI would disagree with any solution that involves invasive technology.\n\n### Please leave any additional context\n\nI completely understand this would drastically remove the \"anonymity\" from Bitcoin, but it could be also a good thing for addressing iniquity and corruption (at least inside this blockchain).",
+      "state": "closed",
+      "user": "davidtaubmann",
+      "created_at": "2025-07-07T20:19:43Z",
+      "updated_at": "2025-07-11T15:58:19Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32897",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "pinheadmz",
+          "body": "This belongs on the Bitcoin dev mailing list or maybe delving Bitcoin, not the issue tracker for this software project. ",
+          "created_at": "2025-07-07T20:22:17Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 9,
+    "issues": 1
+  }
+}

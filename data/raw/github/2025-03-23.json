@@ -1,0 +1,139 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:27:01.084633+00:00",
+  "date": "2025-03-23",
+  "pull_requests": [],
+  "issues": [
+    {
+      "number": 32126,
+      "title": "Restarting Development on BIP-199",
+      "body": "### Please describe the feature you'd like to see added.\n\nHi, I'd like to restart development on BIP-199: https://en.bitcoin.it/wiki/BIP_0199\n\nIt was previously started as [PR #7601](https://github.com/bitcoin/bitcoin/pull/7601) which was then abandoned. \n\nIs there any interest in getting this implemented? If so, I can start a PR and begin contributing. \n\n### Is your feature related to a problem, if so please describe it.\n\nBIP-199 was never fully implemented in Bitcoin Core. \n\n### Describe the solution you'd like\n\nI'd like to use pay-to-public key addresses to implement the feature so that the full script is on-chain. Otherwise, we would run into the problem of how to store the script, which contains refund and redeem addresses + a hash that would need to be stored on disk somewhere.  \n\n### Describe any alternatives you've considered\n\nUsing Segwit witness scripts to generate the HTLC. I believe this would be the an inferior implementation because the full script would then have to be stored on disk. Loss of this data would lead to loss of ability for the refunder to claim a refund of the contract. \n\n### Please leave any additional context\n\nI am the author of the NPM library for BIP-199: ( https://www.npmjs.com/package/bip-199 ), so I have some experience with this feature. \n",
+      "state": "closed",
+      "user": "k26dr",
+      "created_at": "2025-03-23T22:04:21Z",
+      "updated_at": "2025-03-23T22:40:18Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32126",
+      "labels": [
+        "Feature"
+      ],
+      "comment_list": [
+        {
+          "user": "sipa",
+          "body": "> I'd like to use pay-to-public key addresses to implement the feature so that the full script is on-chain.\n\nIf it's a pay-to-pubkey address, it's not an HTLC policy.\n\n>  Otherwise, we would run into the problem of how to store the script, which contains refund and redeem addresses + a hash that would need to be stored on disk somewhere.\n\nThis is inevitable for any realistic protocol. Even BIP199 and #7601 used P2SH, which prevented the script from being on-chain before spending.\n\n\n",
+          "created_at": "2025-03-23T22:10:55Z"
+        },
+        {
+          "user": "k26dr",
+          "body": "Pay-to-public key would just stick the script on-chain, no? @sipa ",
+          "created_at": "2025-03-23T22:18:16Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Well, yes, but it would be a pay-to-pubkey script, not an HTLC script?",
+          "created_at": "2025-03-23T22:18:49Z"
+        },
+        {
+          "user": "k26dr",
+          "body": "As I understand it, this is an HTLC script: \n\n```\n OP_IF\n     [HASHOP] <digest> OP_EQUALVERIFY OP_DUP OP_HASH160 <seller pubkey hash>            \n OP_ELSE\n     <num> [TIMEOUTOP] OP_DROP OP_DUP OP_HASH160 <buyer pubkey hash>\n OP_ENDIF\n OP_EQUALVERIFY\n OP_CHECKSIG\n```\n\nand if this was put on-chain as a pay-to-pubkey script it would still work without breaking consensus. \n\nIf this is true, I'm cool with that. @sipa ",
+          "created_at": "2025-03-23T22:21:06Z"
+        },
+        {
+          "user": "k26dr",
+          "body": "If P2WSH is the preferred implementation, I'm cool with that too. I'm just trying to understand why pay-to-pubkey script would be an issue. ",
+          "created_at": "2025-03-23T22:23:31Z"
+        },
+        {
+          "user": "k26dr",
+          "body": "The NPM implementation uses P2WSH, so I'm not unfamiliar with that methodology. I just ran into the issue that if you lose the witness script, you lose the ability to claim the HTLC.  ",
+          "created_at": "2025-03-23T22:26:17Z"
+        },
+        {
+          "user": "sipa",
+          "body": "\"Pay to pubkey\" (P2PK) means a `<pubkey> OP_CHECKSIG` script, nothing else. I think what you mean is what I'd call a \"bare HTLC script\", i.e., putting the script you give above directly in the `scriptPubKey`?\n\nTerminology aside, this is problematic for several reasons:\n* There exist no addresses for HTLC scripts (BIP199 or otherwise), you'd need to introduce a new address format for this to work or nobody can send to it. Previous experience shows that this is a multi-year process, at least (even the BIP350 address format introduced in 2020, for taproot which activated in 2021, is not universally [accepted](https://whentaproot.org/)). FWIW, there is no address for P2PK either.\n* An address for such scripts would need to be enormous (storing at least 3 hashes, plus a timeout value). My rough guess is ~166 characters for a base32-style address like BIP173/BIP350?\n* Using such scripts is non-standard. Even ignoring that senders cannot use them, transactions paying to them just won't relay across the network. This can be changed of course, but that again is a slow process.\n* It's expensive for senders. Since they need to put the full script in the crediting transaction, they need to pay for the on-chain bytes that consumes. For this reason, basically nothing non-trivial has used bare scripts (besides P2PK and P2PKH), moving to P2SH, P2WSH, or P2TR instead, which move this cost to the receiver - the one who cares about the properties of complex script in the first place - by revealing it at spending time. With P2TR, the script can even be broken up into multiple branches, so that only the used one needs to be revealed and paid for.\n\nIn real applications where HTLCs are used (like Lightning), I believe the problem with data storage is (partially) addressed by deriving the keys/preimages deterministically, though I'm not an expert on this.\n\nIn any case, for P2WSH or P2TR, there is no need for any of this. With the introduction of miniscript descriptors ([BIP 387](https://github.com/bitcoin/bips/blob/master/bip-0387.mediawiki)), Bitcoin Core should be able to sign for any of these scripts already.",
+          "created_at": "2025-03-23T22:35:46Z"
+        },
+        {
+          "user": "k26dr",
+          "body": "Ok fair enough. If a future BIP takes care of this, I'll close the issue. Thanks for the explanation. ",
+          "created_at": "2025-03-23T22:40:16Z"
+        }
+      ]
+    },
+    {
+      "number": 32125,
+      "title": "Failed transactions on importing mempool",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nHello! This is rather a question. I am wondering: are the 10 failed related to package relaying?\n\n29.0rc2\n\n```\n2025-03-23T05:24:22Z SetNetworkActive: false\n2025-03-23T05:24:27Z Loading 20483 mempool transactions from file...\n2025-03-23T05:24:27Z Progress loading mempool transactions from file: 10% (tried 2049, 18434 remaining)\n2025-03-23T05:24:27Z Progress loading mempool transactions from file: 20% (tried 4097, 16386 remaining)\n2025-03-23T05:24:27Z Progress loading mempool transactions from file: 30% (tried 6145, 14338 remaining)\n2025-03-23T05:24:27Z Progress loading mempool transactions from file: 40% (tried 8194, 12289 remaining)\n2025-03-23T05:24:28Z Progress loading mempool transactions from file: 50% (tried 10242, 10241 remaining)\n2025-03-23T05:24:28Z Progress loading mempool transactions from file: 60% (tried 12290, 8193 remaining)\n2025-03-23T05:24:28Z Progress loading mempool transactions from file: 70% (tried 14339, 6144 remaining)\n2025-03-23T05:24:28Z Progress loading mempool transactions from file: 80% (tried 16387, 4096 remaining)\n2025-03-23T05:24:28Z Progress loading mempool transactions from file: 90% (tried 18435, 2048 remaining)\n2025-03-23T05:24:28Z Imported mempool transactions from file: 0 succeeded, 10 failed, 0 expired, 20473 already there, 0 waiting for initial broadcast\n2025-03-23T05:24:28Z SetNetworkActive: true\n```\n\nTo get fresh mempool ready to import, see:\n\n - mymempool: [txt](https://anyone.eu.org/mymempool.txt), [dat](https://anyone.eu.org/mymempool.dat), [log](https://anyone.eu.org/mymempool-log.txt), [getmempoolinfo (JSON)](https://anyone.eu.org/gmi-main.json)\n\n### Expected behaviour\n\nThe nodes I test are running on my local network so I guess all the transactions are importable, but the 10 failed could be 5 packages of 2.\n\n### Steps to reproduce\n\nImport from file using RPC\n\n### Relevant log output\n\n_No response_\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nv29.0rc2\n\n### Operating system and version\n\nAlpine Linux 3.21.3\n\n### Machine specifications\n\nLinux x86_64",
+      "state": "closed",
+      "user": "jsarenik",
+      "created_at": "2025-03-23T05:47:13Z",
+      "updated_at": "2025-03-28T11:05:02Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32125",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "> The nodes I test are running on my local network so I guess all the transactions are importable, but the 10 failed could be 5 packages of 2.\n\nCan you add exact steps to reproduce, please?\n\nThe mempool acceptance depends on the chain state (the best block hash of your node at the time of the mempool import), as well as the mempool file contents.\n\nWithout any exact info, my guess would be that the 10 failures are due to transactions already confirmed (either themselves or a replacement of themselves).\n\nAlso, package acceptance is already a todo comment in the code, see \n\nhttps://github.com/bitcoin/bitcoin/blob/770d39a37652d40885533fecce37e9f71cc0d051/test/functional/mempool_ephemeral_dust.py#L129-L135\n\n",
+          "created_at": "2025-03-24T08:59:48Z"
+        },
+        {
+          "user": "jsarenik",
+          "body": "Thank you for feedback, @maflcko ! In the end of this post I include shell script. The node is started always with `persistmempool=0` and I have also `mempool.dat` file symlinked to `/dev/null` just to remind me on a filesystem level.\n\nYes, my chainstate always contains the last-recent block when starting import.\n\nNow I tried to artificially change priority of each of the transactions before importing them (see in the script at the end) and it worked:\n\n```\n2025-03-24T16:06:18Z Imported mempool transactions from file: 40560 succeeded, 0 failed, 0 expired, 0 already there, 0 waiting for initial broadcast\n```\n\nJust that I imagine it could be much faster than 9 minutes I got with this shell hack if there was an option to `importmempool` RPC that would make sure every single (unless spent already) gets into mempool.\n\nHere is the script I call `mymempoolhere.sh`:\n\n```sh\n#!/bin/sh\n\nBN=89999115000 # arbitrary big number usable here\nhp=anyone.eu.org\nbitcoin-cli echo hello | grep -q . || exit 1\nping -qc 1 -W5 -w5 $hp >/dev/null || { hp=192.168.3.118:12321; scheme=http; }\nurl=${scheme:-\"https\"}://$hp\nout=/dev/shm/mempool.copy\ntouch $out 2>/dev/null || out=$HOME/mempool.copy\nrm -f $out\nuptime=$(bitcoin-cli uptime) || exit 1\ntest $uptime -gt 613 || bitcoin-cli setnetworkactive false\nwget -O $out $url/mempool.copy\nwget -qO - $url/mymempool.txt \\\n  | xargs -I TXID -n 1 -P 200 bitcoin-cli prioritisetransaction TXID \"0.0\" $BN \\\n    >/dev/null 2>&1\nbitcoin-cli importmempool $out '{\n\"apply_fee_delta_priority\":true,\n\"apply_unbroadcast_set\":true}'\nrm -f $out\nbitcoin-cli setnetworkactive true\ndate -u\n\n# optiontal clean-up would mess up logs so maybe exit before here\nbitcoin-cli getprioritisedtransactions \\\n  | grep -e '^  \"' -e '\"fee_delta\":' \\\n  | tr -d '  {,' | paste -d\" \" - - \\\n  | sed 's/\"fee_delta\":/\"0.0\" +/' \\\n  | sed 's/+-//' | tr '+' '-' | tr -d : \\\n  | xargs -n 3 -P 200 bitcoin-cli prioritisetransaction \\\n    >/dev/null 2>&1\n```\n\nUPDATE: it takes ~2 minutes on an already-loaded mempool so for me it is already OK",
+          "created_at": "2025-03-24T16:22:59Z"
+        },
+        {
+          "user": "jsarenik",
+          "body": "Another example of what I was thinking of in the beginning and what is already possible using the script that prioritizes transactions before importing them:\n\n```\nnewlines added\n2025-03-24T20:31:45Z\n  Imported mempool transactions from file:\n    1267 succeeded, 0 failed, 0 expired, 29536 already there,\n    0 waiting for initial broadcast\n```\n\nOne thing I can think of right now would be an RPC which clears all prioritization. No idea how to do it in Bitcoin Core yet, but the idea is here. Such RPC would shrink the clean-up part of my script to one line.",
+          "created_at": "2025-03-24T20:37:55Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "You can modify the source code in `src/node/mempool_persist.cpp` to print the transaction ids (and error reasons) of the failed imports. Then call `getmempoolentry` to get the mempool topology and fees after your successful import to debug this further.",
+          "created_at": "2025-03-25T08:37:29Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "Going to close this as I don't think there's anything left to do here. Let me know if I've misunderstood if you want it re-opened.",
+          "created_at": "2025-03-28T11:05:01Z"
+        }
+      ]
+    },
+    {
+      "number": 32124,
+      "title": "bitcoind crash with corrupt wallet.dat",
+      "body": "```\n2025-03-20T00:52:09Z Using SQLite Version 3.38.5\n2025-03-20T00:52:09Z Using wallet w1\n2025-03-20T00:52:09Z init message: Loading wallet…\n2025-03-20T00:52:09Z SQLite Error. Code: 1. Message: no such column: minversion in \"INSERT INTO main VALUES(?, ?)\"\n2025-03-20T00:52:09Z [w1] Releasing wallet w1..\nterminate called after throwing an instance of 'std::runtime_error'\n  what():  SQLiteDatabase: Failed to close database: database is locked\n```\n\nI had observed `bitcoind` crash a few days back while testing it with a corrupt database. I was testing this because sqlite version was recently updated in core.\n\nNot sure if it is relevant to https://github.com/bitcoin/bitcoin/issues/32111. I can't comment in that issue because @dergoegge has blocked me on GitHub.\n\nFeel free to ignore and close the issue if it's unrelated.",
+      "state": "open",
+      "user": "1440000bytes",
+      "created_at": "2025-03-23T04:47:24Z",
+      "updated_at": "2026-01-08T12:45:40Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32124",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "> Not sure if it is relevant to [#32111](https://github.com/bitcoin/bitcoin/issues/32111).\n\n32111 is about migrating (corrupt) bdb wallets (likely obtained from fuzzing), with exact steps to reproduce and the crash being due to `Assertion m_wallet_flags == 0 failed`. Whereas this issue is about loading (?) a corrupt (?) sqlite wallet, without steps to reproduce. Also, it is unclear how the two sqlite errors interact and if the second one is due to another dangling process on the system, or not.\n\nSo my recommendation would be to add exact steps to reproduce, similar to #32111.",
+          "created_at": "2025-03-24T08:47:10Z"
+        },
+        {
+          "user": "1440000bytes",
+          "body": "Steps to reproduce:\n\n1. Run bitcoind with `bitcoind -regtest`\n2. Create a new wallet which loads on startup with ` bitcoin-cli -regtest -named createwallet wallet_name=w1 load_on_startup=true`\n3. Download sqlite binary: https://www.sqlite.org/download.html\n4. Exit bitcoind\n5. Use arbitrary SQL statements for wallet db with sqlite binary. Use the below SQL statements for the error mentioned in OP.\n    \n    ```\n   $ sqlite3 \"wallet.dat file path\"\n   SQLite version 3.49.1 2025-02-18 13:38:58\n   Enter \".help\" for usage hints.\n   sqlite> CREATE TRIGGER test_trigger BEFORE INSERT ON main\n      ...> BEGIN\n      ...>     UPDATE main SET minversion = 'test' WHERE minversion = minversion;\n      ...> END;\n   sqlite> .exit\n   ```\n6. Restart bitcoind and see the error in logs\n\nNote: I have used v28.0 bitcoin core in this experiment.",
+          "created_at": "2025-03-24T15:16:29Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "This specific crash occurs after an unhandled [exception is thrown](https://github.com/bitcoin/bitcoin/blob/1d281daf8613a3cb7a26759c351ffb34dab0f656/src/wallet/sqlite.cpp#L162-L165) in `SQLiteBatch::SetupSQLStatements()`, when creating a `WalletBatch()` [during](https://github.com/bitcoin/bitcoin/blob/1d281daf8613a3cb7a26759c351ffb34dab0f656/src/wallet/wallet.cpp#L2389) `LoadWallet()`.\n\nIIUC, none of `SQLiteBatch()`'s users, handle errors thrown during batch creation, which seems like an issue to me.",
+          "created_at": "2025-03-25T07:50:53Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 0,
+    "issues": 3
+  }
+}

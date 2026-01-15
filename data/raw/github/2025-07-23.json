@@ -1,0 +1,335 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:00:32.219431+00:00",
+  "date": "2025-07-23",
+  "pull_requests": [
+    {
+      "number": 33048,
+      "title": "test: reduce runtime of p2p_opportunistic_1p1c.py",
+      "body": "It was brought to my attention that the runtime of this test is Too Damn High. The test is slow due to the many `wait_for_getdata`s with delays (inbound peer + txid request) and the large volume of messages sent in the dos-related tests. This PR cuts the runtime by about 60% by reducing the number of messages/transactions and using `setmocktime` instead of waiting.\r\n\r\nOn my machine, master:\r\n```\r\n84.51s user 1.55s system 57% cpu 2:28.53 total\r\n```\r\nAfter first commit (about 1min faster):\r\n```\r\n28.29s user 0.88s system 35% cpu 1:22.84 total\r\n```\r\nAfter second commit (about 30sec faster):\r\n```\r\n28.17s user 0.87s system 59% cpu 49.082 total\r\n```\r\n\r\nReviewers should verify that the transactions in the DoS tests are still enough to cause evictions, and that the `bumpmocktime` amounts are not more than necessary.\r\n\r\nAlternatives:\r\n- If we don't like mocking the times, we can use outbound connections for all the peers. However, that approach won't improve the runtime as much because we impose a 2-second delay on all txid requests regardless of peer type.\r\n- Note that `noban_tx_relay` is not relevant for this test because all delays are related to downloading, not announcing.",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2025-07-23T19:23:58Z",
+      "updated_at": "2025-09-26T16:17:36Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33048",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33048.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/33048#issuecomment-3110151117), [w0xlt](https://github.com/bitcoin/bitcoin/pull/33048#pullrequestreview-3053254178) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-23T19:24:02Z"
+        },
+        {
+          "user": "glozow",
+          "body": "cc @achow101 ",
+          "created_at": "2025-07-23T19:25:27Z"
+        },
+        {
+          "user": "achow101",
+          "body": "The runtime is now much better, thanks!\r\n\r\nACK eb65f57f319dc4e2ea8c83cf7e283c36f1c0d53b\r\n\r\nI checked that the changes looked sane, but did not exhaustively walkthrough the scenarios to determine whether evictions were occurring.",
+          "created_at": "2025-07-23T20:57:00Z"
+        }
+      ]
+    },
+    {
+      "number": 33047,
+      "title": "test: check proper OP_2ROT behavior",
+      "body": "According to corecheck, the following mutant is not caught by any test (https://corecheck.dev/mutation/src/script/interpreter.cpp).\r\n\r\n```diff\r\ndiff --git a/src/script/interpreter.cpp b/src/script/interpreter.cpp\r\nindex 61ea7f4503..4f6fa34836 100644\r\n--- a/src/script/interpreter.cpp\r\n+++ b/src/script/interpreter.cpp\r\n@@ -746,7 +746,6 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript&\r\n                         return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);\r\n                     valtype vch1 = stacktop(-6);\r\n                     valtype vch2 = stacktop(-5);\r\n-                    stack.erase(stack.end()-6, stack.end()-4);\r\n                     stack.push_back(vch1);\r\n                     stack.push_back(vch2);\r\n                 }\r\n```\r\n\r\nIt means we're not testing the behavior of the OP_2ROT opcode properly. The normal behavior is: `[1, 2, 3, 4, 5, 6] → OP_2ROT → [3, 4, 5, 6, 1, 2]` (6 elements). However, by deleting the `erase`, it becomes: `[1, 2, 3, 4, 5, 6] → OP_2ROT → [1, 2, 3, 4, 5, 6, 1, 2] (8 elements)` which is obviously wrong. In `script_tests.json`, we have some test cases that includes the OP_2ROT which correctly tests the move part of 2ROT but not the erase one. See:\r\n\r\n```\r\n[\"25 24 23 22 21 20\", \"2ROT 24 EQUAL\", \"P2SH,STRICTENC\", \"OK\"],\r\n[\"25 24 23 22 21 20\", \"2ROT DROP 25 EQUAL\", \"P2SH,STRICTENC\", \"OK\"],\r\n[\"25 24 23 22 21 20\", \"2ROT 2DROP 20 EQUAL\", \"P2SH,STRICTENC\", \"OK\"],\r\n[\"25 24 23 22 21 20\", \"2ROT 2DROP DROP 21 EQUAL\", \"P2SH,STRICTENC\", \"OK\"],\r\n[\"25 24 23 22 21 20\", \"2ROT 2DROP 2DROP 22 EQUAL\", \"P2SH,STRICTENC\", \"OK\"],\r\n[\"25 24 23 22 21 20\", \"2ROT 2DROP 2DROP DROP 23 EQUAL\", \"P2SH,STRICTENC\", \"OK\"],\r\n[\"25 24 23 22 21 20\", \"2ROT 2ROT 22 EQUAL\", \"P2SH,STRICTENC\", \"OK\"],\r\n[\"25 24 23 22 21 20\", \"2ROT 2ROT 2ROT 20 EQUAL\", \"P2SH,STRICTENC\", \"OK\"],\r\n```\r\n\r\nThat said, this PR adds one more test case to the case mentioned.",
+      "state": "closed",
+      "user": "brunoerg",
+      "created_at": "2025-07-23T16:55:46Z",
+      "updated_at": "2025-07-24T11:24:24Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33047",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33047.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/33047#pullrequestreview-3048598782), [w0xlt](https://github.com/bitcoin/bitcoin/pull/33047#pullrequestreview-3049651677), [maflcko](https://github.com/bitcoin/bitcoin/pull/33047#issuecomment-3112272988) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-23T16:55:51Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK b94c6356a29b03def6337c91caabb3b8642187e8",
+          "created_at": "2025-07-24T06:55:50Z"
+        }
+      ]
+    },
+    {
+      "number": 33046,
+      "title": "[29.x] test: Do not pass tests on unhandled exceptions",
+      "body": "Backports #33001 to `29.x`.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-07-23T16:03:10Z",
+      "updated_at": "2025-07-24T11:16:04Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33046",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33046.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/33046#pullrequestreview-3048147546), [marcofleon](https://github.com/bitcoin/bitcoin/pull/33046#pullrequestreview-3051143596) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-23T16:03:16Z"
+        }
+      ]
+    },
+    {
+      "number": 33045,
+      "title": "depends: disable variables, rules and suffixes.",
+      "body": "This picks up #22126. Previously, this was more complicated to do, as depends packages (upnp, natpmp) used the rules being disabled. Those packages have since been removed.\r\n\r\nWhen there is no rule to build a target in the makefile, make looks for a builtin rule. When `-r` is specified make no longer performs this lookup.\r\n\r\nE.g. the following in an excerpt from `make -d` output. Here, make looks for a rule to build `all`.\r\n```bash\r\nConsidering target file 'all'.\r\n File 'all' does not exist.\r\n Looking for an implicit rule for 'all'.\r\n Trying pattern rule with stem 'all'.\r\n Trying implicit prerequisite 'all.o'.\r\n Trying pattern rule with stem 'all'.\r\n Trying implicit prerequisite 'all.c'.\r\n Trying pattern rule with stem 'all'.\r\n Trying implicit prerequisite 'all.cc'.\r\n Trying pattern rule with stem 'all'.\r\n Trying implicit prerequisite 'all.C'.\r\n Trying pattern rule with stem 'all'.\r\n Trying implicit prerequisite 'all.cpp'.\r\n Trying pattern rule with stem 'all'.\r\n Trying implicit prerequisite 'all.p'.\r\n Trying pattern rule with stem 'all'.\r\n Trying implicit prerequisite 'all.f'.\r\n...\r\n```\r\nMany more lines like this are omitted.\r\n\r\nBecause this build system does not use make builtin rules or suffixes, there is no benefit in having builtin rules enabled.\r\n\r\nThere are 2 benefits in having builtin rules disabled.\r\n\r\n1. Improves performance by eliminating redundant lookups.\r\n2. Simplifies troubleshooting by reducing the output of make `-d` or make `-p`.\r\n\r\nAlso see: https://www.gnu.org/software/make/manual/make.html#index-_002d_002dno_002dbuiltin_002drules.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-07-23T15:24:48Z",
+      "updated_at": "2025-11-04T16:08:58Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33045",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33045.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/33045#pullrequestreview-3411598078) |\n| Concept ACK | [theuni](https://github.com/bitcoin/bitcoin/pull/33045#issuecomment-3254157282) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-23T15:24:53Z"
+        },
+        {
+          "user": "theuni",
+          "body": "Concept ACK and utACK 803a2f5e9f869502536560f5bbe5979a137a20e5.\r\n\r\nI was going to suggest:\r\n- Using `--no-builtin-rules` rather than `-r` to be a little more self-documenting\r\n- Using `GNUMAKEFLAGS` rather than `MAKEFLAGS` for better compatibility\r\n\r\nBut...\r\n\r\nBSD Make supports `-r`, so that pretty much moots both points. Also, I'm pretty sure we require GNU Make anyway.\r\n\r\nOnly nit: Does anything depend on the builtin variables, or could we use `-R` as well?",
+          "created_at": "2025-09-04T15:05:38Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> or could we use -R as well?\r\n\r\nPushed up a commit.",
+          "created_at": "2025-09-05T13:32:37Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--9cd9c72976c961c55c7acef8f6ba82cd-->\n### Guix builds (on x86_64) [untrusted test-only build, possibly unsafe, not for production use]\n\n| File | commit e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b<br>(master) | commit 60623acf9db2a4a2f4b5d628a76b03fec22a755c<br>(pull/33045/merge) |\n|--|--|--|\n| *-aarch64-linux-gnu-debug.tar.gz | [`cd50bfed7e9bc0f8...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-aarch64-linux-gnu-debug.tar.gz) | [`87104f63233496ca...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-aarch64-linux-gnu-debug.tar.gz) |\n| *-aarch64-linux-gnu.tar.gz | [`36a02623053223bc...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-aarch64-linux-gnu.tar.gz) | [`4dea2f22e2960ba8...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-aarch64-linux-gnu.tar.gz) |\n| *-arm-linux-gnueabihf-debug.tar.gz | [`458c2f80c194deb2...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-arm-linux-gnueabihf-debug.tar.gz) | [`2547fc07072da046...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-arm-linux-gnueabihf-debug.tar.gz) |\n| *-arm-linux-gnueabihf.tar.gz | [`b64957c7554150f0...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-arm-linux-gnueabihf.tar.gz) | [`99bb29541b6a6292...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-arm-linux-gnueabihf.tar.gz) |\n| *-arm64-apple-darwin-codesigning.tar.gz | [`60882ae5d893d3a5...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-arm64-apple-darwin-codesigning.tar.gz) | [`51a056eb204b46f0...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-arm64-apple-darwin-codesigning.tar.gz) |\n| *-arm64-apple-darwin-unsigned.tar.gz | [`cb0c6481e288a0ac...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-arm64-apple-darwin-unsigned.tar.gz) | [`2a157c9be42c3c22...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-arm64-apple-darwin-unsigned.tar.gz) |\n| *-arm64-apple-darwin-unsigned.zip | [`1368db96c33512d3...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-arm64-apple-darwin-unsigned.zip) | [`4c4fa278aa1f1b1e...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-arm64-apple-darwin-unsigned.zip) |\n| *-powerpc64-linux-gnu-debug.tar.gz | [`364b4bcb42c3fd42...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-powerpc64-linux-gnu-debug.tar.gz) | [`f5208f711bd2d3d7...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-powerpc64-linux-gnu-debug.tar.gz) |\n| *-powerpc64-linux-gnu.tar.gz | [`c8f45ac13000d807...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-powerpc64-linux-gnu.tar.gz) | [`7077086ce168746a...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-powerpc64-linux-gnu.tar.gz) |\n| *-riscv64-linux-gnu-debug.tar.gz | [`919495916d8c36d9...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-riscv64-linux-gnu-debug.tar.gz) | [`d39dbafc71c5f423...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-riscv64-linux-gnu-debug.tar.gz) |\n| *-riscv64-linux-gnu.tar.gz | [`feb064a4d3f3e9f3...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-riscv64-linux-gnu.tar.gz) | [`83148f565a8d9ad1...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-riscv64-linux-gnu.tar.gz) |\n| *-x86_64-apple-darwin-codesigning.tar.gz | [`08bb05b29e5b466a...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-x86_64-apple-darwin-codesigning.tar.gz) | [`3c0fba3b0f6d22d5...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-x86_64-apple-darwin-codesigning.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.tar.gz | [`968b1f2e17f0eb67...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-x86_64-apple-darwin-unsigned.tar.gz) | [`07162534362b09fd...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-x86_64-apple-darwin-unsigned.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.zip | [`351e8c1f1df53a31...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-x86_64-apple-darwin-unsigned.zip) | [`3acffe679480c073...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-x86_64-apple-darwin-unsigned.zip) |\n| *-x86_64-linux-gnu-debug.tar.gz | [`d1bfb9b513bb03d6...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-x86_64-linux-gnu-debug.tar.gz) | [`61d5dc3bbbbc511c...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-x86_64-linux-gnu-debug.tar.gz) |\n| *-x86_64-linux-gnu.tar.gz | [`504457dd348fe70d...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2-x86_64-linux-gnu.tar.gz) | [`ce70220960f8da3c...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2-x86_64-linux-gnu.tar.gz) |\n| *.tar.gz | [`6944fc8c6b7504b6...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/bitcoin-e04cb9c1bdf2.tar.gz) | [`73e9ba02c5d91050...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/bitcoin-60623acf9db2.tar.gz) |\n| SHA256SUMS.part | [`077beb6922793d39...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/SHA256SUMS.part) | [`8ead66dfe9edef6c...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/SHA256SUMS.part) |\n| guix_build.log | [`bea83b2d9bf46459...`](https://drahtbot.space/guix/monotree/e04cb9c1bdf2199127cc8cf9c87f25e46b8cac7b/guix_build.log) | [`29725b817fc58608...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/guix_build.log) |\n| guix_build.log.diff |  | [`1d72d106a748a136...`](https://drahtbot.space/guix/monotree/60623acf9db2a4a2f4b5d628a76b03fec22a755c/guix_build.log.diff) |\n\n",
+          "created_at": "2025-09-06T14:22:36Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Pushed up the long form for both options.",
+          "created_at": "2025-11-03T15:29:37Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Guix Build (aarch64):\r\n```bash\r\ne0edc03339b5b32705b8eacbc213a6fd6e5b787caba574671bb3c18340a141ec  guix-build-52b1595850f6/output/aarch64-linux-gnu/SHA256SUMS.part\r\n55778a17e64cabdb200679240fa004b5c5c9a684ecae773e8497997ab7c968d6  guix-build-52b1595850f6/output/aarch64-linux-gnu/bitcoin-52b1595850f6-aarch64-linux-gnu-debug.tar.gz\r\n6a2f49dbc8238438d40d46c3ce699814ae1d9eb6d74dd0b4ff273db6648b181c  guix-build-52b1595850f6/output/aarch64-linux-gnu/bitcoin-52b1595850f6-aarch64-linux-gnu.tar.gz\r\n2fce927435eef577f920c6cc9dc0847ee2cf63de84980840eb29031d08523cc8  guix-build-52b1595850f6/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n552ddc9bbf5e7433059bbd12c9cb895bbc49574ab67bfdc1adbf3ca79f287eda  guix-build-52b1595850f6/output/arm-linux-gnueabihf/bitcoin-52b1595850f6-arm-linux-gnueabihf-debug.tar.gz\r\n1c506a3d6faaa75fdc003bd08c2ac60a274cc41db0e681ebeb1a12fe19099ca9  guix-build-52b1595850f6/output/arm-linux-gnueabihf/bitcoin-52b1595850f6-arm-linux-gnueabihf.tar.gz\r\n9bcbe18004baa36d52ee2aabb074119b6812d10b36b18360067e0bda124d028c  guix-build-52b1595850f6/output/arm64-apple-darwin/SHA256SUMS.part\r\n9fa95d3d60523f17b68bf92153e4adad7327091c385d197f40f0491436d800f0  guix-build-52b1595850f6/output/arm64-apple-darwin/bitcoin-52b1595850f6-arm64-apple-darwin-codesigning.tar.gz\r\n2e44bec0f15b670373af7c4b1016b86bbfe4f683ece6b627b08a20c585cd4b1b  guix-build-52b1595850f6/output/arm64-apple-darwin/bitcoin-52b1595850f6-arm64-apple-darwin-unsigned.tar.gz\r\n2589be66b72d3396318f2b79d6e64f4adc4429cbb2cbe3744a7f2c54a2bb8f3d  guix-build-52b1595850f6/output/arm64-apple-darwin/bitcoin-52b1595850f6-arm64-apple-darwin-unsigned.zip\r\naea34b9209209a6b8f25d30ef491f7f24ee038303c9818483b2c9f04e8a7c0f5  guix-build-52b1595850f6/output/dist-archive/bitcoin-52b1595850f6.tar.gz\r\nb9b357784bd101f7e4349b5abe7217cab54e6fbefaba56032c815ab991cba020  guix-build-52b1595850f6/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n139bdb0119211008ce89e7eac8ed63968eeeb7712517fce42442893648c1968a  guix-build-52b1595850f6/output/powerpc64-linux-gnu/bitcoin-52b1595850f6-powerpc64-linux-gnu-debug.tar.gz\r\n8635255c571b6748d73bcef26826905d7c7ea1956ce2707cffab9e0b75a12727  guix-build-52b1595850f6/output/powerpc64-linux-gnu/bitcoin-52b1595850f6-powerpc64-linux-gnu.tar.gz\r\nabb93c2dde3d85cb378b91c81ee744b6a523554c34fd028fa1f8c79d5256ddd5  guix-build-52b1595850f6/output/riscv64-linux-gnu/SHA256SUMS.part\r\n2619483e9d48d51e992a51e06aac0177ce6987c6f4ac43db9632ab7e3c9a4641  guix-build-52b1595850f6/output/riscv64-linux-gnu/bitcoin-52b1595850f6-riscv64-linux-gnu-debug.tar.gz\r\n9d31038a7aa8c1a05bc1adb599301c1046e9d6ac16420ec0d8cda3a4b5c5f06a  guix-build-52b1595850f6/output/riscv64-linux-gnu/bitcoin-52b1595850f6-riscv64-linux-gnu.tar.gz\r\nb3a6da067c134871bfa07e39bd90ece5dc773eee84e455718c24c93268609677  guix-build-52b1595850f6/output/x86_64-apple-darwin/SHA256SUMS.part\r\n918142ac37654b9d85120b8c7837aef970a4502a966d9ce0c308382a75a846fc  guix-build-52b1595850f6/output/x86_64-apple-darwin/bitcoin-52b1595850f6-x86_64-apple-darwin-codesigning.tar.gz\r\n79c0bd17ddc44bea82e2a86c1623768798dea25057c3bf411747eb3217cc90f2  guix-build-52b1595850f6/output/x86_64-apple-darwin/bitcoin-52b1595850f6-x86_64-apple-darwin-unsigned.tar.gz\r\nbed390b458644eeec1992fde18a13bcaf4665b7f491e7aea60962f6216cfe333  guix-build-52b1595850f6/output/x86_64-apple-darwin/bitcoin-52b1595850f6-x86_64-apple-darwin-unsigned.zip\r\na96e7b014827dc99e971274b59b4de64d3eefff58b2083212d598d89fceac2ac  guix-build-52b1595850f6/output/x86_64-linux-gnu/SHA256SUMS.part\r\n453a6625ad577db72b2f197f3ba5289cfb6c2ca49b268e52abc6d0fe7b8705c8  guix-build-52b1595850f6/output/x86_64-linux-gnu/bitcoin-52b1595850f6-x86_64-linux-gnu-debug.tar.gz\r\nb742671d6a84bc9a1bc8758f284fe807d4039c387c30a4061eb0bda264f28c70  guix-build-52b1595850f6/output/x86_64-linux-gnu/bitcoin-52b1595850f6-x86_64-linux-gnu.tar.gz\r\ne37846567cf7ec60148158bfc310618da8087960dd5d3de85fa0a3360e0884df  guix-build-52b1595850f6/output/x86_64-w64-mingw32/SHA256SUMS.part\r\nf67f39c5bfdfa27a8f3027de654659107d8ec631c3c548e9c42bcaae1c1687f6  guix-build-52b1595850f6/output/x86_64-w64-mingw32/bitcoin-52b1595850f6-win64-codesigning.tar.gz\r\n411d2415d71c102bbc607442a28860158802febc2a29150d9239db29535c293b  guix-build-52b1595850f6/output/x86_64-w64-mingw32/bitcoin-52b1595850f6-win64-debug.zip\r\n520b52efeee2495488ace909fa1982b58550d2feb094cdef86397f6adced9513  guix-build-52b1595850f6/output/x86_64-w64-mingw32/bitcoin-52b1595850f6-win64-setup-unsigned.exe\r\n5356c85ba0ce2e210408943b056e8b4ac78a4328543e068875fc71b43ae489d0  guix-build-52b1595850f6/output/x86_64-w64-mingw32/bitcoin-52b1595850f6-win64-unsigned.zip\r\n```",
+          "created_at": "2025-11-03T17:27:34Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Guix build (x86_64):\r\n```bash\r\ne0edc03339b5b32705b8eacbc213a6fd6e5b787caba574671bb3c18340a141ec  guix-build-52b1595850f6/output/aarch64-linux-gnu/SHA256SUMS.part\r\n55778a17e64cabdb200679240fa004b5c5c9a684ecae773e8497997ab7c968d6  guix-build-52b1595850f6/output/aarch64-linux-gnu/bitcoin-52b1595850f6-aarch64-linux-gnu-debug.tar.gz\r\n6a2f49dbc8238438d40d46c3ce699814ae1d9eb6d74dd0b4ff273db6648b181c  guix-build-52b1595850f6/output/aarch64-linux-gnu/bitcoin-52b1595850f6-aarch64-linux-gnu.tar.gz\r\n2fce927435eef577f920c6cc9dc0847ee2cf63de84980840eb29031d08523cc8  guix-build-52b1595850f6/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n552ddc9bbf5e7433059bbd12c9cb895bbc49574ab67bfdc1adbf3ca79f287eda  guix-build-52b1595850f6/output/arm-linux-gnueabihf/bitcoin-52b1595850f6-arm-linux-gnueabihf-debug.tar.gz\r\n1c506a3d6faaa75fdc003bd08c2ac60a274cc41db0e681ebeb1a12fe19099ca9  guix-build-52b1595850f6/output/arm-linux-gnueabihf/bitcoin-52b1595850f6-arm-linux-gnueabihf.tar.gz\r\n9bcbe18004baa36d52ee2aabb074119b6812d10b36b18360067e0bda124d028c  guix-build-52b1595850f6/output/arm64-apple-darwin/SHA256SUMS.part\r\n9fa95d3d60523f17b68bf92153e4adad7327091c385d197f40f0491436d800f0  guix-build-52b1595850f6/output/arm64-apple-darwin/bitcoin-52b1595850f6-arm64-apple-darwin-codesigning.tar.gz\r\n2e44bec0f15b670373af7c4b1016b86bbfe4f683ece6b627b08a20c585cd4b1b  guix-build-52b1595850f6/output/arm64-apple-darwin/bitcoin-52b1595850f6-arm64-apple-darwin-unsigned.tar.gz\r\n2589be66b72d3396318f2b79d6e64f4adc4429cbb2cbe3744a7f2c54a2bb8f3d  guix-build-52b1595850f6/output/arm64-apple-darwin/bitcoin-52b1595850f6-arm64-apple-darwin-unsigned.zip\r\naea34b9209209a6b8f25d30ef491f7f24ee038303c9818483b2c9f04e8a7c0f5  guix-build-52b1595850f6/output/dist-archive/bitcoin-52b1595850f6.tar.gz\r\nb9b357784bd101f7e4349b5abe7217cab54e6fbefaba56032c815ab991cba020  guix-build-52b1595850f6/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n139bdb0119211008ce89e7eac8ed63968eeeb7712517fce42442893648c1968a  guix-build-52b1595850f6/output/powerpc64-linux-gnu/bitcoin-52b1595850f6-powerpc64-linux-gnu-debug.tar.gz\r\n8635255c571b6748d73bcef26826905d7c7ea1956ce2707cffab9e0b75a12727  guix-build-52b1595850f6/output/powerpc64-linux-gnu/bitcoin-52b1595850f6-powerpc64-linux-gnu.tar.gz\r\nabb93c2dde3d85cb378b91c81ee744b6a523554c34fd028fa1f8c79d5256ddd5  guix-build-52b1595850f6/output/riscv64-linux-gnu/SHA256SUMS.part\r\n2619483e9d48d51e992a51e06aac0177ce6987c6f4ac43db9632ab7e3c9a4641  guix-build-52b1595850f6/output/riscv64-linux-gnu/bitcoin-52b1595850f6-riscv64-linux-gnu-debug.tar.gz\r\n9d31038a7aa8c1a05bc1adb599301c1046e9d6ac16420ec0d8cda3a4b5c5f06a  guix-build-52b1595850f6/output/riscv64-linux-gnu/bitcoin-52b1595850f6-riscv64-linux-gnu.tar.gz\r\nb3a6da067c134871bfa07e39bd90ece5dc773eee84e455718c24c93268609677  guix-build-52b1595850f6/output/x86_64-apple-darwin/SHA256SUMS.part\r\n918142ac37654b9d85120b8c7837aef970a4502a966d9ce0c308382a75a846fc  guix-build-52b1595850f6/output/x86_64-apple-darwin/bitcoin-52b1595850f6-x86_64-apple-darwin-codesigning.tar.gz\r\n79c0bd17ddc44bea82e2a86c1623768798dea25057c3bf411747eb3217cc90f2  guix-build-52b1595850f6/output/x86_64-apple-darwin/bitcoin-52b1595850f6-x86_64-apple-darwin-unsigned.tar.gz\r\nbed390b458644eeec1992fde18a13bcaf4665b7f491e7aea60962f6216cfe333  guix-build-52b1595850f6/output/x86_64-apple-darwin/bitcoin-52b1595850f6-x86_64-apple-darwin-unsigned.zip\r\na96e7b014827dc99e971274b59b4de64d3eefff58b2083212d598d89fceac2ac  guix-build-52b1595850f6/output/x86_64-linux-gnu/SHA256SUMS.part\r\n453a6625ad577db72b2f197f3ba5289cfb6c2ca49b268e52abc6d0fe7b8705c8  guix-build-52b1595850f6/output/x86_64-linux-gnu/bitcoin-52b1595850f6-x86_64-linux-gnu-debug.tar.gz\r\nb742671d6a84bc9a1bc8758f284fe807d4039c387c30a4061eb0bda264f28c70  guix-build-52b1595850f6/output/x86_64-linux-gnu/bitcoin-52b1595850f6-x86_64-linux-gnu.tar.gz\r\ne37846567cf7ec60148158bfc310618da8087960dd5d3de85fa0a3360e0884df  guix-build-52b1595850f6/output/x86_64-w64-mingw32/SHA256SUMS.part\r\nf67f39c5bfdfa27a8f3027de654659107d8ec631c3c548e9c42bcaae1c1687f6  guix-build-52b1595850f6/output/x86_64-w64-mingw32/bitcoin-52b1595850f6-win64-codesigning.tar.gz\r\n411d2415d71c102bbc607442a28860158802febc2a29150d9239db29535c293b  guix-build-52b1595850f6/output/x86_64-w64-mingw32/bitcoin-52b1595850f6-win64-debug.zip\r\n520b52efeee2495488ace909fa1982b58550d2feb094cdef86397f6adced9513  guix-build-52b1595850f6/output/x86_64-w64-mingw32/bitcoin-52b1595850f6-win64-setup-unsigned.exe\r\n5356c85ba0ce2e210408943b056e8b4ac78a4328543e068875fc71b43ae489d0  guix-build-52b1595850f6/output/x86_64-w64-mingw32/bitcoin-52b1595850f6-win64-unsigned.zip\r\n```",
+          "created_at": "2025-11-04T14:59:57Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--9cd9c72976c961c55c7acef8f6ba82cd-->\n### Guix builds (on x86_64) [untrusted test-only build, possibly unsafe, not for production use]\n\n| File | commit 745eb053a41c487cc10f20644c65dc8455cf8974<br>(master) | commit 7e5ee940ab535d66ff385de4b0bac3fe9160f3c9<br>(pull/33045/merge) |\n|--|--|--|\n| *-aarch64-linux-gnu-debug.tar.gz | [`aedca4eac76b4a89...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-aarch64-linux-gnu-debug.tar.gz) | [`37f1cbe778cd46bc...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-aarch64-linux-gnu-debug.tar.gz) |\n| *-aarch64-linux-gnu.tar.gz | [`02d3d709804506fb...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-aarch64-linux-gnu.tar.gz) | [`b66c44d04df25280...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-aarch64-linux-gnu.tar.gz) |\n| *-arm-linux-gnueabihf-debug.tar.gz | [`01536f2f5eb0b47a...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-arm-linux-gnueabihf-debug.tar.gz) | [`8771f1506a8b5fb3...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-arm-linux-gnueabihf-debug.tar.gz) |\n| *-arm-linux-gnueabihf.tar.gz | [`2576ab76300717db...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-arm-linux-gnueabihf.tar.gz) | [`cbef9dde988ba46f...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-arm-linux-gnueabihf.tar.gz) |\n| *-arm64-apple-darwin-codesigning.tar.gz | [`f56eed11c4482cc2...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-arm64-apple-darwin-codesigning.tar.gz) | [`2e88ea21139053cd...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-arm64-apple-darwin-codesigning.tar.gz) |\n| *-arm64-apple-darwin-unsigned.tar.gz | [`238afc482da7d0a7...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-arm64-apple-darwin-unsigned.tar.gz) | [`badc334574e0d07d...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-arm64-apple-darwin-unsigned.tar.gz) |\n| *-arm64-apple-darwin-unsigned.zip | [`fb6ba325ecce7f75...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-arm64-apple-darwin-unsigned.zip) | [`2e0055642bd99cdd...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-arm64-apple-darwin-unsigned.zip) |\n| *-powerpc64-linux-gnu-debug.tar.gz | [`83aa00a43219bd3a...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-powerpc64-linux-gnu-debug.tar.gz) | [`c50c01198da72013...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-powerpc64-linux-gnu-debug.tar.gz) |\n| *-powerpc64-linux-gnu.tar.gz | [`081b1f66d600a322...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-powerpc64-linux-gnu.tar.gz) | [`9a914348391cce81...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-powerpc64-linux-gnu.tar.gz) |\n| *-riscv64-linux-gnu-debug.tar.gz | [`a0de8cd87fd9abd8...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-riscv64-linux-gnu-debug.tar.gz) | [`703ccd3c6afcc7a5...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-riscv64-linux-gnu-debug.tar.gz) |\n| *-riscv64-linux-gnu.tar.gz | [`974568bc1a457e33...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-riscv64-linux-gnu.tar.gz) | [`40927e90296740f8...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-riscv64-linux-gnu.tar.gz) |\n| *-x86_64-apple-darwin-codesigning.tar.gz | [`a9eff753aee4a7e1...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-x86_64-apple-darwin-codesigning.tar.gz) | [`ee2ce90bbf0a396f...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-x86_64-apple-darwin-codesigning.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.tar.gz | [`e894a03f2c95a145...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-x86_64-apple-darwin-unsigned.tar.gz) | [`fe74eecd2336b099...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-x86_64-apple-darwin-unsigned.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.zip | [`34b301dbedab2bc5...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-x86_64-apple-darwin-unsigned.zip) | [`13c86df337fa2386...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-x86_64-apple-darwin-unsigned.zip) |\n| *-x86_64-linux-gnu-debug.tar.gz | [`af211993d8cd7d92...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-x86_64-linux-gnu-debug.tar.gz) | [`0bd7c2795c294294...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-x86_64-linux-gnu-debug.tar.gz) |\n| *-x86_64-linux-gnu.tar.gz | [`d08c2440ec3297da...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c-x86_64-linux-gnu.tar.gz) | [`933a16f60b1d2c99...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53-x86_64-linux-gnu.tar.gz) |\n| *.tar.gz | [`e4e6e834e4f5d983...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/bitcoin-745eb053a41c.tar.gz) | [`ac2419874a8577df...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/bitcoin-7e5ee940ab53.tar.gz) |\n| SHA256SUMS.part | [`edc01668502ff776...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/SHA256SUMS.part) | [`81e6638029ad6903...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/SHA256SUMS.part) |\n| guix_build.log | [`ac62aa792e17f56d...`](https://drahtbot.space/guix/monotree/745eb053a41c487cc10f20644c65dc8455cf8974/guix_build.log) | [`ff1e24a8cb8bc9ed...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/guix_build.log) |\n| guix_build.log.diff |  | [`dd736fb281004fca...`](https://drahtbot.space/guix/monotree/7e5ee940ab535d66ff385de4b0bac3fe9160f3c9/guix_build.log.diff) |\n\n",
+          "created_at": "2025-11-04T16:08:57Z"
+        }
+      ]
+    },
+    {
+      "number": 33044,
+      "title": "contrib: drop use of `PermissionsStartOnly` & `Group=`",
+      "body": "> This removes the redundant 'Group=' directive and replaces the deprecated 'PermissionsStartOnly' directive.\r\n\r\nPicks up #16994 / #19513. The concern in both of these PRs was changing this too early, while systemd v240 was still prelevant on supported systems. That was ~5 years ago, and from what I can see, no modern/supported OS is still using an older systemd.\r\n\r\nSeparately , I am wondering if we should move these files out to https://github.com/bitcoin-core/packaging/.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-07-23T13:35:02Z",
+      "updated_at": "2025-08-06T13:50:52Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33044",
+      "labels": [
+        "Scripts and tools"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33044.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [willcl-ark](https://github.com/bitcoin/bitcoin/pull/33044#pullrequestreview-3079321239) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-23T13:35:08Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "> Separately , I am wondering if we should move these files out to [bitcoin-core/packaging](https://github.com/bitcoin-core/packaging/?rgh-link-date=2025-07-23T13%3A35%3A02Z).\r\n\r\nA web search for the systemd service file shows barely any direct results, most notably some [Stacks.co docs](https://docs.stacks.co/guides-and-tutorials/nodes-and-miners/run-a-bitcoin-node)\r\n\r\nFewer still for the openrc and init files.\r\n\r\nSo, I suspect that moving these to the packaging repo would not have much systematic impact. Not to mention that we prefer installs from our releases vs packaged installs.\r\n\r\nI suppose the only thing we don't know is how many users:\r\n\r\n1. Download a release or build from source themselves\r\n2. Install\r\n3. Seperately fetch an init file from the source repo and use it\r\n\r\nAgain, my suspicion would be that the answer is very few to none.",
+          "created_at": "2025-08-01T13:47:37Z"
+        }
+      ]
+    },
+    {
+      "number": 33043,
+      "title": "[POC] wallet: Enable non-electronic (paper-based) wallet backup with codex32",
+      "body": "This PR introduces support for exporting and restoring wallet seeds using the [codex32](https://github.com/BlockstreamResearch/codex32) format, enabling non-electronic (paper-based) wallet backups.\r\n\r\nTo accomplish this, the patch ports the `codex32.{c,h}` implementation from Core Lightning to C++, integrating it with Bitcoin Core's libraries. Corresponding unit tests for codex32 encoding and decoding are also included.\r\n\r\nBecause Bitcoin Core wallets currently do not store the seed material by default, this PR adds support for doing so, along with a new wallet flag to explicitly indicate when this feature is enabled.\r\n\r\nTwo new RPCs are introduced:\r\n\r\n`exposesecret`: exports the wallet seed in codex32 format.\r\n\r\n`recoverwalletfromseed`: restores a wallet from a codex32-encoded seed.\r\n\r\nA functional test included in the last commit demonstrates the full backup and restore flow. Currently, only the default derivation path is supported.\r\n\r\nThis PR is intended as a proposal for feedback—to assess whether this functionality is desirable, and to explore how it might evolve further.",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2025-07-23T07:36:29Z",
+      "updated_at": "2026-01-10T02:01:09Z",
+      "comments": 13,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33043",
+      "labels": [
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33043.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33112](https://github.com/bitcoin/bitcoin/pull/33112) (wallet: relax external_signer flag constraints by Sjors)\n* [#33034](https://github.com/bitcoin/bitcoin/pull/33034) (wallet: Store transactions in a separate sqlite table by achow101)\n* [#32977](https://github.com/bitcoin/bitcoin/pull/32977) (wallet: Remove wallet version and several legacy related functions by w0xlt)\n* [#32895](https://github.com/bitcoin/bitcoin/pull/32895) (wallet: Prepare for future upgrades by recording versions of last client to open and decrypt by achow101)\n* [#32652](https://github.com/bitcoin/bitcoin/pull/32652) (wallet: add codex32 argument to addhdkey by roconnor-blockstream)\n* [#32489](https://github.com/bitcoin/bitcoin/pull/32489) (wallet: Add `exportwatchonlywallet` RPC to export a watchonly version of a wallet by achow101)\n* [#28333](https://github.com/bitcoin/bitcoin/pull/28333) (wallet: Construct ScriptPubKeyMans with all data rather than loaded progressively by achow101)\n* [#27865](https://github.com/bitcoin/bitcoin/pull/27865) (wallet: Track no-longer-spendable TXOs separately by achow101)\n* [#26022](https://github.com/bitcoin/bitcoin/pull/26022) (Add util::ResultPtr class by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- IDENTIFER -> IDENTIFIER [correct spelling in “IDENTIFER := BECH32*4”]\n- in stored -> are stored [grammar fix: “wallet seeds in stored in database”]\n\n<sup>drahtbot_id_4_m</sup>\n",
+          "created_at": "2025-07-23T07:36:34Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/46538554195</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by lint errors, including trailing whitespace, locale-dependent functions, spelling errors, incorrect file permissions, and missing include guards.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-23T09:36:21Z"
+        },
+        {
+          "user": "apoelstra",
+          "body": "> For encrypted wallets, recovery requires both the codex32 seed and the original passphrase, enhancing the security.\r\n\r\nIf I understand you correctly, the intent is that an attacker needs the *wallet passphrase* in addition to the seed. But the seed is the seed -- once an attacker has it, it's game over. He doesn't need the passphrase or any other part of the wallet to sweep coins.\r\n\r\ncodex32 itself does not have any notion of passphrases or encryption.",
+          "created_at": "2025-07-23T14:35:12Z"
+        },
+        {
+          "user": "w0xlt",
+          "body": "Yes, you're right. I thought the passphrase deterministically modified the seed to create the BIP 32 Extended Key, but that's not the case.\r\nhttps://github.com/bitcoin/bitcoin/blob/73e754bd01b0653d1fda2d947fcaed0742da81c3/src/wallet/wallet.cpp#L3542\r\n\r\nSo the passphrase doesn't provide any additional security in this case.",
+          "created_at": "2025-07-23T15:57:33Z"
+        },
+        {
+          "user": "w0xlt",
+          "body": "This could still be implemented—even as part of this PR.\r\n\r\nThe wallet generates the seed, stores it, and then derives the BIP32 master key by deterministically combining the seed with the user-provided passphrase. This approach allows users to back up the raw seed while still requiring the passphrase for wallet recovery.\r\n\r\nOr am I missing something ?",
+          "created_at": "2025-07-23T16:25:43Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "How does this relate to https://github.com/bitcoin/bitcoin/pull/27351 / #32652? It's probably easier to support import before export.",
+          "created_at": "2025-07-24T19:20:05Z"
+        },
+        {
+          "user": "w0xlt",
+          "body": "The emphasis of this PR is on backup functionality: a backup feature isn’t very useful unless you can also restore the wallet reliably.\r\n\r\nBy contrast, the other PRs aim only to import a Codex32 secret—presumably from Core Lightning into Bitcoin Core—and each uses a different method. \r\nThe approach here creates a fresh wallet and rescans the chain, whereas PR  #32652 appears to convert a Codex32 secret into an xpub via the proposed `addhdkey` RPC.",
+          "created_at": "2025-07-24T20:12:39Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "It might be useful to open an issue to discuss paper backups in general.\r\n\r\nI think conceptually the are three different things to backup, and each has different requirements and frequencies:\r\n\r\n1. Private key material: backed up once at wallet creation time  (or never, in some multisig setups where recovery consists of using the other keys and moving to a fresh wallet). Needs to be kept secure against theft. \r\n2. Output descriptors: for anything more complicated than a [BIP48 multisig](https://github.com/bitcoin/bips/blob/master/bip-0048.mediawiki) setup you have to keep track of this, or you'll never find your coins. New descriptors may be added later in the life of a wallet (e.g. for our wallet it happened when taproot support was added, albeit in a deterministic way). Backup happens at wallet creation time and each time a new descriptor is added. Needs to be kept secure for privacy reasons, but not for theft\r\n3. Transaction meta data (labels, etc), see https://github.com/bitcoin/bips/blob/master/bip-0329.mediawiki. Backups happens frequently. Needs to be kept secure for privacy reasons, but also may need to be imported into bookkeeping software. Printing it may be useful so you can still look things up 20 years from now when who knows what the world looks like and what software people use.\r\n\r\nThis division borrows heavily from the motivation section of: https://delvingbitcoin.org/t/a-simple-backup-scheme-for-wallet-accounts/1607\r\n\r\nIt seems to me that codex32 only plays a role in (1). And so importing it should be done with `addhdkey`. Exporting could be done with `gethdkeys`.\r\n\r\nIt may be nice to have a more user friendly way to do all or some of (1), (2) and (3). But that I would probably write a markdown document or a Python script. Outside of this project I could imagine a nice tool that calls various RPC methods and generates a pretty PDF, though I would not recommend that for (1).",
+          "created_at": "2025-07-25T06:39:29Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-08-16T00:36:20Z"
+        },
+        {
+          "user": "BenWestgate",
+          "body": "> This could still be implemented—even as part of this PR.\r\n> \r\n> The wallet generates the seed, stores it, and then derives the BIP32 master key by deterministically combining the seed with the user-provided passphrase. This approach allows users to back up the raw seed while still requiring the passphrase for wallet recovery.\r\n> \r\n> Or am I missing something ?\r\n\r\nNot part of the BIP-0093 spec.\r\n\r\nIf a passphrase is used it becomes a nested 2 of 2(passphrase, codex32 secret) causing funds loss if the passphrase is forgotten. Which is more likely than lost shares if the passphrase offers enough entropy to be secure (4+ `EFF_large` words w/ 4 rounds of 1GB argon2id KDF.\r\n\r\nIn my project [BAILS](https://github.com/BenWestgate/Bails): I derive one codex32 share from a memorized passphrase using Argon2id to create a hybrid brain wallet shamir secret sharing scheme that is resilient against memory loss if n > t + 1.\r\n\r\nA passphrase on the secret is how SLIP-39 does it, similar to what you proposed.",
+          "created_at": "2025-08-21T15:54:28Z"
+        },
+        {
+          "user": "BenWestgate",
+          "body": "> It seems to me that codex32 only plays a role in (1). And so importing it should be done with `addhdkey`. Exporting could be done with `gethdkeys`.\r\n\r\nIt would be a usability and compatibility improvement to begin exporting `hdseed` in the codex32 secret format; as:\r\n\r\n1. Easier to type, write and speak than Base58.\r\n2. Error correcting, hand-verifiable checksum\r\n3. Easier to extract the payload seed bytes without needing base58 conversions.\r\n\r\nThe 4 character identifier when exporting `hdseed` as a codex32 secret should be the BIP-0032 fingerprint of `hdseed`.\r\n\r\nRationale: This default assists users in locating the correct codex32 backup for their wallets, should be distinct for every master seed users may need to disambiguate and, as it is widely stored, improves overall error correction.",
+          "created_at": "2025-08-21T16:05:22Z"
+        },
+        {
+          "user": "BenWestgate",
+          "body": "> Because Bitcoin Core wallets currently do not store the seed material by default, this PR adds support for doing so, along with a new wallet flag to explicitly indicate when this feature is enabled.\n\nWallets would need to begin storing the seed by default for `exposesecret` to function.\n\nThis feature also should allow specifying the identifier for disambiguation and the threshold if secret sharing, possibly the number of shares as well, but that requires new entropy.\n\nIt may be simpler to initially support only `recoverwalletfromseed` for an empty wallet and not store it after.\n\nLastly, this should support recovering from valid sets of codex32 shares not just codex32 secrets.\n\n> Currently, only the default derivation path is supported.\n\nSorry I haven't reviewed the code but we need the timestamp no? Other approaches made the import/restore command require a corresponding descriptor to function and that seems more robust for existing wallets.\n\n> This PR is intended as a proposal for feedback—to assess whether this functionality is desirable, and to explore how it might evolve further.\n\nThe functionality is highly desirable. And the sooner the most basic support is included the ROI on other features like `exposesecret`, recovering private keys for existing wallets or generating sets of shares is greater.",
+          "created_at": "2025-10-13T08:12:10Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--13523179cfe9479db18ec6c5d236f789-->\n⌛ There hasn't been much activity lately and the patch still needs rebase. What is the status here?\n\n* Is it still relevant? ➡️ Please solve the conflicts to make it ready for review and to ensure the CI passes.\n* Is it no longer relevant? ➡️ Please close.\n* Did the author lose interest or time to work on this? ➡️ Please close it and mark it with one of the labels 'Up for grabs' or 'Insufficient Review', so that it can be picked up in the future.\n",
+          "created_at": "2026-01-10T02:01:09Z"
+        }
+      ]
+    },
+    {
+      "number": 33042,
+      "title": "refactor: inline constant return values from `dbwrapper` write methods",
+      "body": "Related to https://github.com/bitcoin/bitcoin/pull/31144#discussion_r2223587480\r\n\r\n### Summary\r\n`WriteBatch` always returns `true` - the errors are handled by throwing `dbwrapper_error` instead.\r\n\r\n### Context\r\nThis boolean return value of the `Write` methods is confusing because it's inconsistent with `CDBWrapper::Read`, which catches exceptions and returns a boolean to indicate success/failure. It's bad that `Read` returns and `Write` throws - but it's a lot worse that `Write` advertises a return value when it actually communicates errors through exceptions.\r\n\r\n### Solution\r\nThis PR removes the constant return values from write methods and inlines `true` at their call sites. Many upstream methods had boolean return values only because they were propagating these constants - those have been cleaned up as well.\r\n\r\nMethods that returned a constant `true` value that now return `void`:\r\n- `CDBWrapper::WriteBatch`, `CDBWrapper::Write`, `CDBWrapper::Erase`\r\n- `TxIndex::DB::WriteTxs`\r\n- `BlockTreeDB::WriteReindexing`, `BlockTreeDB::WriteBatchSync`, `BlockTreeDB::WriteFlag`\r\n- `BlockManager::WriteBlockIndexDB`\r\n\r\n### Note\r\n`CCoinsView::BatchWrite` (and transitively `CCoinsViewCache::Flush` & `CCoinsViewCache::Sync`) were intentionally not changed here. While all implementations return `true`, the base `CCoinsView::BatchWrite` returns `false`. Changing this would cause `coins_view` tests to fail with:\r\n> terminating due to uncaught exception of type std::logic_error: Not all unspent flagged entries were cleared\r\n\r\nWe can fix that in a follow-up PR.",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-07-23T02:14:48Z",
+      "updated_at": "2025-11-10T17:17:05Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33042",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33042.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [janb84](https://github.com/bitcoin/bitcoin/pull/33042#pullrequestreview-3119811469), [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/33042#pullrequestreview-3329597424), [sipa](https://github.com/bitcoin/bitcoin/pull/33042#pullrequestreview-3408745524) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33512](https://github.com/bitcoin/bitcoin/pull/33512) (coins: use number of dirty cache entries in flush warnings/logs by l0rinc)\n* [#32427](https://github.com/bitcoin/bitcoin/pull/32427) ((RFC) kernel: Replace leveldb-based BlockTreeDB with flat-file based store by TheCharlatan)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-07-23T02:14:53Z"
+        },
+        {
+          "user": "janb84",
+          "body": "Is this refactor also part of a series to align the `CDBWrapper::Read` with `CDBWrapper::write` e.g. also converting that to return type void and communicating errors through exceptions ? ",
+          "created_at": "2025-07-23T14:07:18Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "We could go the other way as well, enabling writes to only return a boolean and handle them everywhere.\r\nI'm open to suggestions.",
+          "created_at": "2025-07-23T15:41:30Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Looks like this was introduced in 421218d3040279c84616891e8d14b05576b07c57, I guess because it was less verbose. How verbose would it be to pass it up and check it everywhere? Also, `git grep  '\\<catch\\>'  ./src/index/base.*` doesn't return anything, so I wonder how index code deals with those exceptions?",
+          "created_at": "2025-07-24T10:52:49Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> How verbose would it be to pass it up and check it everywhere?\r\n\r\nWith `CDBWrapper::Read` all callers are trying to handle the failure (usually by returning `false` or `std::nullopt` or `std::vector<uint256>()` or resetting the state or manually logging a failure).\r\nI have tried unifying `Write` and `Read` via:\r\n```diff\r\ndiff --git a/src/node/blockstorage.h b/src/node/blockstorage.h\r\n--- a/src/node/blockstorage.h    (revision 09f004bd9fecbee2216ffb6b7bb787d9ec4f0362)\r\n+++ b/src/node/blockstorage.h    (date 1753416740263)\r\n@@ -52,14 +52,14 @@\r\n {\r\n public:\r\n     using CDBWrapper::CDBWrapper;\r\n-    bool WriteBatchSync(const std::vector<std::pair<int, const CBlockFileInfo*>>& fileInfo, int nLastFile, const std::vector<const CBlockIndex*>& blockinfo);\r\n-    bool ReadBlockFileInfo(int nFile, CBlockFileInfo& info);\r\n-    bool ReadLastBlockFile(int& nFile);\r\n-    bool WriteReindexing(bool fReindexing);\r\n+    [[nodiscard]] bool WriteBatchSync(const std::vector<std::pair<int, const CBlockFileInfo*>>& fileInfo, int nLastFile, const std::vector<const CBlockIndex*>& blockinfo);\r\n+    [[nodiscard]] bool ReadBlockFileInfo(int nFile, CBlockFileInfo& info);\r\n+    [[nodiscard]] bool ReadLastBlockFile(int& nFile);\r\n+    [[nodiscard]] bool WriteReindexing(bool fReindexing);\r\n     void ReadReindexing(bool& fReindexing);\r\n-    bool WriteFlag(const std::string& name, bool fValue);\r\n-    bool ReadFlag(const std::string& name, bool& fValue);\r\n-    bool LoadBlockIndexGuts(const Consensus::Params& consensusParams, std::function<CBlockIndex*(const uint256&)> insertBlockIndex, const util::SignalInterrupt& interrupt)\r\n+    [[nodiscard]] bool WriteFlag(const std::string& name, bool fValue);\r\n+    [[nodiscard]] bool ReadFlag(const std::string& name, bool& fValue);\r\n+    [[nodiscard]] bool LoadBlockIndexGuts(const Consensus::Params& consensusParams, std::function<CBlockIndex*(const uint256&)> insertBlockIndex, const util::SignalInterrupt& interrupt)\r\n         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);\r\n };\r\n } // namespace kernel\r\n\r\n```\r\nand\r\n```patch\r\ndiff --git a/src/dbwrapper.h b/src/dbwrapper.h\r\n--- a/src/dbwrapper.h    (revision 09f004bd9fecbee2216ffb6b7bb787d9ec4f0362)\r\n+++ b/src/dbwrapper.h    (date 1753415399087)\r\n@@ -210,7 +210,7 @@\r\n     CDBWrapper& operator=(const CDBWrapper&) = delete;\r\n \r\n     template <typename K, typename V>\r\n-    bool Read(const K& key, V& value) const\r\n+    [[nodiscard]] bool Read(const K& key, V& value) const\r\n     {\r\n         DataStream ssKey{};\r\n         ssKey.reserve(DBWRAPPER_PREALLOC_KEY_SIZE);\r\n@@ -230,7 +230,7 @@\r\n     }\r\n \r\n     template <typename K, typename V>\r\n-    bool Write(const K& key, const V& value, bool fSync = false)\r\n+    [[nodiscard]] bool Write(const K& key, const V& value, bool fSync = false)\r\n     {\r\n         CDBBatch batch(*this);\r\n         batch.Write(key, value);\r\n@@ -255,14 +255,14 @@\r\n     }\r\n \r\n     template <typename K>\r\n-    bool Erase(const K& key, bool fSync = false)\r\n+    [[nodiscard]] bool Erase(const K& key, bool fSync = false)\r\n     {\r\n         CDBBatch batch(*this);\r\n         batch.Erase(key);\r\n         return WriteBatch(batch, fSync);\r\n     }\r\n \r\n-    bool WriteBatch(CDBBatch& batch, bool fSync = false);\r\n+    [[nodiscard]] bool WriteBatch(CDBBatch& batch, bool fSync = false);\r\n \r\n     // Get an estimate of LevelDB memory usage (in bytes).\r\n     size_t DynamicMemoryUsage() const;\r\n```\r\nand handling all of the calls, but I'm getting failures all over the place, mostly because `Read` cannot tell the difference between missing values and errors. I'll investigate further.\r\n\r\n>  I wonder how index code deals with those exceptions\r\n\r\nChecking all index usages of `CDBWrapper::WriteBatch`, I didn't see a single case where we're trying to handle any exception - seems we assumed the return value reflects the status.\r\nOne of the usages outside of indexes where the exception **would** be cought is https://github.com/bitcoin/bitcoin/blob/master/src/validation.cpp#L2858.\r\n\r\n------\r\n\r\nAlso, it seem the build passes with:\r\n```C++\r\nvoid CDBWrapper::WriteBatch(CDBBatch& batch, bool fSync)\r\n{\r\n    // ...\r\n    leveldb::Status status = DBContext().pdb->Write(...);\r\n    if (!status.ok()) { assert(false); } // instead of HandleError(status);\r\n    if (!status.ok()) { } // alternatively, this also passes\r\n```\r\n\r\nSo we don't really have coverage for errors, even though `DBImpl::Write` has several legitimate reason to fail (especially in LevelDB paranoid mode).\r\nhttps://github.com/bitcoin/bitcoin/blob/master/test/functional/feature_init.py#L181-L184 is the only test I found which reproduces any `HandleError` failure - maybe we can extend that to cover `WriteBatch` as well.",
+          "created_at": "2025-07-25T05:46:37Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> and handling all of the calls, but I'm getting failures all over the place, mostly because `Read` cannot tell the difference between missing values and errors. I'll investigate further.\r\n\r\nYeah, I'd presume you'd have to use `Result<bool>`, which I'd suspect would be highly verbose.\r\n\r\n> I didn't see a single case where we're trying to handle any exception - seems we assumed the return value reflects the status.\r\n\r\nI tried that yesterday, and an error in the index code (`scheduler` thread, or the sync thread via `TraceThread`) will just crash the program, IIRC.",
+          "created_at": "2025-07-25T06:15:42Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> Looks like this was introduced in https://github.com/bitcoin/bitcoin/commit/421218d3040279c84616891e8d14b05576b07c57\r\n\r\nMaybe @sipa can help us out here: should we try making read/write symmetric (either by `write` returning, or `read` throwing) or is the current refactor the cleanest solution for maybe-throwing-while-always-returning-true?",
+          "created_at": "2025-07-26T00:50:26Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I think the question boils down to: How much UX do we want to provide for data corruption or internal bugs? A valid answer could be: None. In that case you can just use `Assert` to ensure no data corruption or internal bugs happen. (If they do, the program terminates, like with other Asserts that unexpectedly hit in production.) This approach will likely use the least amount of code.\r\n\r\nOther valid answers are: Best-effort (use `throw`, and maybe catch it, or not). Full-effort (use `Result`).",
+          "created_at": "2025-07-28T10:31:37Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK\r\n\r\nImplemented the same thing some time ago https://github.com/TheCharlatan/bitcoin/commit/de7e3a973ef5773714cd15ead499fbf734547cf1#diff-ac5fbeb5de6f28370bc348a579fc465fe7f7b91df0e0483c6edbf10273278c0d.\r\n",
+          "created_at": "2025-07-31T16:22:48Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "The [IRC meeting](https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2025-07-31#1140025) contained feedback on the overall direction:\r\n> \\<achow101> #topic dbwrapper read/write asymmetry (l0rinc)\r\n> \\<l0rinc> dbwrapper writes currently pretend to return bool but always return true, while real errors surface via exceptions – #33042 makes that explicit, but we need to decide the canonical error path\r\n> \\<l0rinc> `read` catches the exception and returns, but `write` always returned `true`, while throwing in the background\r\n> \\<achow101> how do errors currently propagate? crashing everything?\r\n> \\<l0rinc> most of the time yes\r\n> \\<TheCharlatan> they are eventually converted to FatalError's yeah\r\n> \\<l0rinc> is the removal of the fake return value enough here or do we need to unify the read/write interfaces?\r\n> \\<achow101> if we can't write state to disk, that does seem like a situation where we'd want to abort anyways\r\n> \\<achow101> if the return value is never used, then we should not return it\r\n> \\<TheCharlatan> rewriting it to propagate an error code seems riskier than just removing what is essentially dead code.\r\n> \\<l0rinc> thanks for the feedback, I'll add these comments to the PR - unless the authors want to\r\n> \\<darosior> TheCharlatan: +1",
+          "created_at": "2025-07-31T16:39:19Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Rebased after https://github.com/bitcoin/bitcoin/pull/33116, ready for review again.",
+          "created_at": "2025-08-13T22:50:28Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "thank you for the reviews.\r\nrfm?",
+          "created_at": "2025-11-04T11:10:15Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 743abbcbde9e5a2db489bca461c98df461eff7d0",
+          "created_at": "2025-11-10T17:03:11Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 7,
+    "issues": 0
+  }
+}

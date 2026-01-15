@@ -1,0 +1,500 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:37:34.557986+00:00",
+  "date": "2025-12-05",
+  "pull_requests": [
+    {
+      "number": 34020,
+      "title": "mining: add getTransactions(ByWitnessID) IPC methods",
+      "body": "For Stratum v2 custom job declaration to be bandwidth efficient, the pool can request[^0] only the transactions that it doesn't know about.\r\n\r\nThe spec doesn't specify how this is achieved, but one method is to call the `getrawtransaction` RPC on each transaction id listed in [DeclareMiningJob](https://stratumprotocol.org/specification/06-Job-Declaration-Protocol?query=DeclareMiningJob#644-declareminingjob-client-server) (or a subset if the pool software maintains a cache). Using RPC is inefficient, made worse by the need to make multiple calls. It also doesn't support queuing by witness id (yet, see #34013).\r\n\r\nThis PR introduces two new IPC methods:\r\n\r\n- `getTransactions()`: takes a list of `Txid`'s\r\n- `getTransactionsByWitnessID()`: : takes a list of `Wtxid`'s\r\n\r\nBoth return a list of serialised transactions. An empty element is returned for transactions that were not found.\r\n\r\nThe `Txid` variant, just like its RPC counterpart, takes advantage of `-txindex` if enabled. The `Wtxid` variant can't do that unless we add a `-witnesstxindex`, but at least sv2 has no use for that.\r\n\r\nThe RPC additionally allows providing a `block_hash` hint. I haven't implemented that here because I don't have a need or it. It can always be added later.\r\n\r\nI thought about having a single (or overloaded) `getTransactions()` that works with both `Txid` and `Wtxid`, but I prefer that clients are intentional about which one they want.\r\n\r\nA unit and functional test cover the new functionality.\r\n\r\nSv2 probably only needs `getTransactionsByWitnessID()`, but it's easy enough to just add both.\r\n\r\nTODO:\r\n- [ ] figure out https://github.com/bitcoin-core/libmultiprocess/issues/235 (this PR is draft pending that, subtree linter failure is expected)\r\n\r\n[^0]: there's two reasons the pool requests these transactions: to approve the template and to broadcast the block if a solution is found (the miner will also broadcast via their template provider). See also https://github.com/stratum-mining/sv2-spec/issues/170",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-12-05T19:13:47Z",
+      "updated_at": "2025-12-19T12:06:54Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34020",
+      "labels": [
+        "Mining",
+        "Needs rebase",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34020.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34003](https://github.com/bitcoin/bitcoin/pull/34003) (test: interface_ipc.py minor fixes and cleanup by ryanofsky)\n* [#33965](https://github.com/bitcoin/bitcoin/pull/33965) (mining: fix -blockreservedweight shadows IPC option by Sjors)\n* [#33936](https://github.com/bitcoin/bitcoin/pull/33936) (mining: pass missing context to createNewBlock() and checkBlock() by Sjors)\n* [#33922](https://github.com/bitcoin/bitcoin/pull/33922) (mining: add getMemoryLoad() and track template non-mempool memory footprint by Sjors)\n* [#29409](https://github.com/bitcoin/bitcoin/pull/29409) (multiprocess: Add capnp wrapper for Chain interface by ryanofsky)\n* [#19461](https://github.com/bitcoin/bitcoin/pull/19461) (multiprocess: Add bitcoin-gui -ipcconnect option by ryanofsky)\n* [#19460](https://github.com/bitcoin/bitcoin/pull/19460) (multiprocess: Add bitcoin-wallet -ipcconnect option by ryanofsky)\n* [#10102](https://github.com/bitcoin/bitcoin/pull/10102) (Multiprocess bitcoin by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible typos and grammar issues:\n\n- represeent -> represent [spelling error in \"represeent null pointers\" makes the sentence harder to read]\n\n\n\n<sup>2025-12-08</sup>\n",
+          "created_at": "2025-12-05T19:13:53Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/actions/runs/19973417058/job/57283535788</sub>\n<sub>LLM reason (✨ experimental): Lint failure: a subtree directory was touched without performing a proper subtree merge.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-12-05T20:32:35Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": ">figure out [Treat std::shared_ptr nullptr as empty Data bitcoin-core/libmultiprocess#235](https://github.com/bitcoin-core/libmultiprocess/issues/235) (this PR is draft pending that, subtree linter failure is expected)\r\n\r\nThis turned out to be an interesting problem, because in general it's not safe to treat empty `Data` fields the same as unset values. For example with `std::optional<std::string>` or `std::string*` we would want to interpret empty `Data` fields as empty strings not null values. Even for serializable types it's not really safe to treat empty `Data` the same as null since empty `Data` could be a valid serialization for some objects. For CTransaction objects though it is safe.\r\n\r\nAnother annoying thing is that if the goal is to be able to serialize `vector<CTransactionRef>` as `List(Data)` and allow the vector to contain null values, the most obvious way to do it would be to map null `CTransactionRef` values to null data values. But annoyingly although the Cap'n Proto wire format can represent null Data values in a list and has APIs to set null Data values and has APIs to distinguish between null and empty Data values in non-list contexts, it doesn't currently provide any way to distinguish between null and empty Data values when the Data value is in a List.\r\n\r\nSo your workaround of interpreting empty Data values as null CTransactionRef is probably the best approach for now. I put together an implementation that should be more robust in b14778374b0694f7255f774cb657c7049cb4256e ([tag](https://github.com/ryanofsky/bitcoin/commits/pr/nohasfield.1)). It limits the workaround to `CTransactionRef` data fields only and avoids making any assumptions in `type-pointer.h` about the type of pointers. It also includes a unit test that makes sure null values can be passed correctly.",
+          "created_at": "2025-12-08T01:01:08Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@ryanofsky thanks, I swapped in your commit (subtree linter is still expected to fail).\r\n\r\n> So your workaround of interpreting empty Data values as null CTransactionRef is probably the best approach for now. \r\n\r\nOne reason I have some confidence in this approach is that the Python functional tests are able to read the result. Although it interprets the empty fields as `b''` rather than `None`, that shouldn't be an issue for client developers. This is captured by your note:\r\n\r\n```cpp\r\n//! [*] The Cap'n Proto wire format actually does distinguish between null and\r\n//! empty Data values inside Lists, and the C++ API does allow distinguishing\r\n//! between null and empty Data values in other contexts, just not the List\r\n//! context, so this limitation could be removed in the future.\r\n```\r\n\r\nIf this is fixed one day and we correctly encode null on the wire, it would technically be a breaking API change, but trivial to deal with for clients. E.g. the functional test would check for both `b''` and `None`.\r\n\r\nb14778374b0694f7255f774cb657c7049cb4256e looks good to me, can you make a libmultiprocess PR, and another PR here that bumps the subtree to use it and add the tests? I'll rebase on that.",
+          "created_at": "2025-12-08T08:44:29Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-12-16T15:26:12Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Needs rebase after #34003, but I'll do that after there's a multiprocess PR.",
+          "created_at": "2025-12-19T12:06:54Z"
+        }
+      ]
+    },
+    {
+      "number": 34018,
+      "title": "log: exempt all category-specific logs from ratelimiting when running with debug",
+      "body": "Previously, running with `-debug=<category>` would exempt the debug and trace log messages in that category from rate limiting, but not the info/warning/error category-specific messages (which are rare). This is unintuitive and unnecessary.\r\n\r\nWhen users run with `-debug`, we already assume they are power users and that they will have significantly higher log volumes, so there is no real benefit from suppressing info log messages in that category.\r\n\r\nFix this by applying ratelimiting exceptions from `-debug=<category>` to all logs in that category.\r\n\r\nAlso updates `net_processing` to log new peer connections with `NET` category. This way, when running with `-debug=net`, the log message (which can be frequent) will not get ratelimited when the user explicitly opts into getting higher log volumes for net.\r\n\r\nIntroduces slight behaviour change by prefixing the log message with [net:info].\r\n\r\nAlternative to #34008",
+      "state": "closed",
+      "user": "stickies-v",
+      "created_at": "2025-12-05T15:53:43Z",
+      "updated_at": "2025-12-09T09:59:04Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34018",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34018.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34008](https://github.com/bitcoin/bitcoin/pull/34008) (log: don't rate-limit \"new peer\" with -debug=net by 0xB10C)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-05T15:53:50Z"
+        },
+        {
+          "user": "Ataraxia009",
+          "body": "Concept NAck\r\n\r\nUsers that are having issues that are not power users would also use the `-debug` option, to help submit logs. \r\nif `-debug` is used with this implementation, it would stop rate-limiting of all category logs.",
+          "created_at": "2025-12-07T04:34:14Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "> if `-debug` is used with this implementation, it would stop rate-limiting of all category logs.\r\n\r\nDebug logs are (by design) much higher frequency than info/warning/error level logs. They have never been ratelimited, because for debugging purposes it's important to see what's happening without limitation. When running with `-debug`, the overwhelming majority of logs produced are debug logs. This PR doesn't change anything about any of that.\r\n\r\nInfo logs are typically much higher signal than debug logs, that's why they're unconditional. Before this PR, if an info/warning/error log has a category associated with it (note: this is quite rare), and that category is activated for debugging, the user would find their higher-signal unconditional logs ratelimited, but not their debug/trace logs. That's unintuitive, unhelpful and doesn't really offer any additional protection, because debug logs are so much more voluminous. It also leads to more elaborate workarounds necessary such as in #34008.\r\n\r\nI hope that clears it up?\r\n",
+          "created_at": "2025-12-07T10:19:50Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "Force-pushed to address merge conflict from #29641, no other changes.",
+          "created_at": "2025-12-07T10:26:30Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "`LogPrintLevel` isn't really documented in the dev notes and the unit test name `logging_LogPrintMacrosDeprecated` seems to indicate it is deprecated. This change here seems to put a use-case to it, so it could make sense to document and test it? Though, I wonder instead of using the `LogPrintLevel` macro, it could make more sense to just add a new `LogInfo` macro that mirrors the `LogDebug` signature? I can't really see a use-case to have high-volume warnings or errors, so that they run into rate-limiting. But no strong opinion, I just mentioned it, because I re-created a scripted-diff to remove `LogPrintLevel` for fun (probably not going to open a pull for this): af8166173f5a1d3b166e237edf259a0e5f6102bd.",
+          "created_at": "2025-12-07T12:19:33Z"
+        },
+        {
+          "user": "Ataraxia009",
+          "body": "> > if `-debug` is used with this implementation, it would stop rate-limiting of all category logs.\r\n> \r\n> \r\n> \r\n> Debug logs are (by design) much higher frequency than info/warning/error level logs. They have never been ratelimited, because for debugging purposes it's important to see what's happening without limitation. When running with `-debug`, the overwhelming majority of logs produced are debug logs. This PR doesn't change anything about any of that.\r\n> \r\n> \r\n> \r\n> Info logs are typically much higher signal than debug logs, that's why they're unconditional. Before this PR, if an info/warning/error log has a category associated with it (note: this is quite rare), and that category is activated for debugging, the user would find their higher-signal unconditional logs ratelimited, but not their debug/trace logs. That's unintuitive, unhelpful and doesn't really offer any additional protection, because debug logs are so much more voluminous. It also leads to more elaborate workarounds necessary such as in #34008.\r\n> \r\n> \r\n> \r\n> I hope that clears it up?\r\n> \r\n> \r\n\r\nYeah the alternative option for those work arounds are not great. Having debug on should just get you less restrictions from a functionality standpoint as well.",
+          "created_at": "2025-12-07T13:26:35Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "Closing this in favour of https://github.com/bitcoin/bitcoin/pull/34008, I think that PR's new approach of downgrading the inbound log to `LogDebug` is superior.\r\n\r\nI think the approach in this PR makes sense if there are other places in the code with a similar issue (modulo addressing [this comment](https://github.com/bitcoin/bitcoin/pull/34018#issuecomment-3621967700)), but until that use case pops up, there's no point keeping this PR open.",
+          "created_at": "2025-12-08T23:01:29Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I think the approach in this PR makes sense if there are other places in the code with a similar issue (modulo addressing [this comment](https://github.com/bitcoin/bitcoin/pull/34018#issuecomment-3621967700)), but until that use case pops up, there's no point keeping this PR open.\r\n\r\nI went ahead and implemented my comment in https://github.com/bitcoin/bitcoin/pull/34033, because it makes sense on its own, and because it makes it easier to implement the changes here in the future, if there is ever need to.",
+          "created_at": "2025-12-09T09:59:04Z"
+        }
+      ]
+    },
+    {
+      "number": 34017,
+      "title": "fuzz: Add a test case for `ParseByteUnits()`",
+      "body": "`ParseByteUnits()` is the only parsing function in `strencodings.cpp` lacking a fuzz test. Add a test case to check the function against arbitrary strings and randomized `default_multiplier`.",
+      "state": "closed",
+      "user": "Chand-ra",
+      "created_at": "2025-12-05T15:39:26Z",
+      "updated_at": "2025-12-06T13:41:19Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34017",
+      "labels": [
+        "Tests",
+        "Fuzzing"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34017.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [dergoegge](https://github.com/bitcoin/bitcoin/pull/34017#pullrequestreview-3545393178), [marcofleon](https://github.com/bitcoin/bitcoin/pull/34017#pullrequestreview-3545708127), [maflcko](https://github.com/bitcoin/bitcoin/pull/34017#issuecomment-3619815099) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-05T15:39:33Z"
+        },
+        {
+          "user": "Chand-ra",
+          "body": "> `ParseByteUnits` is not publicly exposed, i.e. it doesn't handle untrusted inputs, and I would not consider adding fuzz tests for this type of function as a priority.\r\n\r\nMakes perfect sense. But I wonder why fuzz tests for these internal utilities (like `ToUpper()`, `ToLower()`, etc.) were introduced in the first place? Is it being thorough just for the sake for being thorough?\r\n\r\n> As the in-repo fuzz tests are pretty saturated, it can be hard to spot valuable areas to improve (especially if you are new to the code base). A good path for making valuable contributions is to review other fuzzing PRs (e.g. #31533 or #33300).\r\n\r\nWill do!",
+          "created_at": "2025-12-06T08:08:04Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 57b888ce0ebdeb34d866fd1511052fd740cc5ab8",
+          "created_at": "2025-12-06T09:41:42Z"
+        }
+      ]
+    },
+    {
+      "number": 34011,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "Pro2x9",
+      "created_at": "2025-12-05T08:44:50Z",
+      "updated_at": "2025-12-05T08:45:12Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34011",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "\n♻️ Automatically closing for now based on heuristics. Please leave a comment, if this was erroneous.\nGenerally, please focus on creating high-quality, original content that demonstrates a clear\nunderstanding of the project's requirements and goals.\n\n📝 Moderators: If this is spam, please replace the title with `.`, so that the thread does not appear in\nsearch results.\n",
+          "created_at": "2025-12-05T08:44:55Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "\nLLM spam detection (✨ experimental): SPAM. The submission contains only template/boilerplate contributor guidance and no actual description, rationale, code, or tests for the proposed change. It appears to be a placeholder rather than a real PR.\n\n♻️ Automatically wiping, closing, and locking for now based on heuristics.\nGenerally, please focus on creating high-quality, original content that demonstrates a clear\nunderstanding of the project's requirements and goals.\n",
+          "created_at": "2025-12-05T08:44:59Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34011.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-05T08:45:02Z"
+        }
+      ]
+    },
+    {
+      "number": 34010,
+      "title": "psbt: detect invalid MuSig2 pubkeys in deserialization",
+      "body": "Throw error while deserializing PSBT if invalid pubkeys are passed\r\nas a MuSig2 aggregate or participant.\r\n\r\nShould fix #33999 & #34201 by throwing error at the very start while decoding\r\n an invalid PSBT that should subsequently not allow the MuSig2\r\nsigning operation to take place, thereby avoiding the crash.",
+      "state": "closed",
+      "user": "rkrux",
+      "created_at": "2025-12-05T06:49:45Z",
+      "updated_at": "2026-01-05T23:22:51Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34010",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/34010.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fjahr](https://github.com/bitcoin/bitcoin/pull/34010#issuecomment-3710091314), [achow101](https://github.com/bitcoin/bitcoin/pull/34010#issuecomment-3712329381) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-12-05T06:49:52Z"
+        },
+        {
+          "user": "theStack",
+          "body": "The line leading to the crash involves the following two constructors\r\nhttps://github.com/bitcoin/bitcoin/blob/b8e66b901d563d7ba6042e6be54d7e48b9fffc83/src/pubkey.h#L256-L260\r\nwhere cryptographic validity of the pubkey isn't checked at any point, so I don't think this PR fixes anything?",
+          "created_at": "2025-12-05T14:00:28Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Yes, the second constructor appears to be involved. This comment here suggests where the error lies because of an empty aggregate pubkey added in the fuzz input: https://github.com/bitcoin/bitcoin/pull/29675#discussion_r2585106930\r\n\r\nI believe that skipping the loop iteration before the following line hits should help in fixing IIUC?\r\nhttps://github.com/bitcoin/bitcoin/blob/b8e66b901d563d7ba6042e6be54d7e48b9fffc83/src/script/sign.cpp#L299",
+          "created_at": "2025-12-05T14:08:49Z"
+        },
+        {
+          "user": "theStack",
+          "body": "Oh right, the crash already happens in the `std::span{pubkey}.subspan(1, 32)` expression (if `std::span{pubkey}` is empty due to being invalid), before the first constructor is called. It seems we should detect invalid participant pubkeys as early as possible and not allow them to be added to the wallet state in the first place, I suspect a better place to fix this would be `DeserializeMuSig2ParticipantPubkeys`, where a validity check is currently missing.",
+          "created_at": "2025-12-05T14:34:49Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "I did think about adding it there but decided against it to keep the change related to the crash site. But I don't feel strongly about it and will update the PR to add the check in PSBT deserialization.",
+          "created_at": "2025-12-05T15:34:43Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "Could you add a simple test for this?",
+          "created_at": "2025-12-05T23:55:29Z"
+        },
+        {
+          "user": "rkrux",
+          "body": ">  I suspect a better place to fix this would be DeserializeMuSig2ParticipantPubkeys, where a validity check is currently missing.\r\n\r\nUpdated PR to add the check there instead of in the MuSig2 signing flow that occurs later.\r\n\r\n> Could you add a simple test for this?\r\n\r\nAdded few tests from the fuzz inputs and created one more test so that the test coverage of an existing `if` condition that appears at the end of `DeserializeMuSig2ParticipantPubkeys` is not lost due to the newly added check for invalid participant pubkey.",
+          "created_at": "2025-12-08T14:32:10Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 1818f7028e592e52a61b57a67e32eacda78553f9",
+          "created_at": "2025-12-23T22:53:36Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Updated PR to add a test case from issue #34201.",
+          "created_at": "2026-01-05T10:55:29Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "utACK 5805a8b54083539c4fede52b4b726102dcfc864e",
+          "created_at": "2026-01-05T11:42:26Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 5805a8b54083539c4fede52b4b726102dcfc864e",
+          "created_at": "2026-01-05T22:38:38Z"
+        },
+        {
+          "user": "theStack",
+          "body": "post-merge ACK 5805a8b54083539c4fede52b4b726102dcfc864e",
+          "created_at": "2026-01-05T23:22:51Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 34019,
+      "title": "RFC: randomize over netgroups in outbound peer selection",
+      "body": "The current mechanism for choosing outbound peers picks one at randoms among known-reachable addresses, with the caveat that we do not connect twice to the same netgroup (by default /16's and, if an ASmap is configured, by AS's). A more robust mechanism for preventing an attacker to control all of a node's outbound connections would first randomize over netgroups and then pick a known-reachable address within that netgroup.\n\nThis alternative mechanism would make the probability for an attacker to control all of a node's outbound connections exponentially decreasing in the number of connections, roughly $(\\frac{k}{n})^c$ with $k$ the number of netgroups controlled by the attacker, $n$ the total number of netgroups available to be chosen from, and $c$ the number of outbound connections made. There is today in the order of 5k different /16's to choose from in the network[^0]. If we were to use this method, even an adversary that introduced 1k new ones with exclusively their nodes (which would be absurdly expensive) would not be able to control all of a node's outbound peers with any relevant probability.\n\nBy contrast, the current mechanism will allow an adversary with enough node IPs to control all outbound connections of a node with a realistic probability, as long as those IPs are spread across at least as many netgroups as we make outbound connections by default. This is not merely a theoretical concern. This summer i investigated[^1] an entity that spun up hundreds of reachable nodes on the network. They have since scaled up to 3000 nodes, spread across 8 /16's boundaries (and 3 or 4 AS's). As a result, a freshly started clearnet nodes nowadays will make 3 to 5 of their outbound connections on average to this single entity, which is not even actively attacking (for instance by more aggressively sharing their own node addresses and/or not relaying other reachable nodes'). More discussions regarding this entity are available [here](https://bnoc.xyz/t/increase-in-the-number-of-reachable-ipv4-nodes-bitprojects-io) and [here](https://bnoc.xyz/t/many-connections-to-bitproject-io-nodes).\n\nOf course, switching to this mechanism for choosing outbound peers would have consequences on the network graph. Because we currently sample over all known node addresses, we will be biased towards netgroups that contain a lot of nodes (such as hosting providers). First sampling by netgroup would remove this bias, and make it significantly more likely to connect to more \"obscure\" netgroups. This could cause a resource allocation issue on the network, with the inbound connection slots of netgroups with a lesser amount of nodes getting overused (and maxed out) while tons of inbound connection slots in netgroups with a higher amount of nodes sit unused. Interestingly, this is a similar concern to that of switching to ASmap by default shared by @virtu [here](https://github.com/bitcoin/bitcoin/issues/16599#issuecomment-1917362538).\n\nNaturally a middle of the road solution could be to use the alternative mechanism for half of our connections ($c = 5$ in the formula above is more than enough) to get the local eclipse resistance benefits while minimizing the risk of global network disruption. An alternative would be to fully move to sampling by netgroups, but not uniformly. The draw could be biased toward those with more available resources.\n\nA related discussion is how we want a node to behave when its inbound connection slots are full (see https://github.com/bitcoin/bitcoin/issues/16599#issuecomment-3609099274).\n\nA related question is whether we want to keep the \"never connect to more than one netgroup\" rule if we adopt the alternative mechanism. Without the rule but with the new mechanism, could it be the case that if all connection slots in \"small\" netgroups, a large fraction of the network eventually converge towards the larger netgroups? Possibly making several connections to the same netgroups? That seems unlikely. On the other hand if it happens it would organically spread resource usage (though not with a distribution we are happy with).\n\nThis topic was discussed during yesterday's IRC meeting (which this issue is following up on). Logs available [here](https://www.erisian.com.au/bitcoin-core-dev/log-2025-12-04.html#l-469).\n\n[^0]: A conservative estimate from querying the /16's present in the tried table of a number of long-running nodes, and comparing what a number of sources (1, 2, 3) claim are the number of reachable ipv4 nodes.  The command ran to gather the number of /16's in a node's addrman is the following: `bitcoin-cli getrawaddrman |jq -r '.tried[].address | select(test(\"^[0-9]{1,3}(\\\\.[0-9]{1,3}){3}$\")) | (split(\".\")[0:2] | join(\".\"))' |uniq |wc -l`.\n[^1]: See this [blog post](https://antoinep.com/posts/misbehaving_nodes/). The investigation started because the nodes were misconfigured, and i ended up being in contact with the person running those. It appears the person is purposefully trying to optimize for the highest possible number of node addresses announced, in particular by having advertising several IPs per node.",
+      "state": "open",
+      "user": "darosior",
+      "created_at": "2025-12-05T16:19:39Z",
+      "updated_at": "2025-12-12T01:01:36Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34019",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "ajtowns",
+          "body": "I seem to have 7204 ipv4 nodes in my tried table with a timestamp more recent than 90 days ago, split across 3509 /16s. There are 6 /16s with between 100 and 200 tried entries, and another 23 /16s with more than 20 tried entries. At the other end of the scale, there are 2578 /16s with only one node in my tried table, 561 with two nodes, 172 with three, 58 with four, 28 with 5 and 26 with 6.\n\nThe network is able to accept 115 inbound connections per node by default (max connections = 125, minus 10 outbounds), so if I tak e my tried table as comprehensive (not really a sensible assumption), cumulatively that's:\n\n * 2578 /16s with 1 nodes: 29,647 nodes worth of inbound connections\n * +561 /16s with 2 nodes: 42,550 nodes worth of inbound connections\n * +172 /16s with 3 nodes: 48,484 nodes worth of inbound connections\n * +58 /16s with 4 nodes: 51,152 nodes worth of inbound connections\n * +28 /16s with 5 nodes: 52,762 nodes worth of inbound connections\n * +26 /16s with 6 nodes: 54,556 nodes worth of inbound connections\n * +13 /16s with 7 nodes: 55,602 nodes worth of inbound connections\n * +12 /16s with 8 nodes: 56,706 nodes worth of inbound connections\n * +8 /16s with 9 nodes: 57,534 nodes worth of inbound connections\n * +4 /16s with 10 nodes: 57,994 nodes worth of inbound connections\n * +5 /16s with 11 nodes: 58,627 nodes worth of inbound connections\n * +2 /16s with 12 nodes: 58,903 nodes worth of inbound connections\n * +3 /16s with 13 nodes: 59,351 nodes worth of inbound connections\n * +5 /16s with 14 nodes: 60,156 nodes worth of inbound connections \n * +2 /16s with 15 nodes: 60,501 nodes worth of inbound connections\n * everything: 82,846 nodes worth of inbound connections\n\n(the calculation here is just `G` /16s with N nodes each gives `G*N*115` inbound slots, and thus copes `with G*N*11.5` nodes' worth of inbound connections, since each node makes 10 outbound connections)\n\nTrying a sim with a 50/50 split and 60k total nodes seems to suggest the single-node /16s would all fill up their slots; but a 30/70 split looks like the single-node /16s would average out to 108.3/115 inbounds, which might be manageable.",
+          "created_at": "2025-12-05T18:14:00Z"
+        }
+      ]
+    },
+    {
+      "number": 34016,
+      "title": "test: `interface_ipc.py` (might?) start skipping if installed capnp version changes",
+      "body": "Noticed this on a Fedora (Rawhide) Box that has capnp `1.2.0` (recently updated from 1.1.0) and `pycapnp` `2.1.0` installed, but was skipping `interface_ipc.py` as if the Python module was not available. The failure was that pycanp `2.1.0` tries to load an older shared lib, and fails:\n```bash\nRemaining jobs: [interface_ipc.py]\n1/1 - interface_ipc.py failed, Duration: 0 s\n\nstdout:\n\n\nstderr:\nTraceback (most recent call last):\n  File \"/root/ci_scratch/build/test/functional/interface_ipc.py\", line 20, in <module>\n    import capnp  # type: ignore[import] # noqa: F401\n    ^^^^^^^^^^^^\n  File \"/usr/local/lib64/python3.14/site-packages/capnp/__init__.py\", line 36, in <module>\n    from .version import version as __version__\n  File \"/usr/local/lib64/python3.14/site-packages/capnp/version.py\", line 1, in <module>\n    from .lib.capnp import _CAPNP_VERSION_MAJOR as LIBCAPNP_VERSION_MAJOR  # noqa: F401\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nImportError: libcapnpc.so.1.0.1: cannot open shared object file: No such file or directory\n```\nWe catch this and skip as if the module isn't available. Updating to `pycapnp` `2.2.1` solved the issue.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2025-12-05T14:38:18Z",
+      "updated_at": "2025-12-05T16:01:30Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34016",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "ryanofsky",
+          "body": "Maybe this would get the failure to be reported properly:\n\n```diff\n--- a/test/functional/interface_ipc.py\n+++ b/test/functional/interface_ipc.py\n@@ -19,7 +19,7 @@ from test_framework.wallet import MiniWallet\n # Test may be skipped and not have capnp installed\n try:\n     import capnp  # type: ignore[import] # noqa: F401\n-except ImportError:\n+except ModuleNotFoundError:\n     pass\n \n @asynccontextmanager\n```",
+          "created_at": "2025-12-05T15:46:32Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "@ryanofsky yes, that works.",
+          "created_at": "2025-12-05T16:01:30Z"
+        }
+      ]
+    },
+    {
+      "number": 34015,
+      "title": "Minor Release 30.1",
+      "body": "🚧 Milestone: https://github.com/bitcoin/bitcoin/milestone/79\n\nBackports and other changes\n- #33609\n- #33997\n\n\nRC 1:\n- [x] final changes: #33997\n- [x] tag: https://github.com/bitcoin/bitcoin/compare/v30.1rc1\n- [x] upload binaries: https://bitcoincore.org/bin/bitcoin-core-30.1/test.rc1/\n\n30.1 Final:\n- [x] final changes: #34092\n- [x] tag: https://github.com/bitcoin/bitcoin/releases/tag/v30.1\n- [x] upload binaries: https://bitcoincore.org/bin/bitcoin-core-30.1/\n- [x] announcements: https://groups.google.com/g/bitcoindev/c/ijlAyY0UFAQ/m/q3lWqhyfBAAJ\n- [x] archive rel notes: #34191\n- [x] GH Release: https://github.com/bitcoin/bitcoin/releases/tag/v30.1\n\nSee [release process docs](https://github.com/bitcoin/bitcoin/blob/master/doc/release-process.md) for more details. This issue can be used to track status updates.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-12-05T13:38:30Z",
+      "updated_at": "2026-01-05T11:26:21Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34015",
+      "labels": [
+        "Tracking Issue"
+      ],
+      "comment_list": [
+        {
+          "user": "fanquake",
+          "body": "`v30.1rc1` tag is available: https://github.com/bitcoin/bitcoin/compare/v30.1rc1.",
+          "created_at": "2025-12-05T14:52:28Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "v30.1rc1 binaries: https://bitcoincore.org/bin/bitcoin-core-30.1/test.rc1/.",
+          "created_at": "2025-12-31T11:58:06Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "v30.1 binaries: https://bitcoincore.org/bin/bitcoin-core-30.1/.",
+          "created_at": "2026-01-02T15:25:49Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Website PR: https://github.com/bitcoin-core/bitcoincore.org/pull/1207",
+          "created_at": "2026-01-05T11:11:05Z"
+        }
+      ]
+    },
+    {
+      "number": 34014,
+      "title": "mptest hangs, when run in a loop",
+      "body": "Initially ci ran into a segfault in https://github.com/maflcko/bitcoin-core-nightly/actions/runs/19882806964/job/56984144564#step:6:4040: \n\n```\n  3/152 Test   #3: mptest ...............................***Failed    0.05 sec\n[ TEST ] test.cpp:117: Call FooInterface methods\n[ PASS ] test.cpp:117: Call FooInterface methods (18106 μs)\n[ TEST ] test.cpp:209: Call IPC method after client connection is closed\n[ PASS ] test.cpp:209: Call IPC method after client connection is closed (744 μs)\n[ TEST ] test.cpp:226: Calling IPC method after server connection is closed\n[ PASS ] test.cpp:226: Calling IPC method after server connection is closed (819 μs)\n[ TEST ] test.cpp:243: Calling IPC method and disconnecting during the call\n[ PASS ] test.cpp:243: Calling IPC method and disconnecting during the call (793 μs)\n[ TEST ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call\n[ PASS ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call (1329 μs)\n[ TEST ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error\n*** Received signal #11: Segmentation fault\nstack: 588ddc67 587839bb 5877e6ef 588667a8 58858975 58861e3d 58784940 58780828 5868c5fb 5868c0c8 f5b62d20 f57b0136 f5844c05\n```\n\nWhen trying to reproduce it locally, I'd see mptest hang, when run in a loop (and the CPUs on the machine were made busy via other means). To reproduce on a fresh `podman run -it --rm --platform=linux alpine:3.23`:\n\n`apk update && apk add rsync screen python3 git bash vim && git clone --depth=1 https://github.com/bitcoin/bitcoin ./b-c-ci && cd ./b-c-ci`\n\n`RUN_UNIT_TESTS=false RUN_FUNCTIONAL_TESTS=false CCACHE_DIR=/ccache_dir CCACHE_MAXSIZE=5500M USER=dummy_user DANGER_RUN_CI_ON_HOST=\"1\" MAKEJOBS=\"-j$(nproc)\" FILE_ENV=\"./ci/test/00_setup_env_native_alpine_musl.sh\" ./ci/test_run_all.sh`\n\n`while /ci_container_base/ci/scratch/build-*/src/ipc/libmultiprocess/test/mptest ; do true ; done`\n\n\nAfter some time it just hangs forever:\n\n```\n...\n6 test(s) passed \n[ TEST ] test.cpp:117: Call FooInterface methods\n[ PASS ] test.cpp:117: Call FooInterface methods (83659 μs)\n[ TEST ] test.cpp:209: Call IPC method after client connection is closed\n[ PASS ] test.cpp:209: Call IPC method after client connection is closed (6884 μs)\n[ TEST ] test.cpp:226: Calling IPC method after server connection is closed\n[ PASS ] test.cpp:226: Calling IPC method after server connection is closed (9762 μs)\n[ TEST ] test.cpp:243: Calling IPC method and disconnecting during the call\n[ PASS ] test.cpp:243: Calling IPC method and disconnecting during the call (8612 μs)\n[ TEST ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call\n[ PASS ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call (13144 μs)\n[ TEST ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error\nmp/proxy.cpp:45: error: Uncaught exception in daemonized task.; exception = (unknown):-1: failed: std::exception: std::future_error: Promise already satisfied\n[ PASS ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error (16464 μs)\n6 test(s) passed \n[ TEST ] test.cpp:117: Call FooInterface methods\n[ PASS ] test.cpp:117: Call FooInterface methods (53144 μs)\n[ TEST ] test.cpp:209: Call IPC method after client connection is closed\n[ PASS ] test.cpp:209: Call IPC method after client connection is closed (7757 μs)\n[ TEST ] test.cpp:226: Calling IPC method after server connection is closed\n[ PASS ] test.cpp:226: Calling IPC method after server connection is closed (7552 μs)\n[ TEST ] test.cpp:243: Calling IPC method and disconnecting during the call\n[ PASS ] test.cpp:243: Calling IPC method and disconnecting during the call (7087 μs)\n[ TEST ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call\n[ PASS ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call (11442 μs)\n[ TEST ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error\n[ PASS ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error (11951 μs)\n6 test(s) passed \n[ TEST ] test.cpp:117: Call FooInterface methods\n[ PASS ] test.cpp:117: Call FooInterface methods (57813 μs)\n[ TEST ] test.cpp:209: Call IPC method after client connection is closed\n[ PASS ] test.cpp:209: Call IPC method after client connection is closed (6301 μs)\n[ TEST ] test.cpp:226: Calling IPC method after server connection is closed\n[ PASS ] test.cpp:226: Calling IPC method after server connection is closed (7153 μs)\n[ TEST ] test.cpp:243: Calling IPC method and disconnecting during the call\n[ PASS ] test.cpp:243: Calling IPC method and disconnecting during the call (8374 μs)\n[ TEST ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call\n[ PASS ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call (11935 μs)\n[ TEST ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error\n[ PASS ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error (15253 μs)\n6 test(s) passed \n[ TEST ] test.cpp:117: Call FooInterface methods\n[ PASS ] test.cpp:117: Call FooInterface methods (98583 μs)\n[ TEST ] test.cpp:209: Call IPC method after client connection is closed\n[ PASS ] test.cpp:209: Call IPC method after client connection is closed (6840 μs)\n[ TEST ] test.cpp:226: Calling IPC method after server connection is closed\n[ PASS ] test.cpp:226: Calling IPC method after server connection is closed (6811 μs)\n[ TEST ] test.cpp:243: Calling IPC method and disconnecting during the call\n[ PASS ] test.cpp:243: Calling IPC method and disconnecting during the call (6656 μs)\n[ TEST ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call\n[ PASS ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call (12740 μs)\n[ TEST ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error\n[ PASS ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error (14853 μs)\n6 test(s) passed \n[ TEST ] test.cpp:117: Call FooInterface methods\n[ PASS ] test.cpp:117: Call FooInterface methods (45695 μs)\n[ TEST ] test.cpp:209: Call IPC method after client connection is closed\n[ PASS ] test.cpp:209: Call IPC method after client connection is closed (7465 μs)\n[ TEST ] test.cpp:226: Calling IPC method after server connection is closed\n[ PASS ] test.cpp:226: Calling IPC method after server connection is closed (5967 μs)\n[ TEST ] test.cpp:243: Calling IPC method and disconnecting during the call\n[ PASS ] test.cpp:243: Calling IPC method and disconnecting during the call (7727 μs)\n[ TEST ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call\n[ PASS ] test.cpp:263: Calling IPC method, disconnecting and blocking during the call (9699 μs)\n[ TEST ] test.cpp:312: Make simultaneous IPC calls to trigger 'thread busy' error\n... (hang)\n```\n\nThe bt looks like this:\n\n```\n(gdb) thread apply all bt\n\nThread 3 (LWP 106816 \"mptest\"):\n#0  __cp_end () at src/thread/x86_64/syscall_cp.s:29\n#1  0x00007f21f68bb868 in __syscall_cp_c (nr=281, u=<optimized out>, v=<optimized out>, w=<optimized out>, x=<optimized out>, y=0, z=8) at src/thread/pthread_cancel.c:33\n#2  0x00007f21f689896c in epoll_pwait (fd=3, ev=0x7f21f6449ae0, cnt=16, to=-1, sigs=0x0) at src/linux/epoll.c:28\n#3  0x00005638a3067426 in kj::UnixEventPort::wait (this=0x7f21f68fb4b8) at /usr/src/kj/io.h:284\n#4  0x00005638a2fd0228 in kj::EventLoop::wait (this=this@entry=0x7f21f68fb590) at /usr/src/kj/async.c++:1850\n#5  0x00005638a2fd594c in kj::_::waitImpl (node=..., result=..., waitScope=..., location=...) at /usr/src/kj/async.c++:1984\n#6  0x00005638a2ed3eb6 in kj::Promise<unsigned long>::wait (this=0x7f21f644a070, waitScope=..., location=...) at /ci_container_base/depends/x86_64-pc-linux-musl/include/kj/async-inl.h:1357\n#7  mp::EventLoop::loop (this=this@entry=0x7f21f644a7b0) at ./ipc/libmultiprocess/src/mp/proxy.cpp:240\n#8  0x00005638a2dbcf58 in mp::test::TestSetup::TestSetup(bool)::{lambda()#1}::operator()() const (__closure=<optimized out>) at ./ipc/libmultiprocess/test/mp/test/test.cpp:99\n#9  0x00005638a2dbd1a9 in std::__invoke_impl<void, mp::test::TestSetup::TestSetup(bool)::{lambda()#1}>(std::__invoke_other, mp::test::TestSetup::TestSetup(bool)::{lambda()#1}&&) (__f=...) at /usr/include/c++/15.2.0/bits/invoke.h:63\n#10 std::__invoke<mp::test::TestSetup::TestSetup(bool)::{lambda()#1}>(mp::test::TestSetup::TestSetup(bool)::{lambda()#1}&&) (__fn=...) at /usr/include/c++/15.2.0/bits/invoke.h:98\n#11 std::thread::_Invoker<std::tuple<mp::test::TestSetup::TestSetup(bool)::{lambda()#1}> >::_M_invoke<0ul>(std::_Index_tuple<0ul>) (this=<optimized out>) at /usr/include/c++/15.2.0/bits/std_thread.h:303\n#12 std::thread::_Invoker<std::tuple<mp::test::TestSetup::TestSetup(bool)::{lambda()#1}> >::operator()() (this=<optimized out>) at /usr/include/c++/15.2.0/bits/std_thread.h:310\n#13 std::thread::_State_impl<std::thread::_Invoker<std::tuple<mp::test::TestSetup::TestSetup(bool)::{lambda()#1}> > >::_M_run() (this=<optimized out>) at /usr/include/c++/15.2.0/bits/std_thread.h:255\n#14 0x00007f21f6695680 in ?? () from /usr/lib/libstdc++.so.6\n#15 0x00007f21f68bc573 in start (p=<optimized out>) at src/thread/pthread_create.c:207\n#16 0x00007f21f68bdec1 in __clone () at src/thread/x86_64/clone.s:22\nBacktrace stopped: frame did not save the PC\n\nThread 2 (LWP 106817 \"mptest\"):\n#0  __cp_end () at src/thread/x86_64/syscall_cp.s:29\n#1  0x00007f21f68bb868 in __syscall_cp_c (nr=202, u=<optimized out>, v=<optimized out>, w=<optimized out>, x=<optimized out>, y=0, z=0) at src/thread/pthread_cancel.c:33\n#2  0x00007f21f68bad24 in __futex4_cp (addr=0x7f21f63d27a4, op=0, val=2, to=<optimized out>) at src/thread/__timedwait.c:24\n#3  __timedwait_cp (addr=addr@entry=0x7f21f63d27a4, val=val@entry=2, clk=clk@entry=0, at=at@entry=0x0, priv=128, priv@entry=1) at src/thread/__timedwait.c:52\n#4  0x00007f21f68bbc05 in __pthread_cond_timedwait (c=0x7f21f659a708, m=0x7f21f659a6e0, ts=0x0) at src/thread/pthread_cond_timedwait.c:100\n#5  0x00007f21f668b39d in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/libstdc++.so.6\n#6  0x00005638a2ed3548 in std::condition_variable::wait<mp::Waiter::wait<mp::ProxyServer<mp::ThreadMap>::makeThread(mp::ThreadMap::Server::MakeThreadContext)::<lambda()>::<lambda()> >(mp::Lock&, mp::ProxyServer<mp::ThreadMap>::makeThread(mp::ThreadMap::Server::MakeThreadContext)::<lambda()>::<lambda()>)::<lambda()> > (this=0x7f21f659a708, __lock=..., __p=...) at /usr/include/c++/15.2.0/condition_variable:107\n#7  mp::Waiter::wait<mp::ProxyServer<mp::ThreadMap>::makeThread(mp::ThreadMap::Server::MakeThreadContext)::<lambda()>::<lambda()> > (this=0x7f21f659a6e0, lock=..., pred=...) at ./ipc/libmultiprocess/include/mp/proxy-io.h:343\n#8  operator() (__closure=<optimized out>) at ./ipc/libmultiprocess/src/mp/proxy.cpp:419\n#9  0x00005638a2ed3733 in std::__invoke_impl<void, mp::ProxyServer<mp::ThreadMap>::makeThread(mp::ThreadMap::Server::MakeThreadContext)::<lambda()> > (__f=...) at /usr/include/c++/15.2.0/bits/invoke.h:63\n#10 std::__invoke<mp::ProxyServer<mp::ThreadMap>::makeThread(mp::ThreadMap::Server::MakeThreadContext)::<lambda()> > (__fn=...) at /usr/include/c++/15.2.0/bits/invoke.h:98\n#11 std::thread::_Invoker<std::tuple<mp::ProxyServer<mp::ThreadMap>::makeThread(mp::ThreadMap::Server::MakeThreadContext)::<lambda()> > >::_M_invoke<0> (this=<optimized out>) at /usr/include/c++/15.2.0/bits/std_thread.h:303\n#12 std::thread::_Invoker<std::tuple<mp::ProxyServer<mp::ThreadMap>::makeThread(mp::ThreadMap::Server::MakeThreadContext)::<lambda()> > >::operator() (this=<optimized out>) at /usr/include/c++/15.2.0/bits/std_thread.h:310\n#13 std::thread::_State_impl<std::thread::_Invoker<std::tuple<mp::ProxyServer<mp::ThreadMap>::makeThread(mp::ThreadMap::Server::MakeThreadContext)::<lambda()> > > >::_M_run(void) (this=<optimized out>) at /usr/include/c++/15.2.0/bits/std_thread.h:255\n#14 0x00007f21f6695680 in ?? () from /usr/lib/libstdc++.so.6\n#15 0x00007f21f68bc573 in start (p=<optimized out>) at src/thread/pthread_create.c:207\n#16 0x00007f21f68bdec1 in __clone () at src/thread/x86_64/clone.s:22\nBacktrace stopped: frame did not save the PC\n\nThread 1 (LWP 106803 \"mptest\"):\n#0  __cp_end () at src/thread/x86_64/syscall_cp.s:29\n#1  0x00007f21f68bb868 in __syscall_cp_c (nr=202, u=<optimized out>, v=<optimized out>, w=<optimized out>, x=<optimized out>, y=0, z=0) at src/thread/pthread_cancel.c:33\n#2  0x00007f21f68bad24 in __futex4_cp (addr=0x7ffd73a69134, op=0, val=2, to=<optimized out>) at src/thread/__timedwait.c:24\n#3  __timedwait_cp (addr=addr@entry=0x7ffd73a69134, val=val@entry=2, clk=clk@entry=0, at=at@entry=0x0, priv=128, priv@entry=1) at src/thread/__timedwait.c:52\n#4  0x00007f21f68bbc05 in __pthread_cond_timedwait (c=0x7f21f659a608, m=0x7f21f659a5e0, ts=0x0) at src/thread/pthread_cond_timedwait.c:100\n#5  0x00007f21f668b39d in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/libstdc++.so.6\n#6  0x00005638a2da84ac in std::condition_variable::wait<mp::Waiter::wait<mp::test::TestCase312::run()::<lambda()> >(mp::Lock&, mp::test::TestCase312::run()::<lambda()>)::<lambda()> > (this=0x7f21f659a608, __lock=..., __p=...) at /usr/include/c++/15.2.0/condition_variable:107\n#7  mp::Waiter::wait<mp::test::TestCase312::run()::<lambda()> > (this=0x7f21f659a5e0, lock=..., pred=...) at ./ipc/libmultiprocess/include/mp/proxy-io.h:343\n#8  mp::test::TestCase312::run (this=<optimized out>) at ./ipc/libmultiprocess/test/mp/test/test.cpp:373\n#9  0x00005638a2ede23b in kj::TestRunner::run()::{lambda()#1}::operator()() const (__closure=<optimized out>) at /usr/src/kj/test.c++:318\n#10 kj::runCatchingExceptions<kj::TestRunner::run()::{lambda()#1}>(kj::TestRunner::run()::{lambda()#1}&&) (func=...) at /usr/src/kj/exception.h:371\n#11 kj::TestRunner::run (this=0x7ffd73a6a040) at /usr/src/kj/test.c++:318\n#12 0x00005638a2edf2e3 in kj::TestRunner::getMain()::{lambda(auto:1&, (auto:2&&)...)#7}::operator()<kj::TestRunner>(kj::TestRunner&) (__closure=<optimized out>, s=...) at /usr/src/kj/test.c++:217\n#13 kj::_::BoundMethod<kj::TestRunner&, kj::TestRunner::getMain()::{lambda(auto:1&, (auto:2&&)...)#7}, kj::TestRunner::getMain()::{lambda(auto:1&, (auto:2&&)...)#8}>::operator()<>() (this=<optimized out>) at /usr/src/kj/function.h:263\n#14 kj::Function<kj::MainBuilder::Validity ()>::Impl<kj::_::BoundMethod<kj::TestRunner&, kj::TestRunner::getMain()::{lambda(auto:1&, (auto:2&&)...)#7}, kj::TestRunner::getMain()::{lambda(auto:1&, (auto:2&&)...)#8}> >::operator()() (this=<optimized out>) at /usr/src/kj/function.h:142\n#15 0x00005638a308cd48 in kj::Function<kj::MainBuilder::Validity()>::operator() (this=<optimized out>) at /usr/src/kj/function.h:119\n#16 kj::MainBuilder::MainImpl::operator() (this=<optimized out>, programName=..., params=...) at /usr/src/kj/main.c++:623\n#17 0x00005638a3091b95 in kj::Function<void(kj::StringPtr, kj::ArrayPtr<kj::StringPtr const>)>::Impl<kj::MainBuilder::MainImpl>::operator() (this=<optimized out>, params#0=..., params#1=...) at /usr/src/kj/function.h:142\n#18 0x00005638a308d1cb in kj::Function<void(kj::StringPtr, kj::ArrayPtr<kj::StringPtr const>)>::operator() (this=0x7ffd73a6a050, params#0=..., params#1=...) at /usr/src/kj/function.h:119\n#19 operator() (__closure=<optimized out>) at /usr/src/kj/main.c++:228\n#20 kj::runCatchingExceptions<kj::runMainAndExit(ProcessContext&, MainFunc&&, int, char**)::<lambda()> > (func=...) at /usr/src/kj/exception.h:371\n#21 kj::runMainAndExit (context=..., func=..., argc=<optimized out>, argc@entry=1, argv=argv@entry=0x7ffd73a6a0f8) at /usr/src/kj/main.c++:228\n#22 0x00005638a2edc4c9 in main (argc=1, argv=0x7ffd73a6a0f8) at /usr/src/kj/test.c++:381\n",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2025-12-05T10:48:01Z",
+      "updated_at": "2025-12-05T13:43:41Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34014",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "I can also reproduce the i686 segfault from the CI run locally, but I suspect it is similar to issue https://github.com/bitcoin/bitcoin/issues/31772",
+          "created_at": "2025-12-05T10:51:48Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @Sjors @ryanofsky ",
+          "created_at": "2025-12-05T10:53:38Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Thanks for the report. I also saw failures in the \"thread busy\" test on i686 here https://github.com/bitcoin-core/libmultiprocess/pull/218#issuecomment-3366301777.  The problem here seems easier to reproduce though, so maybe solving this issue with the \"thread busy\" the test will help with the other issue too.\n\nCurious how long approximately it takes for the hang to happen?",
+          "created_at": "2025-12-05T12:40:20Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Curious how long approximately it takes for the hang to happen?\n\nMaybe 5-15 minutes on my system. Just make sure to saturate all CPUs on the system. (You can run the functional tests with -j 99, or compile without cccache in a loop.)",
+          "created_at": "2025-12-05T12:48:45Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I also saw failures in the \"thread busy\" test on i686 here\n\nI tried reproducing those in `podman run -it --rm --platform linux/i386 alpine:3.23` (with the steps from above), and also in `podman run -it --rm --platform linux/i386 debian:unstable` (using `FILE_ENV=\"./ci/test/00_setup_env_native_nowallet.sh\"` or `FILE_ENV=\"./ci/test/00_setup_env_native_previous_releases.sh\"`), but they wouldn't segfault, only hang.\n\nOnly the modified `FILE_ENV=\"./ci/test/00_setup_env_i686_no_ipc.sh\"` would reproduce the segfault, so i guess it is the gcc+clang mixing 🤷 ",
+          "created_at": "2025-12-05T13:01:57Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> so i guess it is the gcc+clang mixing 🤷\n\nOh, fun\n\n",
+          "created_at": "2025-12-05T13:43:41Z"
+        }
+      ]
+    },
+    {
+      "number": 34013,
+      "title": "rpc: getrawtransaction lookup by witness txid",
+      "body": "For Stratum v2 custom job declaration to be bandwidth efficient, the pool can request[^0] only the transactions that it doesn't know about.\n\nThe spec doesn't specify how this is achieved, but one method is to call `getrawtransaction` on each of the transaction ids listed in [DeclareMiningJob](https://stratumprotocol.org/specification/06-Job-Declaration-Protocol?query=DeclareMiningJob#644-declareminingjob-client-server) (or a subset if the pool software maintains a cache).\n\nUnfortunately this RPC only supports `txid`, not `wtxid`.\n\nI think the easiest change would be:\n- have `getrawtransaction` accept either `txid` or `wtxid` as the first _positional_ argument\n- add a `GetTransaction` that takes a `Wtxid`\n- try with `Txid` first, `Wtxid` if that fails\n- optionally add a \"hash_type\" argument: `txid`, `txid` or `*`\n\nSee also:\n- https://github.com/stratum-mining/sv2-spec/issues/170\n\n[^0]: there's two reasons the pool requests these transactions: to approve the template and to broadcast the block if a solution is found (the miner will also broadcast via their template provider) ",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-12-05T10:31:52Z",
+      "updated_at": "2025-12-10T07:37:36Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34013",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "Fi3",
+          "body": "ACK for dmnd or other pools that will implement sv2 and want to do job declaration and being able to relay the blocks founded by the miners, having fast way to retrieve tx data from the node using a wtxid would be very useful.   ",
+          "created_at": "2025-12-05T11:22:21Z"
+        },
+        {
+          "user": "sedited",
+          "body": "It's not clear to me why this should happen through RPC if they are using the IPC interface already.",
+          "created_at": "2025-12-05T11:26:20Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@sedited there's different \"they\"s here:\n\n1. The miner who proposes a block, they use IPC\n2. The pool software that verifies the template and broadcasts a solution: the current SRI implementation doesn't use IPC\n\nThat said, I'm thinking about making an IPC method to fetch transactions more efficiently.",
+          "created_at": "2025-12-05T11:30:20Z"
+        },
+        {
+          "user": "Fi3",
+          "body": "> It's not clear to me why this should happen through RPC if they are using the IPC interface already.\n\nThe [Template Provider](https://github.com/Sjors/sv2-tp/)  is using the IPC interface but the Job Declarator Server is not, and it could need to get tx data for tx in jobs declared by the miner. Having a method to do that without asking to the miner is very helpful.  The Job Declarator Server could use the IPC interface, but I don't see why this should not be possible trough the RPC interface. And as an implementor I prefer to use RPC for  Job Declarator Server since IPC is very new and I don't need it if I have this in RPC.\n\nhttps://stratumprotocol.org/specification",
+          "created_at": "2025-12-05T11:31:49Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "currently SRI Job Declarator Server monitors the mempool via RPC and we have considered switching to ZMQ on this issue https://github.com/stratum-mining/sv2-apps/issues/26, which is about to be tackled soon\n\nbut I like @Sjors idea of leveraging IPC for this purpose, we can use this JDS refactoring to drive the development and stabilization of this new feature on Bitcoin Core side\n\n(perhaps on a separate issue on this repo?)",
+          "created_at": "2025-12-05T11:42:50Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ZMQ will give you all new mempool transactions, whereas a new `getRawTransactions()` IPC method would only give you the ones you request. As does the RPC change suggested here.\n\nThat's probably enough if you keep a local cache of transactions you've seen before and only request unknown ones from `DeclareMiningJob`.\n\n> perhaps on a separate issue on this repo\n\nYes, an IPC method would need a different issue, or the pull request once I write it.",
+          "created_at": "2025-12-05T11:52:56Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "See #34020 for the IPC approach.",
+          "created_at": "2025-12-05T19:15:39Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "I see @Fi3 manifested interest for this, so I'd assume he still wants his JDS implementation to rely on a poll-style RPC-based design for a while\n\non SRI we're aiming for a stream-based design under the efforts for https://github.com/stratum-mining/sv2-apps/issues/26\n\nso IPC would be desirable, but as a potential replacement for ZMQ `rawtx` subscription, and not as a in-place replacement for `getrawtransaction`",
+          "created_at": "2025-12-06T16:30:56Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> for a while\n\nI would not expect this to land before v31 in spring 2026, so by that time @Fi3 might have finished implementing IPC support and could just use the more performant #34020.",
+          "created_at": "2025-12-07T10:03:50Z"
+        },
+        {
+          "user": "Fi3",
+          "body": "> > for a while\n> \n> I would not expect this to land before v31 in spring 2026, so by that time [@Fi3](https://github.com/Fi3) might have finished implementing IPC support and could just use the more performant [#34020](https://github.com/bitcoin/bitcoin/pull/34020).\n\nyep this is likley. @plebhash about the stream style design I don't think that is good idea, I do not want to have every tx in mempool around but just the ones that are actually added to templates.",
+          "created_at": "2025-12-10T07:00:02Z"
+        },
+        {
+          "user": "plebhash",
+          "body": "@Fi3 thanks for your input!\n\nlet's move this discussion to #34030 and leave this issue for the RPC discussion",
+          "created_at": "2025-12-10T07:30:29Z"
+        }
+      ]
+    },
+    {
+      "number": 34012,
+      "title": "ci: failure in Windows native job",
+      "body": "Has been re-run multiple times.\nhttps://github.com/bitcoin/bitcoin/actions/runs/19800578606/job/57234826268?pr=33973#step:9:900:\n```bash\n\nCompleted submission of libevent[core,thread]:x64-windows@2.1.12#7 to 1 binary cache(s) in 248 ms\nWaiting for 1 remaining binary cache submissions...\nCompleted submission of sqlite3[core,json1]:x64-windows@3.50.4 to 1 binary cache(s) in 399 ms (1/1)\nAll requested installations completed successfully in: 2.4 min\n-- Running vcpkg install - done\n-- Selecting Windows SDK version 10.0.26100.0 to target Windows 10.0.20348.\n-- The CXX compiler identification is MSVC 19.44.35221.0\n-- Detecting CXX compiler ABI info\n-- Detecting CXX compiler ABI info - done\n-- Check for working CXX compiler: C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe - skipped\n-- Detecting CXX compile features\n-- Detecting CXX compile features - done\n-- Performing Test CXX_SUPPORTS__WX__OPTIONS_STRICT\n-- Performing Test CXX_SUPPORTS__WX__OPTIONS_STRICT - Success\nCMake Error at C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageHandleStandardArgs.cmake:233 (message):\n  Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)\nCall Stack (most recent call first):\n  C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageHandleStandardArgs.cmake:603 (_FPHSA_FAILURE_MESSAGE)\n  C:/Program Files/CMake/share/cmake-3.31/Modules/FindPkgConfig.cmake:114 (find_package_handle_standard_args)\n  C:/vcpkg/scripts/buildsystems/vcpkg.cmake:908 (_find_package)\n  cmake/module/FindZeroMQ.cmake:31 (find_package)\n  C:/vcpkg/scripts/buildsystems/vcpkg.cmake:908 (_find_package)\n  CMakeLists.txt:127 (find_package)\n\n\n-- Configuring incomplete, errors occurred!\nError: Process completed with exit code 1.\n```",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2025-12-05T09:59:32Z",
+      "updated_at": "2025-12-05T13:38:09Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34012",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "I haven't looked here, but generally CI does not work well with re-running tasks, when the code is merged with current master, but the ci config is stale.\n\nThe solution is to minimize the ci config (yaml) and pull out all ci settings and ci scripts into stand-alone files (similar to the files `.github/ci-lint-exec.py  .github/ci-test-each-commit-exec.py`)\n\nAs the error is zmq related, it could be due to 49c672853503e561cd1e7fed19a32f21ad345370, but again, I haven't checked this closely.",
+          "created_at": "2025-12-05T10:16:00Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> I haven't looked here, but generally CI does not work well with re-running tasks, when the code is merged with current master, but the ci config is stale.\n> \n> As the error is zmq related, it could be due to [49c6728](https://github.com/bitcoin/bitcoin/commit/49c672853503e561cd1e7fed19a32f21ad345370), but again, I haven't checked this closely.\n\nI concur with both assessments above.\n\nThe `.github/workflows/ci.yml` for the failed run looks outdated: https://github.com/bitcoin/bitcoin/actions/runs/19800578606/workflow?pr=33973.\n\nUPDATE. Although the issue occurred in the Windows CI job, it is not specific to Windows.",
+          "created_at": "2025-12-05T11:41:23Z"
+        }
+      ]
+    },
+    {
+      "number": 34009,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "fugatecorey22",
+      "created_at": "2025-12-05T05:16:05Z",
+      "updated_at": "2025-12-05T05:16:14Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34009",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "\nLLM spam detection (✨ experimental): SPAM. The content is just minimal setup/boilerplate commands with no issue description, problem, or relation to the repository — lacking actionable context and appears irrelevant.\n\n♻️ Automatically wiping, closing, and locking for now based on heuristics.\nGenerally, please focus on creating high-quality, original content that demonstrates a clear\nunderstanding of the project's requirements and goals.\n",
+          "created_at": "2025-12-05T05:16:12Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 7
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:27:36.465858+00:00",
+  "date": "2025-11-01",
+  "pull_requests": [
+    {
+      "number": 33759,
+      "title": "Fix BIP143 standardness rules for CHECKMULTISIG",
+      "body": "From https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki#restrictions-on-public-key-type\r\n\r\n> As a default policy, only compressed public keys are accepted in P2WPKH and\r\n> P2WSH. Each public key passed to a sigop inside version 0 witness program must\r\n> be a compressed key: the first byte MUST be either 0x02 or 0x03, and the size\r\n> MUST be 33 bytes. Transactions that break this rule will not be relayed or mined\r\n> by default.\r\n\r\nPR #8499 's implemenation is insufficent to meet BIP143's requirements as it only checks those pubkeys processed by CHECKMULTISIG, whereas BIP143 requires that every public key passed to the CHECKMULTISIG be validated.\r\n\r\nNote: these restrictions are policy only and not consensus rules.\r\n",
+      "state": "open",
+      "user": "roconnor-blockstream",
+      "created_at": "2025-11-01T01:54:02Z",
+      "updated_at": "2025-12-30T17:02:44Z",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33759",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33759.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [ajtowns](https://github.com/bitcoin/bitcoin/pull/33759#issuecomment-3482564006), [billymcbip](https://github.com/bitcoin/bitcoin/pull/33759#issuecomment-3699958203) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33755](https://github.com/bitcoin/bitcoin/pull/33755) (Relax standardness rules regarding CHECKMULTISIG by roconnor-blockstream)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-11-01T01:54:06Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "Concept NACK. This doesn't seem like a productive use of anyone's time? \"passed to a sigop\" is at most ambiguous, and that ambiguity is already resolved by the implementation; if it's a problem, update the BIP text to match the implementation. Changing the implementation risks \"soft\" confiscating funds (ie, transactions that were relayable become non-standard and can only be mined directly), which doesn't seem at all worth doing.",
+          "created_at": "2025-11-03T20:55:14Z"
+        },
+        {
+          "user": "roconnor-blockstream",
+          "body": "I don't think the wording \"passed to a sigop\" is ambiguous at all, but I'm fine with the BIP text being clarified if someone wants to do that instead.\r\n\r\nI don't have a strong opinion on how to resolve the disagreement.  I do think that updating the implementation is slightly better, but only slightly.",
+          "created_at": "2025-11-03T21:48:54Z"
+        },
+        {
+          "user": "billymcbip",
+          "body": "Concept NACK 5ea1ea880e5edb70e4f2c890cebc56f78ba10516\r\n\r\nThis would further increase the complexity of `OP_CHECKMULTISIG` in `interpreter.cpp` and it's a net LOC increase.\r\n\r\nThe unit tests explicitly assert that unused uncompressed keys are policy-valid. Even if our current implementation does not match BIP-143, this change would break an existing expectation.\r\n\r\nWe should update BIP-143 instead and align it with the implementation.",
+          "created_at": "2025-12-30T17:02:41Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33761,
+      "title": "Is not demanding low-R grinding still relevant for external signers?",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nIt seems that largest transaction coming from (my) external signer is not accepted in mempool. From what I understand, low-R grinding is not expected from external signers. That's what I understand <https://github.com/bitcoin/bitcoin/issues/26030>.\n\nIs this still true? (it is desirable) This is the result for me in 'regtest' environment on Bitcoin Core v29.2.\n\n### Expected behaviour\n\nAny transaction properly signed by external signer (because potentially low-capacity embedded device) is accepted.\n\n### Steps to reproduce\n\nConnect \"external signer\" via External Signer interface (command-line tool, directly, not through HWI)\n\nSign transaction until transaction with largest size is encountered.\n\n### Relevant log output\n\nThree transactions. Largest is not accepted for me on 'regtest', and to my knowledge signature is good.\n\n```\n020000000122d24e014ba0566c52dcedc316116fc6c0506d8d4506a59df48c086dafa944be010000006a47304402203d2e4ad14e4ffde063fab547d074d842060054827dd2db26b6b77ac40faa6aec022014de31cfda5fbe61a789112e106cc07a13a6187682908b22ec28f5b41256dd80012103158a5f4fd7588aa696a13d49889895b4b077aae721b52f9b72cda919ff926dfffeffffff02d2d4e405000000001600143e445eb2b84a73fec1851628a8f20998880af04d00c39dd0000000001976a914d2d44c8765409c6cecb3eb0861f7beb78f232c9e88ac00000000\n```\n\n```\n0200000001b0a283e1c1634f1eb748cb1a7ca0c6bda1d385037a6a626cdf3aa0b865a1be9e000000006b483045022100d412738cb2a54c530f62ba4f2458660dfab5239297df074bf5bb829f369c4c70022077f6cd209178e9aff43269c42c8df34c710096aa88c8a77d8f860db218603e050121031d633694c1ba15687ff4c1eb9ecb5ec730d44131008fa250d49e5f80dc516379feffffff0288dde405000000001600143e445eb2b84a73fec1851628a8f20998880af04d00a493d6000000001976a91418a4d1bec02c5489bebdd6fbb304e8e1b173733588ac00000000\n```\n\n```\n020000000122d24e014ba0566c52dcedc316116fc6c0506d8d4506a59df48c086dafa944be010000006c493046022100d21e82e9f292654f52bb3623f803b07e74c3b91f55aad40b6d0f5d767f2b66c9022100826102337dd415d4f9adcb4874da63f7981ffcaff18f0c2a94715d9ea3596c0d012103158a5f4fd7588aa696a13d49889895b4b077aae721b52f9b72cda919ff926dfffeffffff0288dde405000000001600143e445eb2b84a73fec1851628a8f20998880af04d00c39dd0000000001976a914d2d44c8765409c6cecb3eb0861f7beb78f232c9e88ac00000000\n```\n\n### How did you obtain Bitcoin Core\n\nPackage manager\n\n### What version of Bitcoin Core are you using?\n\nv29.2.0\n\n### Operating system and version\n\nFedora\n\n### Machine specifications\n\n_No response_",
+      "state": "closed",
+      "user": "cobratbq",
+      "created_at": "2025-11-01T19:18:21Z",
+      "updated_at": "2025-11-02T21:24:10Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33761",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "achow101",
+          "body": "What is the exact error that you are getting?\n\nThere is no \"demanding\", we cannot demand or request external signers do anything with low-R grinding. All we can do is make a guess about whether low-R grinding will be done, and account for that when selecting inputs so that the fee can be set appropriately. The current behavior is that if an input can be signed by the wallet itself, then we assume low-R grinding will occur. If it cannot be, i.e. the wallet does not have the private keys to sign the input, then we assume that low-R grinding will not occur. The only effect of this should be that sometimes a transaction will pay a slightly higher feerate than specified. It should not cause a transaction to not be accepted to the mempool.",
+          "created_at": "2025-11-02T18:05:11Z"
+        },
+        {
+          "user": "cobratbq",
+          "body": "> What is the exact error that you are getting?\n\nNot error. Every time a transaction is signed and ready in the transaction list, when the transaction is of the largest flavor, it is completely greyed out and status tells me \"_unconfirmed, not in memory pool_\". I cannot find any other explanation why it is always the largest variant (maximum bytes) that is rejected by the memory pool.\n\nNote: this is on `regtest`, so might it be that memory pool rejects it by some average number that is badly determined because there is no (globally determined) average?\n\nMy intuitive guess is that the transaction is signed with a predetermined fee that assumes that either `R` or `s` is slightly smaller, hence not accepted by memory pool. To my knowledge, the signature is correct, as it is always processed in the same way regardless of size.\n \n> There is no \"demanding\", we cannot demand or request external signers do anything with low-R grinding. All we can do is make a guess about whether low-R grinding will be done, and account for that when selecting inputs so that the fee can be set appropriately.\n\nThe fee is guessed beforehand, right? So is it possible that the memory pool rejects the largest transaction because the guess is for a fee for 1 byte less? Or does that not matter for being accepted by the mempool, just that the transaction is slightly less attractive for slightly lesser over-all fee?\n\n> The current behavior is that if an input can be signed by the wallet itself, then we assume low-R grinding will occur. If it cannot be, i.e. the wallet does not have the private keys to sign the input, then we assume that low-R grinding will not occur. The only effect of this should be that sometimes a transaction will pay a slightly higher feerate than specified. It should not cause a transaction to not be accepted to the mempool.\n\nWhen you say \"wallet\", I presume you mean Bitcoin Core in possession of private key in own management? If so, the signer is configured and registered as external signer, and during creation the external signer checkbox is thus also set.",
+          "created_at": "2025-11-02T18:15:01Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Can you try to broadcast the problematic transaction using `sendrawtransaction`? It should give you a more specific error.\n\n> The fee is guessed beforehand, right?\n\nThe fee is set beforehand, the size is guessed.\n\n> So is it possible that the memory pool rejects the largest transaction because the guess is for a fee for 1 byte less?\n\nYes. If you set the feerate to be minrelayfee, and the transaction is larger than was estimated, then the actual feerate will be lower than minrelayfee and the transaction won't be accepted.\n\n> When you say \"wallet\", I presume you mean Bitcoin Core in possession of private key in own management?\n\nYes.\n\n***\n\nIn the 3 transactions you posted, the first one is 222 bytes, the second 223, and the last 224. Of those 3 transactions, the 222 byte has a signature with low-R low-S, the 223 is high-R low-S, and the 224 is high-R high-S.\n\nFrom your description, the 224 bytes transaction is the one that isn't being accepted? In that case, it is because high-S has been non-standard for a very long time now. That itself is an issue. When the wallet does size estimation, it always assumes a low-S because high-S itself won't be accepted by the mempool.\n\nYou need to work with the creator of your external signing tool to have it make signatures with only low-S.",
+          "created_at": "2025-11-02T18:28:16Z"
+        },
+        {
+          "user": "cobratbq",
+          "body": "> Can you try to broadcast the problematic transaction using `sendrawtransaction`? It should give you a more specific error.\n\nWill try.\n\n> [..]\n> \n> > So is it possible that the memory pool rejects the largest transaction because the guess is for a fee for 1 byte less?\n> \n> Yes. If you set the feerate to be minrelayfee, and the transaction is larger than was estimated, then the actual feerate will be lower than minrelayfee and the transaction won't be accepted.\n\nNot sure if this applies in 'regtest'. I'll see if I can query the 'minrelayfee' via the console or something.\n\n> [..]\n> \n> In the 3 transactions you posted, the first one is 222 bytes, the second 223, and the last 224. Of those 3 transactions, the 222 byte has a signature with low-R low-S, the 223 is high-R low-S, and the 224 is high-R high-S.\n\nCorrect.\n\n> From your description, the 224 bytes transaction is the one that isn't being accepted? In that case, it is because high-S has been non-standard for a very long time now. That itself is an issue. When the wallet does size estimation, it always assumes a low-S because high-S itself won't be accepted by the mempool.\n\nOkay, so it is most likely about high-S.\n\nAny ref of high-S / low-S?\n\nI started from a plain embedded ECDSA p256r1 library, so any necessary adjustments I make myself.\n\nI'd guess it's about something like clearing a highest bit somewhere, which then becomes the sign bit in the ASN.1-encoded DER-encoding. I presume there is some resource that evaluates the loss of randomness in this activity or otherwise clarifies why this is chosen.\n\n> You need to work with the creator of your external signing tool to have it make signatures with only low-S.\n\nI am the dev. (It's an open source project.)",
+          "created_at": "2025-11-02T19:04:05Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> Any ref of high-S / low-S?\n\nhttps://github.com/bitcoin/bips/blob/master/bip-0062.mediawiki#user-content-Low_S_values_in_signatures (the BIP itself is withdrawn, but this section on low-S is relevant in this dicsussion)",
+          "created_at": "2025-11-02T19:14:56Z"
+        },
+        {
+          "user": "cobratbq",
+          "body": "This seems to do the job. Right, so high-`s` was the problem. Given that it produces signatures of both 222 bytes and 223 bytes, high `R` must indeed (still) be accepted.\n\nSo, essentially `s' = n - s` with `n` being the order of the curve. Except that your reference writes out the value of `n` itself.",
+          "created_at": "2025-11-02T21:22:16Z"
+        }
+      ]
+    },
+    {
+      "number": 33760,
+      "title": ".",
+      "body": "### Please describe the feature you'd like to see added.\n\nBitcoin you can use as a community \n\n### Is your feature related to a problem, if so please describe it.\n\n_No response_\n\n### Describe the solution you'd like\n\n_No response_\n\n### Describe any alternatives you've considered\n\n_No response_\n\n### Please leave any additional context\n\n_No response_",
+      "state": "closed",
+      "user": "Mdhlikoo-create",
+      "created_at": "2025-11-01T08:20:37Z",
+      "updated_at": "2025-11-01T09:13:32Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33760",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 1,
+    "issues": 2
+  }
+}

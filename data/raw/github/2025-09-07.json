@@ -1,0 +1,368 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:12:12.305543+00:00",
+  "date": "2025-09-07",
+  "pull_requests": [
+    {
+      "number": 33335,
+      "title": "txgraph: randomize order of same-feerate distinct-cluster transactions",
+      "body": "Part of #30289.\r\n\r\nBefore, the implicit ordering of transactions in a TxGraph's main graph is sorted by:\r\n- feerate, high to low\r\n- `Cluster`, low to high `m_sequence`\r\n- linearization order within clusters\r\n\r\nHowever, since `m_sequence` values are assigned deterministically and predictably, the ordering of same-feerate distinct-Cluster transactions can reveal something about the order they were inserted into `TxGraph`.\r\n\r\nIn #28676, this ordering (through `TxGraph::CompareMainOrder`) is used to decide the order of to-be-announced transactions. These should not expose information about insertion order.\r\n\r\nTo deal with this, do not compare the `m_sequence` values directly, but hash them with a fixed but random key first. In case this yields a collision (which needs ~192000 clusters to have a probability of 10^-9 of existing), fall back to comparing the `m_sequence` values directly.\r\n\r\nAlternatives: we could instead use the pre-cluster-mempool approach of sorting by wtxid in case of ties, which is equally non-revealing, and deterministic. I find it cleaner to have a randomized internal total ordering rather than needing a partial ordering within `TxGraph` that needs to be complemented by tie-breaking logic inside the mempool, however, and I don't think the determinism is that valuable.\r\n\r\nFor context: https://github.com/bitcoin/bitcoin/pull/28676#discussion_r2328804847\r\n",
+      "state": "closed",
+      "user": "sipa",
+      "created_at": "2025-09-07T23:43:54Z",
+      "updated_at": "2026-01-15T05:25:27Z",
+      "comments": 19,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33335",
+      "labels": [
+        "Mempool"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33335.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [instagibbs](https://github.com/bitcoin/bitcoin/pull/33335#issuecomment-3671600016) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34257](https://github.com/bitcoin/bitcoin/pull/34257) (txgraph: deterministic optimal transaction order by sipa)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-07T23:43:59Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "concept ACK, I also think it removes the kinda weird behavior where same CFR clusters get mined/evicted based on the underlying cluster's original sequence value",
+          "created_at": "2025-09-11T13:17:31Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Rebased on top of #33157, as there are some conflicts, and I expect the other one will go in first.",
+          "created_at": "2025-09-17T15:04:34Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Rebased.",
+          "created_at": "2025-10-12T13:02:23Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "f0699bd5718eb099e242900d2b4494c171d70825 does something similar, with making chunk ordering within the *same cluster* at same chunk feerate randomized ",
+          "created_at": "2025-12-15T20:13:50Z"
+        },
+        {
+          "user": "sipa",
+          "body": "@instagibbs Indeed, and with the same rationale.",
+          "created_at": "2025-12-15T20:52:09Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "Should TxGraph::m_rng be instrumented to allow it being deterministic to increase fuzz stability?",
+          "created_at": "2025-12-18T17:08:19Z"
+        },
+        {
+          "user": "sipa",
+          "body": "The `txgraph` tests sets the RNG to deterministic mode before every run, see the `SeedRandomStateForTest(SeedRand::ZEROS);` call at the start.\r\n\r\nWithout that, there is even logic to show an error if the global RNG is used. See `CheckGlobalsImpl::~CheckGlobalsImpl` in src/test/fuzz/util/check_globals.cpp.",
+          "created_at": "2025-12-18T18:13:37Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "ACK e325c3aff6b2bcff6a409a1b4c2ac1857c725fc6",
+          "created_at": "2025-12-18T18:29:55Z"
+        },
+        {
+          "user": "sipa",
+          "body": "After discussion with @gmaxwell, there is a possibility to do something more deterministic here, though I'm not sure it's worth it.\r\n\r\nIt would be possible to sort by this metric:\r\n* First by chunk feerate\r\n* Then by cumulative equal-feerate chunk size: the sum of the sizes within all chunks of the same feerate in the same cluster, up to and including the one that holds the transaction under consideration.\r\n* Then by salted hash of cluster id.\r\n* Then by position within the chunk (or cluster).\r\n\r\nInstead of this \"sum of sizes of transactions in equal-feerate chunks up to current chunk\", it can be any function of the cluster that is monotonically increasing within equal-feerate transaction groups of the same cluster. It can even be multiple functions, e.g. first sum of sizes, and then sum of hashes of topologies of chunks or so.\r\n\r\nThis would make things more deterministic, but in an arbitrary way - making certain transactions preferred over others, without them being fundamentally more desirable for miners. Size at least has some bearing on the block building logic, but it's not clear to me that smallest-first is necessarily best: if the block boundary falls near the end of a group of equal-feerate chunks, you'd want the smallest ones at the end. Using a hash of topology or so is even more arbitrary.",
+          "created_at": "2025-12-27T18:37:41Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "Tend to agree I don't think the additional complexity is worth it since:\r\n1) you're not going to get rid of lots of non-determinism in practice (see brc20 patterns of same-size-same-feerate-same-topo chains)\r\n2) may encourage weird games by transaction makers to \"grind\" it in general case to come in \"on top\", if you consider the more general/arbitrary functions like topology hash.",
+          "created_at": "2025-12-29T15:00:36Z"
+        },
+        {
+          "user": "gmaxwell",
+          "body": "hm? you can absolutely eliminate all non-determinism-- e.g. with the old use the wtxid as a tiebreaker, if nothing else.  I think you'll probably have to eliminate all non-determinism one way or another eventually if this sort order is eventually used for efficient block relay.  It may be desirable to eliminate it now so it doesn't have to be done later and so e.g. metrics that determine if miners are censoring transactions get less noise from randomness here, or even compact block reconstruction rates are less harmed by differences in eviction choices if the network starts evicting.  They're fringe benefits (at least now) but I'm not aware of wtxid grinding to get a slight tiebreak advantage ever having been a concern.  In any case, for the reasons that determinism is better (or worse) any marginal increase in determinism is good/bad.\r\n\r\nMy discussion was sipa was basically just on 'can't you prefer smaller first' under the idea that it would be better for block packing, but he convinced me that the block boundary could fall anywhere in the cluster and so that wasn't an obvious win.  But being able to sort on cumulative size is more or less orthogonal to making the sort more deterministic.\r\n\r\n@0xB10C  any thoughts about block content predictability here?",
+          "created_at": "2025-12-31T16:49:04Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "> e.g. with the old use the wtxid as a tiebreaker, if nothing else\r\n\r\nRight, I was speaking of the exact proposed methods (not wtxid!), we previously used time as a tiebreaker iirc (pre cluster mempool)\r\n\r\nedit: guess I didn't publish my other time related comment\r\n\r\n> I'm not aware of wtxid grinding to get a slight tiebreak advantage ever having been a concern\r\n\r\nWell, I don't think we used wtxid as tiebreak previously, so it wouldn't have been a concern? In practice I don't think it would effect network resources, so I'm not particularly concerned, it's just something new people might do.",
+          "created_at": "2025-12-31T16:52:16Z"
+        },
+        {
+          "user": "gmaxwell",
+          "body": "Ah I guess it was the relay sort tie broke on wtxid then.   In any case I think it's good to tiebreak first on things we want people to do but after all that the choice is something like wtxid or random (I agree arrival order is right out).  A final arbitrary criteria risks that people game it to get a slight preference, but the alternative of random has the downside of making block inclusion/order less consistent between nodes.\r\n",
+          "created_at": "2025-12-31T17:12:32Z"
+        },
+        {
+          "user": "sipa",
+          "body": "There are several places where tie-break decisions need to be made:\r\n1. **The order of equal-feerate chunks in distinct clusters**: currently lowest `cluster_id` first, while this PR makes it uniformly random.\r\n2. **The order of equal-feerate chunks within the same cluster** (without dependency constraints between them): since SFL, smallest chunk first and then uniformly random.\r\n3. **The order of transactions within the same chunk**: since SFL, random but followed by a `PostLinearize()` which in practice often undoes the randomization.\r\n\r\nSo even with this PR, the current situation is arguably inconsistent (we prefer smaller chunks, but don't tie-break based on size elsewhere). I feel like we should make a decision for what properties are desirable, and then implement it consistently. I think we definitely want highest-feerate chunk first (that's what cluster mempool is), and probably want `PostLinearize()` within chunks, as they are objective (even though `PostLinearize()`'s quality improvement isn't actually observable without sub-chunk block template building). But besides those, we could decide:\r\n\r\n* Preference for smaller size or not? While smallest doesn't directly mean better, it's at least objectively relevant to block building, and *if* grinding is somehow an outcome, grinding for smaller size is probably not terrible.\r\n  * (s) Preference for size.\r\n    * For (1), prefer smaller clusters first (h) or smaller equal-feerate-chunks-before (c)\r\n    * For (2), prefer smaller chunks like now.\r\n    * For (3), prefer smaller transactions within chunks first. Optionally (f) or not (m) it could involve preferring higher-feerate transactions within a chunk first too, before preferring smaller size.\r\n  * (u) Do not discriminate based on size at all (including no preference for smaller chunks).\r\n* How to tie-break the rest:\r\n  * (r) Randomly.\r\n  * (t) By txid.\r\n    * For (1), pick lower sum of txids (as bigint) of the whole cluster (h) or sum of txids of equal-feerate-chunks-before (c).\r\n    * For (2), pick chunk with smallest sum of txids first.\r\n    * For (3), pick lowest txid transaction first.\r\n  * (w) Like (t), but use wtxids rather than txids. I think this is (very slightly) worse as it might encourage witness grinding which is slightly easier than full txid grinding, and doesn't have any benefits as far as I can see.\r\n  * (d) Like (t), but use a salted hash of txids rather than directly. This avoids a global bias, and thus avoids grinding, but unlike (r) it is per-host deterministic (and thus won't randomly change any time a cluster is modified).\r\n\r\nI think all of these are doable for implementation. For any of the versions with dependency on wtxid (d/t/w) I think it would involve handing `TxGraph` a callback function which computes a score based on mempool data (as `TxGraph` doesn't have access to wtxids directly).\r\n\r\n* The easiest solution is (ur). Everything random, including no preference for smallest chunk first.\r\n* If size preference is a good discriminator, I think (scfr) makes sense, and probably gets rid of most non-determinism.\r\n* If we want fully deterministic, (scft), but it comes at the cost of some implementation complexity.\r\n\r\nMarking as draft until decided what approach we want.",
+          "created_at": "2025-12-31T19:22:01Z"
+        },
+        {
+          "user": "gmaxwell",
+          "body": "Other preferences like \"creates fewest outputs\" could also be used before breaking on size, but perhaps it would be rare that this would be the tiebreaker?  Like size it has an advantage that if someone is \"gaming\" it that's a good-ish thing.  In any case the more criteria you stick in front of a grindable tiebreaker the less the grinding matters. (Or, if you do go with a local pseudorandom choice, -- which I think you shouldn't-- the more criteria in front of it the less unpredictable the behavior will be.)\r\n\r\nYou could prefer the lowest maximum confirmed input height as a tie breaker before TXID: It's a deterministic, naturally scarce resource-- and favoring the coins that have moved less recently in the event of a tie seems healthy.\r\n\r\nDoes your comparison need to obey the triangle inequality-- I assume not if you could decide 'randomly'?  H(sorted(txid_a,txid_b))^txid_a < H(sorted(txid_a,txid_b))^txid_b  as the tiebraker?  this can't usefully be ground.\r\n",
+          "created_at": "2025-12-31T20:35:29Z"
+        },
+        {
+          "user": "sipa",
+          "body": "> Other preferences like \"creates fewest outputs\" could also be used before breaking on size, but perhaps it would be rare that this would be the tiebreaker? Like size it has an advantage that if someone is \"gaming\" it that's a good-ish thing. \r\n\r\nIndeed, but I don't think it's particularly useful. It should be pretty rare to have a different number of outputs if the size is already the same. And similarly, after grinding for smaller size (which probably already means fewer outputs) you can't really make the number of outputs smaller while keeping the size the same. There is also some CPU/memory cost to having more criteria, especially if it somehow turns out that they need to be cached on a per-chunk basis (which may be the case for (c)).\r\n\r\n> You could prefer the lowest maximum confirmed input height as a tie breaker before TXID: It's a deterministic, naturally scarce resource-- and favoring the coins that have moved less recently in the event of a tie seems healthy.\r\n\r\nHa, tie-break by anti-priority.\r\n\r\n> Does your comparison need to obey the triangle inequality-- I assume not if you could decide 'randomly'? H(sorted(txid_a,txid_b))^txid_a < H(sorted(txid_a,txid_b))^txid_b as the tiebraker? this can't usefully be ground.\r\n\r\nYes, it needs to be consistent. In the current implementation, that's achieved by mapping everything to a score function and comparing the scores. For random, the score isn't actually a function, just a randomly-generated value assigned to each chunk/transaction.\r\n\r\nFor (2) and (3), any scoring function works (even if the result is some complicated tuple of uint256s and feerates), really, because it's internal to the linearization algorithm. Compute once for each chunk/txn throw into the decision-making heaps.\r\n\r\nFor (1), it's more complicated, because it either needs to be cached per chunk/cluster, or recomputed any time two equal-feerate chunks are sorted. Furthermore, it must respect chunk ordering within clusters. So we need something that can be implemented as a function of (cluster, chunk within that cluster), in such a way that f(cluster, chunk_pos1) <= f(cluster, chunk_pos2) if chunk_pos1 <= chunk_pos2 and the two chunks have equal feerate. That's why I suggest sums of values (sizes, or hashes) of the whole cluster, or of equal-feerate chunk prefixes; those are naturally monotonically increasing with chunk position. Anything that's just a function of cluster satisfies this, however.\r\n\r\nSo it's possible for both (1) and (2) to just use SHA256(concat(sorted(txids))) or so (for all txids within cluster, or all txids within chunk). But I'm not sure that is desirable, because it means any new transaction could completely change the existing orderings.\r\n",
+          "created_at": "2025-12-31T20:56:22Z"
+        },
+        {
+          "user": "sipa",
+          "body": "What about the following fully-deterministic ordering:\r\n\r\nFirst, prefer smaller sizes. \r\n* For sorting equal-feerate chunks in distinct clusters: sort by the sum of tx weights across all chunks in the same cluster of the same feerate, up to and including the chunk itself.\r\n* For sorting equal-feerate chunks within the same cluster: sort by chunk weight.\r\n* For sorting transactions within a chunk: sort by tx weight (and PostLinearize afterwards).\r\n\r\nThen, tie-break by \"maximum txid\":\r\n* For sorting equal-feerate chunks (both within and across clusters), sort by the maximum txid within the chunk.\r\n* For sorting transactions within a chunk, use transaction txid (and PostLinearize afterwards).\r\n\r\nI think this can be done with a very small impact on CPU and memory (8 bytes per transaction: 4 to store the equal-feerate-chunk-prefix-weight, and 4 to store the max txid `GraphIndex`).",
+          "created_at": "2026-01-04T21:14:47Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Closing in favor of #34257.",
+          "created_at": "2026-01-15T05:25:20Z"
+        }
+      ]
+    },
+    {
+      "number": 33334,
+      "title": "node: optimize CBlockIndexWorkComparator",
+      "body": "## Summary\r\n\r\nThis PR optimizes `CBlockIndexWorkComparator::operator()` by removing 4 redundant branches.\r\n\r\nThe previous implementation used multiple separate comparisons with explicit branches for greater-than and less-than cases, resulting in unnecessary code paths.\r\n\r\nThe new implementation consolidates comparisons into single inequality checks and reduces complexity while preserving its original behavior. This change is particularly beneficial for loading blocks from files and reindexing.\r\n\r\n## Benchmarks\r\n\r\n```shell\r\ntaskset -c 1 ./bin/bench_bitcoin --filter=\"(CheckBlockIndex|LoadExternalBlockFile)\" -output-csv=bench_old.csv --min-time=30000\r\n```\r\n\r\n> Before:\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|          129,988.82 |            7,692.97 |    0.0% |     33.02 | `CheckBlockIndex`\r\n|       21,661,396.96 |               46.17 |    0.5% |     32.37 | `LoadExternalBlockFile`\r\n\r\n> After:\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|          115,346.65 |            8,669.52 |    0.0% |     33.00 | `CheckBlockIndex`\r\n|       20,389,679.85 |               49.04 |    0.4% |     31.76 | `LoadExternalBlockFile`\r\n\r\nCompared to master:\r\n\r\n* `CheckBlockIndex` **+12.7%** faster\r\n* `LoadExternalBlockFile` **+6.2%** faster\r\n",
+      "state": "closed",
+      "user": "Raimo33",
+      "created_at": "2025-09-07T22:00:42Z",
+      "updated_at": "2025-10-24T09:26:54Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33334",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33334.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/33334#pullrequestreview-3202982209) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33637](https://github.com/bitcoin/bitcoin/pull/33637) (refactor: optimize block index comparisons (1.4-7.7x faster) by l0rinc)\n* [#29640](https://github.com/bitcoin/bitcoin/pull/29640) (Fix tiebreak when loading blocks from disk (and add tests for comparing chain ties) by sr-gi)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-07T22:00:47Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "Follow up in #33637",
+          "created_at": "2025-10-17T09:17:36Z"
+        }
+      ]
+    },
+    {
+      "number": 33333,
+      "title": "coins: warn on oversized `-dbcache`",
+      "body": "### Summary\r\n\r\nOversized allocations can cause out-of-memory errors or [heavy swapping](https://github.com/getumbrel/umbrel-os/issues/64#issuecomment-663637321), [grinding the system to a halt](https://x.com/murchandamus/status/1964432335849607224).\r\n\r\n### Fix\r\n\r\nAdded a minimal system helper to query total physical RAM on [Linux/macOS/Windows](https://stackoverflow.com/a/2513561) (on unsupported platforms we just disable this warning completely).\r\nThe added test checks if the value is roughly correct by checking if the CI platforms are returning any value and if the value is at least 1 GB (as a simple property test checking if the unit size is correct, e.g. doesn't return megabytes or bits).\r\n\r\n### Details\r\n\r\n`LogOversizedDbCache()` now emits a startup warning if the configured `-dbcache` exceeds a cap derived from system RAM, using the same parsing/clamping as cache sizing via `CalculateDbCacheBytes()`. This isn't meant as a recommended setting, rather a likely upper limit.\r\n\r\nNote that we're not modifying the set value, just issuing a warning.\r\nAlso note that the 75% calculation is rounded for the last two numbers since we have to divide first before multiplying, otherwise we wouldn't stay inside `size_t` on 32-bit systems - and this was simpler than casting back and forth.\r\n\r\nWe could have chosen the remaining free memory for the warning (e.g. warn if free memory is less than 1 GiB), but this is just a heuristic, we assumed that on systems with a lot of memory, other processes are also running, while memory constrained ones run only Core.\r\n\r\n### Cap\r\n\r\nIf total RAM < 2 GiB, cap is `DEFAULT_DB_CACHE` (`450 MiB`), otherwise it's 75% of total RAM.\r\nThe threshold is chosen to be close to values commonly used in [raspiblitz](https://github.com/raspiblitz/raspiblitz/blob/dev/home.admin/_provision.setup.sh#L98-L115) for common setups:\r\n\r\n| Total RAM | `dbcache` (MiB) | raspiblitz % | proposed cap (MiB) |\r\n|----------:|----------------:|-------------:|-------------------:|\r\n|     1 GiB |             512 |        50.0% |               450* |\r\n|     2 GiB |            1536 |        75.0% |               1536 |\r\n|     4 GiB |            2560 |        62.5% |               3072 |\r\n|     8 GiB |            4096 |        50.0% |               6144 |\r\n|    16 GiB |            4096 |        25.0% |              12288 |\r\n|    32 GiB |            4096 |        12.5% |              24576 |\r\n\r\n[Umbrel issues](https://github.com/getumbrel/umbrel-os/issues/64#issuecomment-663816367) also mention 75% being the upper limit.\r\n\r\n### Reproducer\r\n\r\nStarting `bitcoind` on an 8 GiB rpi4b with a dbcache of 7 GiB:\r\n> ./build/bin/bitcoind -dbcache=7000\r\n\r\nwarns now as follows:\r\n```\r\n2025-09-07T17:24:29Z [warning] A 7000 MiB dbcache may be too large for a system memory of only 7800 MiB.\r\nWarning: A 7000 MiB dbcache may be too large for a system memory of only 7800 MiB.\r\n2025-09-07T17:24:29Z Cache configuration:\r\n2025-09-07T17:24:29Z * Using 2.0 MiB for block index database\r\n2025-09-07T17:24:29Z * Using 8.0 MiB for chain state database\r\n2025-09-07T17:24:29Z * Using 6990.0 MiB for in-memory UTXO set (plus up to 286.1 MiB of unused mempool space)\r\n```\r\n\r\n### Manual testing\r\n\r\nBesides the [godbolt](https://godbolt.org/z/ec81Tjvrj) reproducers for the new total memory method, we also tested the warnings manually on:\r\n- [x] Apple M4 Max, macOS 15.6.1\r\n- [x] Intel Core i9-9900K, Ubuntu 24.04.2 LTS\r\n- [x] Raspberry Pi 4 Model B, Armbian Linux 6.12.22-current-bcm2711\r\n- [x] Intel Xeon x64, Windows 11 Home Version 24H2, OS Build 26100.4351",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-09-07T17:26:10Z",
+      "updated_at": "2025-09-22T20:50:35Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33333",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33333.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/33333#issuecomment-3304387000), [w0xlt](https://github.com/bitcoin/bitcoin/pull/33333#pullrequestreview-3236080193), [hodlinator](https://github.com/bitcoin/bitcoin/pull/33333#pullrequestreview-3236121502), [danielabrozzoni](https://github.com/bitcoin/bitcoin/pull/33333#pullrequestreview-3239885117) |\n| Concept ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/33333#issuecomment-3264818576), [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/33333#issuecomment-3265143719), [willcl-ark](https://github.com/bitcoin/bitcoin/pull/33333#issuecomment-3285116096), [stickies-v](https://github.com/bitcoin/bitcoin/pull/33333#pullrequestreview-3216090598) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32380](https://github.com/bitcoin/bitcoin/pull/32380) (Modernize use of UTF-8 in Windows code by hebasto)\n* [#29365](https://github.com/bitcoin/bitcoin/pull/29365) (Extend signetchallenge to set target block spacing by starius)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-07T17:26:16Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Concept ACK\r\n\r\nTested on my M4 macOS machine that is shows the warning. It gets buried in the log, but I think it's a good start, and at least it will help people figure out why their node crashed after the fact.\r\n",
+          "created_at": "2025-09-08T06:37:31Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Concept ACK",
+          "created_at": "2025-09-08T08:23:15Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "Concept ACK\r\n\r\nI think warning when someone is likely going to clobber their system performance is useful.\r\n\r\nThis change introduces a warning on lower limit of free RAM remaining; would it make sense to also include an upper bound to suppress/skip the warning? The cap is set to warn when < 1.5GB is left free in the case RAM is below 2GB, but will then warn when I have 16GB of ram free:\r\n\r\n```\r\nsrc/core/bitcoin on  pr-33333 [$] via △ v3.31.6 via 🐍 v3.13.3 via ❄️  impure (nix-shell-env) took 3s\r\n❯ build/bin/bitcoind -regtest -daemon=0 -dbcache=48140 | rg warning\r\n2025-09-11T17:39:13Z [warning] A 48130 MiB dbcache may be too large for a system memory of only 64172 MiB.\r\n```\r\n\r\nAlthough the warning can just be ignored it feels a shame to introduce new false positives if we can avoid it?\r\n",
+          "created_at": "2025-09-11T17:49:12Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> would it make sense to also include an upper bound to suppress/skip the warning\r\n\r\nI'm afraid it would be interpreted as a recommendation in that case - all we can claim is that this is likely too high, we can't actually know the optimal size\r\n\r\n> feels a shame to introduce new false positives if we can avoid it?\r\n\r\nYou mean that the uxto size is less than 48 GiB therefore the warning isn't relevant?",
+          "created_at": "2025-09-11T18:04:47Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "> You mean that the uxto size is less than 48 GiB therefore the warning isn't relevant?\r\n\r\nWhat I mean is, we are warning when system ram is below <various_sizes> with the %-based scheme. Why should <1.5GB free emit a warning on some systems, and < 16GB free emit a warning on others? I get that it's a best-effort algorithm approach, but just not convinced that it makes the most sense.\r\n\r\nFor example, did you consider just warning if it would leave <1.5GB free on all systems, and if so why choose to opt for the %-based approach over that?\r\n\r\nStill concept ACK btw!",
+          "created_at": "2025-09-12T12:34:23Z"
+        },
+        {
+          "user": "achow101",
+          "body": "I think it would be better to use an `InitWarning` rather than just logging since people are unlikely notice the warning when it's only in the log.",
+          "created_at": "2025-09-16T00:59:15Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "[Changed](https://github.com/bitcoin/bitcoin/compare/ec92151b538473792846db7d5bcabe4d6ae83c82..13fa0d0a433722f294854001b0561c079db12dbc) it to `InitWarning`, so now the warnings look like:\r\n```\r\n2025-09-16T02:17:00Z [warning] A 60000 MiB dbcache may be too large for a system memory of only 65536 MiB.\r\nWarning: A 60000 MiB dbcache may be too large for a system memory of only 65536 MiB.\r\n```\r\nThanks for the hint!",
+          "created_at": "2025-09-16T02:20:20Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> The warning should now be available via RPC as wel, run any of these against the running `bitcoind`:\r\n\r\nI don't think this warning belongs in those warnings. The help text for the warnings output states \"any network and blockchain warnings\", and I don't think this warning about configuration options meets any of these. There are several other similar warnings that we have around configuration options and they do not appear in those warnings fields either, nor should they.",
+          "created_at": "2025-09-16T23:53:36Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Thanks for the feedback, removed the last commit.",
+          "created_at": "2025-09-16T23:58:18Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 168360f4ae47cbfdb30a2cc4704435bc67e12f16",
+          "created_at": "2025-09-17T19:57:47Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 30.x in #33424.",
+          "created_at": "2025-09-22T20:50:35Z"
+        }
+      ]
+    },
+    {
+      "number": 33332,
+      "title": "common: Make arith_uint256 trivially copyable",
+      "body": "Makes `arith_uint256`/`base_uint` trivially copyable by removing the custom copy constructor and copy assignment operators. Removing of the custom code should not result in a change of behavior since `base_uint` contains a simple array of `uint32_t` and compiler generated versions of the code could be better optimized.\r\n\r\nThis was suggested by maflcko here: https://github.com/bitcoin/bitcoin/pull/30469#pullrequestreview-3186533494",
+      "state": "closed",
+      "user": "fjahr",
+      "created_at": "2025-09-07T16:32:21Z",
+      "updated_at": "2025-09-15T02:14:28Z",
+      "comments": 15,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33332",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33332.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Raimo33](https://github.com/bitcoin/bitcoin/pull/33332#issuecomment-3281348841), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33332#issuecomment-3281739187), [hodlinator](https://github.com/bitcoin/bitcoin/pull/33332#pullrequestreview-3213497518), [achow101](https://github.com/bitcoin/bitcoin/pull/33332#issuecomment-3282710122) |\n| Stale ACK | [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/33332#pullrequestreview-3196130456) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32579](https://github.com/bitcoin/bitcoin/pull/32579) (p2p: Correct unrealistic headerssync unit test behavior by hodlinator)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-07T16:32:26Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "Concept ACK\r\nthe compiler can now generate constexpr constructors and better optimize.\r\n\r\nApproach NACK\r\nI think it's more explicit to use the `= default` syntax.\r\nAlso a test needs to be added. a simple static_assert as mentioned by others.",
+          "created_at": "2025-09-08T04:10:34Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "Addressed the comments, thanks for running the benchmarks @l0rinc , it's good to see that the performance improvement can be demonstrated.",
+          "created_at": "2025-09-11T15:11:28Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "ACK 653a9849d5f98ba80e334ddc0ae9a5e367459f59",
+          "created_at": "2025-09-11T15:15:04Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK 653a9849d5f98ba80e334ddc0ae9a5e367459f59\r\n\r\nI'm fine with the change as it is currently, would prefer more implicit behavior instead (the original PR), but this is also better than before, thanks for doing it.",
+          "created_at": "2025-09-11T16:26:03Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 653a9849d5f98ba80e334ddc0ae9a5e367459f59",
+          "created_at": "2025-09-11T21:33:46Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "The members of  `base_uint` are all [trivially copyable](https://en.cppreference.com/w/cpp/named_req/TriviallyCopyable.html): `WIDTH` is a scalar, and `pn` is an array of scalars, so the class is trivially copyable and we should use the implicit copy constructors of the class. But, by explicitly declaring the implicitly defined copy constructors the move constructors are suppressed.\r\n\r\n<details><summary>\r\n\r\n#### (https://en.cppreference.com/w/cpp/language/move_constructor.html)\r\n\r\n</summary>\r\n\r\n> ### Implicitly-declared move constructor\r\n>\r\n> If no user-defined move constructors are provided for a class type, and all of the following is true:\r\n>\r\n> - there are no user-declared [copy constructors](https://en.cppreference.com/w/cpp/language/copy_constructor.html);\r\n> - there are no user-declared [copy assignment operators](https://en.cppreference.com/w/cpp/language/as_operator.html);\r\n> - there are no user-declared [move assignment operators](https://en.cppreference.com/w/cpp/language/move_operator.html);\r\n> - there is no user-declared [destructor](https://en.cppreference.com/w/cpp/language/destructor.html). \r\n>\r\n> Then the compiler will declare a move constructor as a non-[explicit](https://en.cppreference.com/w/cpp/language/explicit.html) inline public member of its class with the signature T::T(T&&).\r\n\r\n</details>\r\n\r\nThere are a few places where move constructors would be used, and where copy elision is not guaranteed, so it would be better to either remove the explicit declarations or to also declare move constructors.\r\n\r\nEdit: Missed that this was merged, I can open a follow-up. ",
+          "created_at": "2025-09-11T21:50:42Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "if I understand this correctly, move constructors were suppressed before this PR as well.",
+          "created_at": "2025-09-11T21:55:16Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> if I understand this correctly, move constructors were suppressed before this PR as well.\r\n\r\nThey were, so this is not a regression, but it would be better for the implicitly defined move constructors to be usable.",
+          "created_at": "2025-09-11T21:59:54Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "\n> it would be better for the implicitly defined move constructors to be usable.\n\ngood catch, totally agree, let's run some benchmarks\n\n",
+          "created_at": "2025-09-11T22:01:54Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> let's run some benchmarks\r\n\r\nI have already tested move construction in https://github.com/bitcoin/bitcoin/pull/33332#pullrequestreview-3197960566",
+          "created_at": "2025-09-12T02:38:37Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> > let's run some benchmarks\r\n> \r\n> I have already tested move construction in [#33332 (review)](https://github.com/bitcoin/bitcoin/pull/33332#pullrequestreview-3197960566)\r\n\r\nAs I understand it, `std::move()` does not force the invocation of a move assignment / constructor, it casts its argument to an `rvalue` but if a constructor / assignment operator that takes an rvalue reference is not found, a function that takes an lvalue will be used, so in the `ArithUint256MoveCircle` benchmark, the copy assignment / constructor is actually being called in each use of `std::move()`, this can be demonstrated by adding logging to the copy functions. (https://godbolt.org/z/Y6c8qjo5s)\r\n\r\n<details><summary>\r\n\r\n#### Minimal demonstration\r\n\r\n</summary>\r\n\r\nhttps://godbolt.org/z/5j7hEY8zs\r\n```cpp\r\n#include <iostream>\r\n\r\nclass no_move\r\n{\r\npublic:\r\n    int val{};\r\n\r\n    no_move(int x) : val(x) {}\r\n\r\n    no_move(const no_move& b) {\r\n        std::cout << \"Copy Constructor called\" << std::endl;\r\n        val = b.val;\r\n    }\r\n    no_move& operator=(const no_move& b) {\r\n        std::cout << \"Copy assignment operator called\" << std::endl;\r\n        val = b.val;\r\n        return *this;\r\n    }\r\n\r\n    /* if you uncomment these explicit declarations of the move constructor/assignment\r\n       they will be invoked. \r\n    */\r\n    // no_move(no_move&& b) = default;\r\n    // no_move& operator=(no_move&& b) = default;\r\n\r\n};\r\n\r\nint main(int argc, char** argv)\r\n{\r\n    no_move a{1};\r\n    no_move b{2};\r\n    no_move c{3};\r\n\r\n    no_move temp{std::move(a)};\r\n    a = std::move(b);\r\n    b = std::move(c);\r\n    c = std::move(temp);\r\n}\r\n```\r\n```console\r\nCopy Constructor called\r\nCopy assignment operator called\r\nCopy assignment operator called\r\nCopy assignment operator called\r\n```\r\n</details>\r\n\r\n----\r\n\r\nBut, on second thought, since `base_uint` is just trivially copyable data, i.e. there are no external resources to be moved, the move constructor won't do anything differently than the copy constructor. There is even a clang-tidy rule that checks for this since it has no effect: https://clang.llvm.org/extra/clang-tidy/checks/performance/move-const-arg.html#cmdoption-arg-CheckTriviallyCopyableMove so this can be left as-is.\r\n\r\nAs-is I think the class kind of violates the rule of three (https://en.cppreference.com/w/cpp/language/rule_of_three.html), not a big deal but that could be fixed by making the constructor default, but probably not worth a follow-up. (e.g. https://github.com/davidgumberg/bitcoin/commit/eda422cfa56245a9b78b9a4f499a490d44e58eb5)",
+          "created_at": "2025-09-12T08:47:17Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "(I'd be in slight favor of changing raw arrays to `std::array` as done in https://github.com/davidgumberg/bitcoin/commit/eda422cfa56245a9b78b9a4f499a490d44e58eb5 since some debug builds in CI run with extra bounds-checking for std-types. Although maybe MSAN builds already catch out of bounds access for raw arrays, and I don't suspect we would detect any new issues for `base_uint`/`arith_uint256`).",
+          "created_at": "2025-09-12T20:47:45Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "same. i think https://github.com/davidgumberg/bitcoin/commit/eda422cfa56245a9b78b9a4f499a490d44e58eb5 is worth a PR even if it's a minor change. Maybe you can pack it with other commits where `std::array` is needed.",
+          "created_at": "2025-09-12T21:04:05Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "+1 for https://github.com/davidgumberg/bitcoin/commit/eda422cfa56245a9b78b9a4f499a490d44e58eb5 but without the explicit stuff, it's just noise, let the compiler do the work. We can add tests or static assertions instead of making simple structures more complicated - there's a reason the compiler is willing to generate it for us.",
+          "created_at": "2025-09-15T02:14:28Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33331,
+      "title": "bench: broken CSV format, commas in benchmark names",
+      "body": "Currently there are a couple of benchmarks that have commas in their name:\n\n- SHA256D64_1024_AVX2 using the 'sse4(1way),sse41(4way),avx2(8way)' SHA256 implementation\n- SHA256D64_1024_SHANI using the 'sse4(1way),sse41(4way)' SHA256 implementation\n- SHA256D64_1024_SSE4 using the 'sse4(1way),sse41(4way)' SHA256 implementation\n- SHA256D64_1024_STANDARD using the 'standard' SHA256 implementation\n- SHA256_32b_AVX2 using the 'sse4(1way),sse41(4way),avx2(8way)' SHA256 implementation\n- SHA256_32b_SHANI using the 'sse4(1way),sse41(4way)' SHA256 implementation\n- SHA256_32b_SSE4 using the 'sse4(1way),sse41(4way)' SHA256 implementation\n- SHA256_32b_STANDARD using the 'standard' SHA256 implementation\n- SHA256_AVX2 using the 'sse4(1way),sse41(4way),avx2(8way)' SHA256 implementation\n- SHA256_SHANI using the 'sse4(1way),sse41(4way)' SHA256 implementation\n- SHA256_SSE4 using the 'sse4(1way),sse41(4way)' SHA256 implementation\n- SHA256_STANDARD using the 'standard' SHA256 implementation\n\nThis breaks the CSV format when using `./bench_bitcoin -output-csv=bench_old.csv`. Commas are allowed only as column separators in CSV.",
+      "state": "closed",
+      "user": "Raimo33",
+      "created_at": "2025-09-07T14:31:19Z",
+      "updated_at": "2025-09-09T09:11:33Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33331",
+      "labels": [
+        "Tests"
+      ]
+    },
+    {
+      "number": 33330,
+      "title": "How can I become a bitcoin developer?",
+      "body": "Hey guys, How Can I become a bitcoin developer?",
+      "state": "closed",
+      "user": "Janix-dev",
+      "created_at": "2025-09-07T12:35:54Z",
+      "updated_at": "2025-09-16T10:31:08Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33330",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "pinheadmz",
+          "body": "https://bitcoincore.academy/\n\nhttps://learning.chaincode.com\n\nhttps://bitcoin.stackexchange.com\n\n",
+          "created_at": "2025-09-07T12:38:01Z"
+        }
+      ]
+    },
+    {
+      "number": 33329,
+      "title": "Intermittent tsan CI timeout in p2p_1p1c_network.py\", line 155, self.sync_mempools()",
+      "body": "https://github.com/bitcoin/bitcoin/actions/runs/17526806361/job/49778354104?pr=33303#step:9:17166:\n\n```\n2025-09-07T10:22:31.1900795Z \u001b[0;36m test  2025-09-07T10:22:26.326636Z TestFramework (ERROR): Unexpected exception \u001b[0m\n2025-09-07T10:22:31.1900932Z \u001b[0;36m                                   Traceback (most recent call last):\u001b[0m\n2025-09-07T10:22:31.1901180Z \u001b[0;36m                                     File \"/home/admin/actions-runner/_work/_temp/test/functional/test_framework/test_framework.py\", line 199, in main\u001b[0m\n2025-09-07T10:22:31.1901270Z \u001b[0;36m                                       self.run_test()\u001b[0m\n2025-09-07T10:22:31.1901508Z \u001b[0;36m                                     File \"/home/admin/actions-runner/_work/_temp/build/test/functional/p2p_1p1c_network.py\", line 155, in run_test\u001b[0m\n2025-09-07T10:22:31.1901599Z \u001b[0;36m                                       self.sync_mempools()\u001b[0m\n2025-09-07T10:22:31.1901850Z \u001b[0;36m                                     File \"/home/admin/actions-runner/_work/_temp/test/functional/test_framework/test_framework.py\", line 823, in sync_mempools\u001b[0m\n2025-09-07T10:22:31.1902004Z \u001b[0;36m                                       raise AssertionError(\"Mempool sync timed out after {}s:{}\".format(\u001b[0m\n2025-09-07T10:22:31.1902159Z \u001b[0;36m                                   AssertionError: Mempool sync timed out after 2400s:\u001b[0m\n2025-09-07T10:22:31.1915092Z \u001b[0;36m                                     {'bebd2df6e99b8351c81282c73d31968290de7ac636415f06bb734abd54331abd', '7273ca1d7b885cf715bbabd959565642eb1db1763608ecb3f275efb55cf67dc6', 'b86ca7505fe33d3a47db54b452505b4f81a18a5e90e1311c92df869d456dae5f', 'eafc39632dfc1fa8e25b024eda99108998b2eaee11166b369de7e402405bf2f5', 'd1e9da3c9cb68eb9c42f9b8dc33a91acd095be0090a9a444c89ef7b84ad84850', 'dc35ddd9879a31a40a051b0da50eb5d8d9fc724eafbbff1dce7696a457e365fd', '4a4d3378fdfab5ed243135cbdc0922b3d8e9f67b8d431f516c904433affc0572', 'b30f84b49c880c3bc74c2129303aa9dce6eac2cceb386fa2adb7efd01e055d59', 'bdcc37e0ef044e8bb6698fb8a96c9ccc643ea01232fcab144d82b8ca1387a1dc', '144c711a44b89ccddd0ccf5b54aff8c149e6c5f24ad6b9a152d2b6a173a74feb', '07cc4ab05b33a3a3f5f28af920c74f026089d06500e2166d0289dca74f8a68f0', '9f5bda4cc692e32a71fda5ba5801d15316d5e1442a77ed40c3de79f4ee301491', '667fcc0ea0fe599b5ab3cd0116abfffb02bb153817249e58cdb4e15de713936d', '87b1be437ce288be3fda8b3e5656a94bd4d6ac12fc8a35d1b05ad8489445b122', 'd4b2cc4e4690967625cc687629082806ee9494b850049b682f90a4029945728f', 'f995f24e0a12314a19bbd3988e500cb388fdf4c6471b7d7607ae02a20b80c3ca', '5bbc0b0d8c8950725e3b34aa4ad2ffba1f38c923655657e9004be9f911b3c8b1', '7f1b4800511217a36ea24d1b128a37b527d759c56cdc2d11ce15b0429a821e9d', '60997d8da80d852b4f613b3358f6414aa39027d55368549c2569092a3dd93bd8', '68c9f68cd8e75d9a79ee47755cac272b149f0a284b2bdde5f4d8366db114f90a', 'a31cd827a231376150e4959f571d1d514a3ff45b1fca13626dd2740a58d33eb0', 'f2633b2d2a3e58c194daf4856537877d87c71cb118d3738aa828f28651a1883d', '3ddc78cd340e02c0d8dce6bcfdf77e1030a94461282d7088829e3477f11021fc', '8f50b6ba0a6b8ae50205524228e7cf19dd8a6804769dd2927c54e299a4deeb9c', '800d1bbbf783277ee12242752c0ef53a1edf4281dbb4f24ffe4d10ac18d8c44f', '390ec58b4c5b017f557e30ead39f9921b3fec5729b07ff89415c5570275a87dc', 'c9d47dc5eb682a76f790fa51c88cb24f6d0e7ac15fdd1bb46fe65e6e5a123211', '1e922f647905b098dbab750bad283c009070bef29a7732793e11deab5374bb61', 'acf176487b0619d172d69c2ab4b55a4b67055f4d419d96483749f1fbbf3fa455', '3e7a7abbea9340decfc291d77adaf1b2af46bf64706389be9818a1dc16b29dfb', '4d00af8ecd11707ca0ab94f0d4fab853ccf45503a13ab4dc0bdf0c1735a364d3', 'da3f89b41d701e3ead2d2794d259d8cb0cecd8fa4b25cacd8637c8ce0713c262', '4400dd83bd9f4340cae4ebf48a4653ea38495b9e1b8b25708360187ac0d414f6', '3de1355365cbf67777941644d90b993c3ccf72952ab5c78f8d64ccda0898357a', 'c8ca64cb3da89905b3ccfc5423d908a17273f90c4893373af9354e61f3bd651c', '277ebed48bd775f3ae2ecd1fa7c8cecfe9375815bef1a08849f9dd92a32abefc', '264a7fe0d79e34b47eba9a30bec1ffb2aae039d9544d0d888b56c74fc6a7ef1c', 'cdd837336b8fd1e2d5e7d62f869b34c37ac787fe436d977ba5519a47979546f3', 'f66d5223b94d27e0e563fc000527a3f92e104f85260720a55408e75e5ffec493', 'efc169fe46833a5681cc6a3c07cd401b3a6fa131edce9a6553a08bf625b39467', '233c3760167a81cd6ffccae81bcb650bdbd9c84b72cf87bf329940d2ac97b8ee', 'e65a4978ff3975018661cc7833f00d992905043e584afbe1ed95bb39177f40d2', '63a588e11563ae8c0086643fdec4943366486cc8b6cf2677b67727686cec7ffa', '48c020e2a0cfa4f8a2a1a80a01860830362ce817d5c9f2059fabb3873b34b473', 'dff054924724b9fba88dcdfffcdcb5b55bc76d61a2a70d3cff8846dfc3508c04', '11abdef0950963da6eed57167d3ad82a9075efaabb929b28a94d4206a64ed0a5', '10d9fddbbb9eece895f93e85fcfbe0b114995849903aded1f2c1355211e36482', '1ca9e274f85ed12dc3a7264f67294ce20b985fcc6cb5ed1ccae03d53221ca2e2', 'b7832dd846fa5e966f1e11d40d8a47fddd6902de0a12e5f01da7022cf57e0923', '355480cb05e268e2de9314308f32d409b4c18d7fd1d73db66dcc60c566394b53', '128f9cd5e773904a0d448e599443d40f95421cbb95d9441efc83f47657edc35b', '74c951d3e1bc27437394377a48d6ff7f11b49c1e0bd05e169d54c5138deea7f2', 'e392463efb464c915b06f3a1c55457ee56174cf9da498447a8de79027b7c157e', 'ea4359a614c61f9b5b171800a161f438e058007674ce31912868c3fc81c87154', '08bccd11aee383dc68594ea8668958b76ef3471bccd095d523e23fa60dff148a', 'b099dd0a9d5fa00e642869d7b8b7818780fdde2ecc1546ceb0be01817d00c9a7', '5078f52a0c3d5705fc69966938caa6d5eb3bdea4028f41942e5c68b3b1ba4b01', '7de00ef22dfd5393025e07d39204a4c9aaa4e21ae8c366891c2466702ee00490', '30f2a54c89255cbab900b8f82164dd417b0fb323baf3d5b7e11167476b6bebbb', 'ee1388ad6c0d347084462f3025cea7d0bf5519e7f2a101c29ccfc549c65ee1ff', 'a9275937d2adf90231162533139df2cbeb4adb49fbc1b0d39ca86d49748c2a76', 'f6752865ca9b2f70903acd4835e84db58bcbd43b7101b14a3b62b25b61925495', 'd54a9c8eeb0e1d01b82722cdeedc7c117861bebe8eb5e8e177f9788d26f14f5e', '98c0c525900c58f650f6cb9310b254fc0d60b8ba0ef6bb25a9ed3b153cf6f1a6', '9e90a395a910a8a443bb9c167487ce1a3932dbe79802a564f976dca46c3ce7bf', '79c22ccafc1df323c74c1365fd808634eeb42f3ee79b71dec960e578be4c65a6', '55c1401b62b32dcc931c94f990b81b12b0f1de34ba579aacd601f19d712ca69d', '12334b3bf9c5186f2ab0d3d0b2391a77fa27e6c09e04d56d77ec5fa2323669d0', '416ace12e288f862ae99c76a3580c49abc373e40b4c80779c8e85143f49eebf1', '6d1bb557ff1bc0359547f43eab350ff0bef8df2f385f65b2a827074738f1b8de', '4b5cbc7743a124088139b569d1ba227053c0c046489c3f71e5a45cd924b794b0', '0a99084b7f28b2f00900df8806c5cea023cd5f4500f5c2df6ccd8d9a26ba1ab1', '5085e89dc39452a1427a21182e82cdcbf8de2186c960cce62386787e738fc192', '77708ea74fbffa47e192e5be99b03a72e830f22a8b60d02e262ba8cfbc3e9b47', 'b1f9928bc80529cc8e42dca1c51e68ff8d5697ca8bc14e0ba7dd2e374024dc47', '344993629fd335d604cf54f1dc30e4a0d7d55ac6001c1e2e9c48c562b49d9303', '34fd4a3a81a3de15f5980131fad0bcead1d1968c95b3965bd1361953f6326e54', 'c6416135c271fbcbf31cf2a9f82b03c77ba71767cc4c9984e328d141be639470', 'ace5022080051f1f59816b806668cea184186183b3c6dbf105d357604e3e3519', '0ac7bd777b1b423c30bf07648b199e9e9c06f5339fda3520885fe59b28126c6b', 'dd6c0009197ce24ec9e3fcce4d1ec85ec8b3a25e987a361a52e39a2121d8f45c'}\u001b[0m\n2025-09-07T10:22:31.1927771Z \u001b[0;36m                                     {'bebd2df6e99b8351c81282c73d31968290de7ac636415f06bb734abd54331abd', '7273ca1d7b885cf715bbabd959565642eb1db1763608ecb3f275efb55cf67dc6', 'b86ca7505fe33d3a47db54b452505b4f81a18a5e90e1311c92df869d456dae5f', 'eafc39632dfc1fa8e25b024eda99108998b2eaee11166b369de7e402405bf2f5', 'd1e9da3c9cb68eb9c42f9b8dc33a91acd095be0090a9a444c89ef7b84ad84850', 'dc35ddd9879a31a40a051b0da50eb5d8d9fc724eafbbff1dce7696a457e365fd', '4a4d3378fdfab5ed243135cbdc0922b3d8e9f67b8d431f516c904433affc0572', 'b30f84b49c880c3bc74c2129303aa9dce6eac2cceb386fa2adb7efd01e055d59', 'bdcc37e0ef044e8bb6698fb8a96c9ccc643ea01232fcab144d82b8ca1387a1dc', '144c711a44b89ccddd0ccf5b54aff8c149e6c5f24ad6b9a152d2b6a173a74feb', '07cc4ab05b33a3a3f5f28af920c74f026089d06500e2166d0289dca74f8a68f0', '9f5bda4cc692e32a71fda5ba5801d15316d5e1442a77ed40c3de79f4ee301491', '667fcc0ea0fe599b5ab3cd0116abfffb02bb153817249e58cdb4e15de713936d', '87b1be437ce288be3fda8b3e5656a94bd4d6ac12fc8a35d1b05ad8489445b122', 'd4b2cc4e4690967625cc687629082806ee9494b850049b682f90a4029945728f', 'f995f24e0a12314a19bbd3988e500cb388fdf4c6471b7d7607ae02a20b80c3ca', '5bbc0b0d8c8950725e3b34aa4ad2ffba1f38c923655657e9004be9f911b3c8b1', '7f1b4800511217a36ea24d1b128a37b527d759c56cdc2d11ce15b0429a821e9d', '60997d8da80d852b4f613b3358f6414aa39027d55368549c2569092a3dd93bd8', '68c9f68cd8e75d9a79ee47755cac272b149f0a284b2bdde5f4d8366db114f90a', 'a31cd827a231376150e4959f571d1d514a3ff45b1fca13626dd2740a58d33eb0', 'f2633b2d2a3e58c194daf4856537877d87c71cb118d3738aa828f28651a1883d', '3ddc78cd340e02c0d8dce6bcfdf77e1030a94461282d7088829e3477f11021fc', '8f50b6ba0a6b8ae50205524228e7cf19dd8a6804769dd2927c54e299a4deeb9c', '800d1bbbf783277ee12242752c0ef53a1edf4281dbb4f24ffe4d10ac18d8c44f', '390ec58b4c5b017f557e30ead39f9921b3fec5729b07ff89415c5570275a87dc', 'c9d47dc5eb682a76f790fa51c88cb24f6d0e7ac15fdd1bb46fe65e6e5a123211', '1e922f647905b098dbab750bad283c009070bef29a7732793e11deab5374bb61', 'acf176487b0619d172d69c2ab4b55a4b67055f4d419d96483749f1fbbf3fa455', '3e7a7abbea9340decfc291d77adaf1b2af46bf64706389be9818a1dc16b29dfb', '4d00af8ecd11707ca0ab94f0d4fab853ccf45503a13ab4dc0bdf0c1735a364d3', 'da3f89b41d701e3ead2d2794d259d8cb0cecd8fa4b25cacd8637c8ce0713c262', '4400dd83bd9f4340cae4ebf48a4653ea38495b9e1b8b25708360187ac0d414f6', '3de1355365cbf67777941644d90b993c3ccf72952ab5c78f8d64ccda0898357a', 'c8ca64cb3da89905b3ccfc5423d908a17273f90c4893373af9354e61f3bd651c', '277ebed48bd775f3ae2ecd1fa7c8cecfe9375815bef1a08849f9dd92a32abefc', '264a7fe0d79e34b47eba9a30bec1ffb2aae039d9544d0d888b56c74fc6a7ef1c', 'cdd837336b8fd1e2d5e7d62f869b34c37ac787fe436d977ba5519a47979546f3', 'f66d5223b94d27e0e563fc000527a3f92e104f85260720a55408e75e5ffec493', 'efc169fe46833a5681cc6a3c07cd401b3a6fa131edce9a6553a08bf625b39467', '233c3760167a81cd6ffccae81bcb650bdbd9c84b72cf87bf329940d2ac97b8ee', 'e65a4978ff3975018661cc7833f00d992905043e584afbe1ed95bb39177f40d2', '63a588e11563ae8c0086643fdec4943366486cc8b6cf2677b67727686cec7ffa', '48c020e2a0cfa4f8a2a1a80a01860830362ce817d5c9f2059fabb3873b34b473', 'dff054924724b9fba88dcdfffcdcb5b55bc76d61a2a70d3cff8846dfc3508c04', '11abdef0950963da6eed57167d3ad82a9075efaabb929b28a94d4206a64ed0a5', '10d9fddbbb9eece895f93e85fcfbe0b114995849903aded1f2c1355211e36482', '1ca9e274f85ed12dc3a7264f67294ce20b985fcc6cb5ed1ccae03d53221ca2e2', 'b7832dd846fa5e966f1e11d40d8a47fddd6902de0a12e5f01da7022cf57e0923', '355480cb05e268e2de9314308f32d409b4c18d7fd1d73db66dcc60c566394b53', '128f9cd5e773904a0d448e599443d40f95421cbb95d9441efc83f47657edc35b', '74c951d3e1bc27437394377a48d6ff7f11b49c1e0bd05e169d54c5138deea7f2', 'e392463efb464c915b06f3a1c55457ee56174cf9da498447a8de79027b7c157e', 'ea4359a614c61f9b5b171800a161f438e058007674ce31912868c3fc81c87154', '08bccd11aee383dc68594ea8668958b76ef3471bccd095d523e23fa60dff148a', 'b099dd0a9d5fa00e642869d7b8b7818780fdde2ecc1546ceb0be01817d00c9a7', '5078f52a0c3d5705fc69966938caa6d5eb3bdea4028f41942e5c68b3b1ba4b01', '7de00ef22dfd5393025e07d39204a4c9aaa4e21ae8c366891c2466702ee00490', '30f2a54c89255cbab900b8f82164dd417b0fb323baf3d5b7e11167476b6bebbb', 'ee1388ad6c0d347084462f3025cea7d0bf5519e7f2a101c29ccfc549c65ee1ff', 'a9275937d2adf90231162533139df2cbeb4adb49fbc1b0d39ca86d49748c2a76', 'f6752865ca9b2f70903acd4835e84db58bcbd43b7101b14a3b62b25b61925495', 'd54a9c8eeb0e1d01b82722cdeedc7c117861bebe8eb5e8e177f9788d26f14f5e', '98c0c525900c58f650f6cb9310b254fc0d60b8ba0ef6bb25a9ed3b153cf6f1a6', '9e90a395a910a8a443bb9c167487ce1a3932dbe79802a564f976dca46c3ce7bf', '79c22ccafc1df323c74c1365fd808634eeb42f3ee79b71dec960e578be4c65a6', '55c1401b62b32dcc931c94f990b81b12b0f1de34ba579aacd601f19d712ca69d', '12334b3bf9c5186f2ab0d3d0b2391a77fa27e6c09e04d56d77ec5fa2323669d0', '416ace12e288f862ae99c76a3580c49abc373e40b4c80779c8e85143f49eebf1', '6d1bb557ff1bc0359547f43eab350ff0bef8df2f385f65b2a827074738f1b8de', '4b5cbc7743a124088139b569d1ba227053c0c046489c3f71e5a45cd924b794b0', '0a99084b7f28b2f00900df8806c5cea023cd5f4500f5c2df6ccd8d9a26ba1ab1', '5085e89dc39452a1427a21182e82cdcbf8de2186c960cce62386787e738fc192', '77708ea74fbffa47e192e5be99b03a72e830f22a8b60d02e262ba8cfbc3e9b47', 'b1f9928bc80529cc8e42dca1c51e68ff8d5697ca8bc14e0ba7dd2e374024dc47', '344993629fd335d604cf54f1dc30e4a0d7d55ac6001c1e2e9c48c562b49d9303', '34fd4a3a81a3de15f5980131fad0bcead1d1968c95b3965bd1361953f6326e54', 'c6416135c271fbcbf31cf2a9f82b03c77ba71767cc4c9984e328d141be639470', 'ace5022080051f1f59816b806668cea184186183b3c6dbf105d357604e3e3519', '0ac7bd777b1b423c30bf07648b199e9e9c06f5339fda3520885fe59b28126c6b'}\u001b[0m\n2025-09-07T10:22:31.1940408Z \u001b[0;36m                                     {'bebd2df6e99b8351c81282c73d31968290de7ac636415f06bb734abd54331abd', '7273ca1d7b885cf715bbabd959565642eb1db1763608ecb3f275efb55cf67dc6', 'b86ca7505fe33d3a47db54b452505b4f81a18a5e90e1311c92df869d456dae5f', 'eafc39632dfc1fa8e25b024eda99108998b2eaee11166b369de7e402405bf2f5', 'd1e9da3c9cb68eb9c42f9b8dc33a91acd095be0090a9a444c89ef7b84ad84850', 'dc35ddd9879a31a40a051b0da50eb5d8d9fc724eafbbff1dce7696a457e365fd', '4a4d3378fdfab5ed243135cbdc0922b3d8e9f67b8d431f516c904433affc0572', 'b30f84b49c880c3bc74c2129303aa9dce6eac2cceb386fa2adb7efd01e055d59', 'bdcc37e0ef044e8bb6698fb8a96c9ccc643ea01232fcab144d82b8ca1387a1dc', '144c711a44b89ccddd0ccf5b54aff8c149e6c5f24ad6b9a152d2b6a173a74feb', '07cc4ab05b33a3a3f5f28af920c74f026089d06500e2166d0289dca74f8a68f0', '9f5bda4cc692e32a71fda5ba5801d15316d5e1442a77ed40c3de79f4ee301491', '667fcc0ea0fe599b5ab3cd0116abfffb02bb153817249e58cdb4e15de713936d', '87b1be437ce288be3fda8b3e5656a94bd4d6ac12fc8a35d1b05ad8489445b122', 'd4b2cc4e4690967625cc687629082806ee9494b850049b682f90a4029945728f', 'f995f24e0a12314a19bbd3988e500cb388fdf4c6471b7d7607ae02a20b80c3ca', '5bbc0b0d8c8950725e3b34aa4ad2ffba1f38c923655657e9004be9f911b3c8b1', '7f1b4800511217a36ea24d1b128a37b527d759c56cdc2d11ce15b0429a821e9d', '60997d8da80d852b4f613b3358f6414aa39027d55368549c2569092a3dd93bd8', '68c9f68cd8e75d9a79ee47755cac272b149f0a284b2bdde5f4d8366db114f90a', 'a31cd827a231376150e4959f571d1d514a3ff45b1fca13626dd2740a58d33eb0', 'f2633b2d2a3e58c194daf4856537877d87c71cb118d3738aa828f28651a1883d', '3ddc78cd340e02c0d8dce6bcfdf77e1030a94461282d7088829e3477f11021fc', '8f50b6ba0a6b8ae50205524228e7cf19dd8a6804769dd2927c54e299a4deeb9c', '800d1bbbf783277ee12242752c0ef53a1edf4281dbb4f24ffe4d10ac18d8c44f', '390ec58b4c5b017f557e30ead39f9921b3fec5729b07ff89415c5570275a87dc', 'c9d47dc5eb682a76f790fa51c88cb24f6d0e7ac15fdd1bb46fe65e6e5a123211', '1e922f647905b098dbab750bad283c009070bef29a7732793e11deab5374bb61', 'acf176487b0619d172d69c2ab4b55a4b67055f4d419d96483749f1fbbf3fa455', '3e7a7abbea9340decfc291d77adaf1b2af46bf64706389be9818a1dc16b29dfb', '4d00af8ecd11707ca0ab94f0d4fab853ccf45503a13ab4dc0bdf0c1735a364d3', 'da3f89b41d701e3ead2d2794d259d8cb0cecd8fa4b25cacd8637c8ce0713c262', '4400dd83bd9f4340cae4ebf48a4653ea38495b9e1b8b25708360187ac0d414f6', '3de1355365cbf67777941644d90b993c3ccf72952ab5c78f8d64ccda0898357a', 'c8ca64cb3da89905b3ccfc5423d908a17273f90c4893373af9354e61f3bd651c', '277ebed48bd775f3ae2ecd1fa7c8cecfe9375815bef1a08849f9dd92a32abefc', '264a7fe0d79e34b47eba9a30bec1ffb2aae039d9544d0d888b56c74fc6a7ef1c', 'cdd837336b8fd1e2d5e7d62f869b34c37ac787fe436d977ba5519a47979546f3', 'f66d5223b94d27e0e563fc000527a3f92e104f85260720a55408e75e5ffec493', 'efc169fe46833a5681cc6a3c07cd401b3a6fa131edce9a6553a08bf625b39467', '233c3760167a81cd6ffccae81bcb650bdbd9c84b72cf87bf329940d2ac97b8ee', 'e65a4978ff3975018661cc7833f00d992905043e584afbe1ed95bb39177f40d2', '63a588e11563ae8c0086643fdec4943366486cc8b6cf2677b67727686cec7ffa', '48c020e2a0cfa4f8a2a1a80a01860830362ce817d5c9f2059fabb3873b34b473', 'dff054924724b9fba88dcdfffcdcb5b55bc76d61a2a70d3cff8846dfc3508c04', '11abdef0950963da6eed57167d3ad82a9075efaabb929b28a94d4206a64ed0a5', '10d9fddbbb9eece895f93e85fcfbe0b114995849903aded1f2c1355211e36482', '1ca9e274f85ed12dc3a7264f67294ce20b985fcc6cb5ed1ccae03d53221ca2e2', 'b7832dd846fa5e966f1e11d40d8a47fddd6902de0a12e5f01da7022cf57e0923', '355480cb05e268e2de9314308f32d409b4c18d7fd1d73db66dcc60c566394b53', '128f9cd5e773904a0d448e599443d40f95421cbb95d9441efc83f47657edc35b', '74c951d3e1bc27437394377a48d6ff7f11b49c1e0bd05e169d54c5138deea7f2', 'e392463efb464c915b06f3a1c55457ee56174cf9da498447a8de79027b7c157e', 'ea4359a614c61f9b5b171800a161f438e058007674ce31912868c3fc81c87154', '08bccd11aee383dc68594ea8668958b76ef3471bccd095d523e23fa60dff148a', 'b099dd0a9d5fa00e642869d7b8b7818780fdde2ecc1546ceb0be01817d00c9a7', '5078f52a0c3d5705fc69966938caa6d5eb3bdea4028f41942e5c68b3b1ba4b01', '7de00ef22dfd5393025e07d39204a4c9aaa4e21ae8c366891c2466702ee00490', '30f2a54c89255cbab900b8f82164dd417b0fb323baf3d5b7e11167476b6bebbb', 'ee1388ad6c0d347084462f3025cea7d0bf5519e7f2a101c29ccfc549c65ee1ff', 'a9275937d2adf90231162533139df2cbeb4adb49fbc1b0d39ca86d49748c2a76', 'f6752865ca9b2f70903acd4835e84db58bcbd43b7101b14a3b62b25b61925495', 'd54a9c8eeb0e1d01b82722cdeedc7c117861bebe8eb5e8e177f9788d26f14f5e', '98c0c525900c58f650f6cb9310b254fc0d60b8ba0ef6bb25a9ed3b153cf6f1a6', '9e90a395a910a8a443bb9c167487ce1a3932dbe79802a564f976dca46c3ce7bf', '79c22ccafc1df323c74c1365fd808634eeb42f3ee79b71dec960e578be4c65a6', '55c1401b62b32dcc931c94f990b81b12b0f1de34ba579aacd601f19d712ca69d', '12334b3bf9c5186f2ab0d3d0b2391a77fa27e6c09e04d56d77ec5fa2323669d0', '416ace12e288f862ae99c76a3580c49abc373e40b4c80779c8e85143f49eebf1', '6d1bb557ff1bc0359547f43eab350ff0bef8df2f385f65b2a827074738f1b8de', '4b5cbc7743a124088139b569d1ba227053c0c046489c3f71e5a45cd924b794b0', '0a99084b7f28b2f00900df8806c5cea023cd5f4500f5c2df6ccd8d9a26ba1ab1', '5085e89dc39452a1427a21182e82cdcbf8de2186c960cce62386787e738fc192', '77708ea74fbffa47e192e5be99b03a72e830f22a8b60d02e262ba8cfbc3e9b47', 'b1f9928bc80529cc8e42dca1c51e68ff8d5697ca8bc14e0ba7dd2e374024dc47', '344993629fd335d604cf54f1dc30e4a0d7d55ac6001c1e2e9c48c562b49d9303', '34fd4a3a81a3de15f5980131fad0bcead1d1968c95b3965bd1361953f6326e54', 'c6416135c271fbcbf31cf2a9f82b03c77ba71767cc4c9984e328d141be639470', 'ace5022080051f1f59816b806668cea184186183b3c6dbf105d357604e3e3519', '0ac7bd777b1b423c30bf07648b199e9e9c06f5339fda3520885fe59b28126c6b'}\u001b[0m\n2025-09-07T10:22:31.1953035Z \u001b[0;36m                                     {'bebd2df6e99b8351c81282c73d31968290de7ac636415f06bb734abd54331abd', '7273ca1d7b885cf715bbabd959565642eb1db1763608ecb3f275efb55cf67dc6', 'b86ca7505fe33d3a47db54b452505b4f81a18a5e90e1311c92df869d456dae5f', 'eafc39632dfc1fa8e25b024eda99108998b2eaee11166b369de7e402405bf2f5', 'd1e9da3c9cb68eb9c42f9b8dc33a91acd095be0090a9a444c89ef7b84ad84850', 'dc35ddd9879a31a40a051b0da50eb5d8d9fc724eafbbff1dce7696a457e365fd', '4a4d3378fdfab5ed243135cbdc0922b3d8e9f67b8d431f516c904433affc0572', 'b30f84b49c880c3bc74c2129303aa9dce6eac2cceb386fa2adb7efd01e055d59', 'bdcc37e0ef044e8bb6698fb8a96c9ccc643ea01232fcab144d82b8ca1387a1dc', '144c711a44b89ccddd0ccf5b54aff8c149e6c5f24ad6b9a152d2b6a173a74feb', '07cc4ab05b33a3a3f5f28af920c74f026089d06500e2166d0289dca74f8a68f0', '9f5bda4cc692e32a71fda5ba5801d15316d5e1442a77ed40c3de79f4ee301491', '667fcc0ea0fe599b5ab3cd0116abfffb02bb153817249e58cdb4e15de713936d', '87b1be437ce288be3fda8b3e5656a94bd4d6ac12fc8a35d1b05ad8489445b122', 'd4b2cc4e4690967625cc687629082806ee9494b850049b682f90a4029945728f', 'f995f24e0a12314a19bbd3988e500cb388fdf4c6471b7d7607ae02a20b80c3ca', '5bbc0b0d8c8950725e3b34aa4ad2ffba1f38c923655657e9004be9f911b3c8b1', '7f1b4800511217a36ea24d1b128a37b527d759c56cdc2d11ce15b0429a821e9d', '60997d8da80d852b4f613b3358f6414aa39027d55368549c2569092a3dd93bd8', '68c9f68cd8e75d9a79ee47755cac272b149f0a284b2bdde5f4d8366db114f90a', 'a31cd827a231376150e4959f571d1d514a3ff45b1fca13626dd2740a58d33eb0', 'f2633b2d2a3e58c194daf4856537877d87c71cb118d3738aa828f28651a1883d', '3ddc78cd340e02c0d8dce6bcfdf77e1030a94461282d7088829e3477f11021fc', '8f50b6ba0a6b8ae50205524228e7cf19dd8a6804769dd2927c54e299a4deeb9c', '800d1bbbf783277ee12242752c0ef53a1edf4281dbb4f24ffe4d10ac18d8c44f', '390ec58b4c5b017f557e30ead39f9921b3fec5729b07ff89415c5570275a87dc', 'c9d47dc5eb682a76f790fa51c88cb24f6d0e7ac15fdd1bb46fe65e6e5a123211', '1e922f647905b098dbab750bad283c009070bef29a7732793e11deab5374bb61', 'acf176487b0619d172d69c2ab4b55a4b67055f4d419d96483749f1fbbf3fa455', '3e7a7abbea9340decfc291d77adaf1b2af46bf64706389be9818a1dc16b29dfb', '4d00af8ecd11707ca0ab94f0d4fab853ccf45503a13ab4dc0bdf0c1735a364d3', 'da3f89b41d701e3ead2d2794d259d8cb0cecd8fa4b25cacd8637c8ce0713c262', '4400dd83bd9f4340cae4ebf48a4653ea38495b9e1b8b25708360187ac0d414f6', '3de1355365cbf67777941644d90b993c3ccf72952ab5c78f8d64ccda0898357a', 'c8ca64cb3da89905b3ccfc5423d908a17273f90c4893373af9354e61f3bd651c', '277ebed48bd775f3ae2ecd1fa7c8cecfe9375815bef1a08849f9dd92a32abefc', '264a7fe0d79e34b47eba9a30bec1ffb2aae039d9544d0d888b56c74fc6a7ef1c', 'cdd837336b8fd1e2d5e7d62f869b34c37ac787fe436d977ba5519a47979546f3', 'f66d5223b94d27e0e563fc000527a3f92e104f85260720a55408e75e5ffec493', 'efc169fe46833a5681cc6a3c07cd401b3a6fa131edce9a6553a08bf625b39467', '233c3760167a81cd6ffccae81bcb650bdbd9c84b72cf87bf329940d2ac97b8ee', 'e65a4978ff3975018661cc7833f00d992905043e584afbe1ed95bb39177f40d2', '63a588e11563ae8c0086643fdec4943366486cc8b6cf2677b67727686cec7ffa', '48c020e2a0cfa4f8a2a1a80a01860830362ce817d5c9f2059fabb3873b34b473', 'dff054924724b9fba88dcdfffcdcb5b55bc76d61a2a70d3cff8846dfc3508c04', '11abdef0950963da6eed57167d3ad82a9075efaabb929b28a94d4206a64ed0a5', '10d9fddbbb9eece895f93e85fcfbe0b114995849903aded1f2c1355211e36482', '1ca9e274f85ed12dc3a7264f67294ce20b985fcc6cb5ed1ccae03d53221ca2e2', 'b7832dd846fa5e966f1e11d40d8a47fddd6902de0a12e5f01da7022cf57e0923', '355480cb05e268e2de9314308f32d409b4c18d7fd1d73db66dcc60c566394b53', '128f9cd5e773904a0d448e599443d40f95421cbb95d9441efc83f47657edc35b', '74c951d3e1bc27437394377a48d6ff7f11b49c1e0bd05e169d54c5138deea7f2', 'e392463efb464c915b06f3a1c55457ee56174cf9da498447a8de79027b7c157e', 'ea4359a614c61f9b5b171800a161f438e058007674ce31912868c3fc81c87154', '08bccd11aee383dc68594ea8668958b76ef3471bccd095d523e23fa60dff148a', 'b099dd0a9d5fa00e642869d7b8b7818780fdde2ecc1546ceb0be01817d00c9a7', '5078f52a0c3d5705fc69966938caa6d5eb3bdea4028f41942e5c68b3b1ba4b01', '7de00ef22dfd5393025e07d39204a4c9aaa4e21ae8c366891c2466702ee00490', '30f2a54c89255cbab900b8f82164dd417b0fb323baf3d5b7e11167476b6bebbb', 'ee1388ad6c0d347084462f3025cea7d0bf5519e7f2a101c29ccfc549c65ee1ff', 'a9275937d2adf90231162533139df2cbeb4adb49fbc1b0d39ca86d49748c2a76', 'f6752865ca9b2f70903acd4835e84db58bcbd43b7101b14a3b62b25b61925495', 'd54a9c8eeb0e1d01b82722cdeedc7c117861bebe8eb5e8e177f9788d26f14f5e', '98c0c525900c58f650f6cb9310b254fc0d60b8ba0ef6bb25a9ed3b153cf6f1a6', '9e90a395a910a8a443bb9c167487ce1a3932dbe79802a564f976dca46c3ce7bf', '79c22ccafc1df323c74c1365fd808634eeb42f3ee79b71dec960e578be4c65a6', '55c1401b62b32dcc931c94f990b81b12b0f1de34ba579aacd601f19d712ca69d', '12334b3bf9c5186f2ab0d3d0b2391a77fa27e6c09e04d56d77ec5fa2323669d0', '416ace12e288f862ae99c76a3580c49abc373e40b4c80779c8e85143f49eebf1', '6d1bb557ff1bc0359547f43eab350ff0bef8df2f385f65b2a827074738f1b8de', '4b5cbc7743a124088139b569d1ba227053c0c046489c3f71e5a45cd924b794b0', '0a99084b7f28b2f00900df8806c5cea023cd5f4500f5c2df6ccd8d9a26ba1ab1', '5085e89dc39452a1427a21182e82cdcbf8de2186c960cce62386787e738fc192', '77708ea74fbffa47e192e5be99b03a72e830f22a8b60d02e262ba8cfbc3e9b47', 'b1f9928bc80529cc8e42dca1c51e68ff8d5697ca8bc14e0ba7dd2e374024dc47', '344993629fd335d604cf54f1dc30e4a0d7d55ac6001c1e2e9c48c562b49d9303', '34fd4a3a81a3de15f5980131fad0bcead1d1968c95b3965bd1361953f6326e54', 'c6416135c271fbcbf31cf2a9f82b03c77ba71767cc4c9984e328d141be639470', 'ace5022080051f1f59816b806668cea184186183b3c6dbf105d357604e3e3519', '0ac7bd777b1b423c30bf07648b199e9e9c06f5339fda3520885fe59b28126c6b'}\u001b[0m",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-09-07T10:50:22Z",
+      "updated_at": "2025-09-07T11:08:14Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33329",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "fanquake",
+          "body": "Dupe of #33318?",
+          "created_at": "2025-09-07T11:06:24Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 4,
+    "issues": 3
+  }
+}

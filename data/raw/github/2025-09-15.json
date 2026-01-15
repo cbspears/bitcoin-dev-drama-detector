@@ -1,0 +1,425 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:14:42.332562+00:00",
+  "date": "2025-09-15",
+  "pull_requests": [
+    {
+      "number": 33399,
+      "title": "key: use static context for libsecp256k1 calls where applicable",
+      "body": "The dynamically created [signing context](https://github.com/bitcoin/bitcoin/blob/2d6a0c464912c325faf35d4ad28b1990e828b414/src/key.cpp#L19) for libsecp256k1 calls is only needed for functions that involve generator point multiplication with a secret key, i.e. different variants of public key creation and signing. The API docs hint to those by stating \"[(not secp256k1_context_static)](https://github.com/bitcoin-core/secp256k1/blob/b4756543028065b3ae6f30e9e6d7f1ecf2bb08c6/include/secp256k1.h#L645)\" for the context parameter. In our case that applies to the following calls:\r\n- `secp256k1_ec_pubkey_create`\r\n- `secp256k1_keypair_create`\r\n- `secp256k1_ellswift_create`\r\n- `secp256k1_ecdsa_sign`\r\n- `secp256k1_ecdsa_sign_recoverable`\r\n- `secp256k1_schnorrsig_sign32`\r\n- `ec_seckey_export_der` (not a direct secp256k1 function, but calls `secp256k1_ec_pubkey_create` inside)\r\n\r\nFor all the other secp256k1 calls we can simply use the static context. This is done for consistency to other calls that already use `secp256k1_context_static`, and also to reduce dependencies on the global signing context variable. Looked closer at this in the course of reviewing #29675, where some functions used the signing context that didn't need to, avoiding a move to another module (see https://github.com/bitcoin/bitcoin/pull/29675#discussion_r2333831377).",
+      "state": "closed",
+      "user": "theStack",
+      "created_at": "2025-09-15T23:48:41Z",
+      "updated_at": "2025-09-26T16:02:23Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33399",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33399.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Eunovo](https://github.com/bitcoin/bitcoin/pull/33399#pullrequestreview-3258200371), [furszy](https://github.com/bitcoin/bitcoin/pull/33399#pullrequestreview-3263479028), [rkrux](https://github.com/bitcoin/bitcoin/pull/33399#pullrequestreview-3267494219) |\n| Concept ACK | [real-or-random](https://github.com/bitcoin/bitcoin/pull/33399#pullrequestreview-3228076799), [Raimo33](https://github.com/bitcoin/bitcoin/pull/33399#issuecomment-3299155068) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-15T23:48:46Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @jonasnick @real-or-random ",
+          "created_at": "2025-09-16T07:17:39Z"
+        },
+        {
+          "user": "real-or-random",
+          "body": "> I don't claim to fully understand when the state is needed and when a static can be used.\r\n\r\nThe simple answer is that the static context can be used unless the API docs for the function in question say that it cannot be used. ;)\r\n\r\nA better answer is that the full context is needed whenever the generator point G is multiplied by a secret scalar. Or, roughly speaking, whenever a secret key is involved, i.e., key generation or signing. The exceptions to this rule are the computation of the shared secret in ECDH and EllSwift.\r\n\r\n> And would it make sense to rename the old `secp256k1_context_sign` references while we're here?\r\n\r\nI'm not sure. `SECP256K1_CONTEXT_SIGN` was deprecated, but `secp256k1_context_sign` still expresses that this is the context used for signing. On the other hand, that's imprecise. It's for signing and for key generation. So perhaps a better name will be `secp256k1_context_full`, or simply `secp256k1_context`, just to distinguish it from the static one. ",
+          "created_at": "2025-09-16T07:34:51Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "Concept ACK",
+          "created_at": "2025-09-16T14:55:41Z"
+        },
+        {
+          "user": "theStack",
+          "body": "Thanks for the reviews, fixed the typo in commit message and PR description (s/paramter/parameter/) and reduced the scope of `secp256k1_context_sign` in the fuzz test as suggested (h/t @l0rinc). Didn't do any renaming of the context object, as I haven't stumbled upon a name yet where I was convinced that it's much better (I agree with @real-or-random though that's it's imprecise).",
+          "created_at": "2025-09-16T20:00:39Z"
+        }
+      ]
+    },
+    {
+      "number": 33396,
+      "title": "util/strencodings: guard SAFE_CHARS index and pre-reserve result",
+      "body": "- Add defensive bounds check for `rule` parameter in `SanitizeString` to prevent out-of-range access to `SAFE_CHARS` array\r\n- Pre-reserve result capacity and cache reference to allowed charset to avoid repeated lookups  \r\n- No behavior change for valid inputs; improves robustness and minor performance",
+      "state": "closed",
+      "user": "forkfury",
+      "created_at": "2025-09-15T21:00:52Z",
+      "updated_at": "2025-09-16T11:02:21Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33396",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33396.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n",
+          "created_at": "2025-09-16T00:58:02Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Thanks, however we can leave this code as-is.",
+          "created_at": "2025-09-16T11:02:21Z"
+        }
+      ]
+    },
+    {
+      "number": 33395,
+      "title": "net: do not apply whitelist permissions to onion inbounds",
+      "body": "Tor inbound connections do not reveal the peer's actual network address. Do not apply whitelist permissions to them since address-based matching is ineffective.",
+      "state": "closed",
+      "user": "mzumsande",
+      "created_at": "2025-09-15T20:14:38Z",
+      "updated_at": "2025-09-18T17:31:04Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33395",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33395.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [darosior](https://github.com/bitcoin/bitcoin/pull/33395#pullrequestreview-3231159963), [furszy](https://github.com/bitcoin/bitcoin/pull/33395#pullrequestreview-3231188034), [vasild](https://github.com/bitcoin/bitcoin/pull/33395#pullrequestreview-3231237773) |\n| Stale ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/33395#issuecomment-3294292053) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32394](https://github.com/bitcoin/bitcoin/pull/32394) (net: make m_nodes_mutex non-recursive by vasild)\n* [#32065](https://github.com/bitcoin/bitcoin/pull/32065) (i2p: make a time gap between creating transient sessions and using them by vasild)\n* [#32015](https://github.com/bitcoin/bitcoin/pull/32015) (net: replace manual reference counting of CNode with shared_ptr by vasild)\n* [#29415](https://github.com/bitcoin/bitcoin/pull/29415) (Broadcast own transactions only via short-lived Tor or I2P connections by vasild)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-15T20:14:43Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK e46a7a547371317a4d116b9b1a314917508ea480",
+          "created_at": "2025-09-15T23:18:24Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "[e46a7a5](https://github.com/bitcoin/bitcoin/commit/e46a7a547371317a4d116b9b1a314917508ea480) to [f563ce9](https://github.com/bitcoin/bitcoin/commit/f563ce90818d486d2a199439d2f6ba39cd106352): Addressed @vasild suggestion.",
+          "created_at": "2025-09-16T17:42:56Z"
+        }
+      ]
+    },
+    {
+      "number": 33394,
+      "title": "refactor: Fix typo and correct template parameter inconsistency",
+      "body": "- Fixed typo in merkle.cpp where variable was named 'matchh' instead of 'match'\r\n- Fixed Hash160 to use 'T' instead of 'T1' for single template parameter, making it consistent with other single-parameter template functions like Hash<T>\r\n\r\n## Impact\r\n\r\nThese are refactoring changes with no functional impact:\r\n- No behavior changes\r\n- No consensus changes\r\n- All existing tests pass without modification\r\n- Improves code maintainability and reduces cognitive load for developers\r\n",
+      "state": "closed",
+      "user": "sekomer",
+      "created_at": "2025-09-15T20:05:09Z",
+      "updated_at": "2025-09-16T11:04:12Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33394",
+      "labels": [
+        "Refactoring"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33394.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [optout21](https://github.com/bitcoin/bitcoin/pull/33394#pullrequestreview-3228547436) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- Compute the 160-bit hash an object. -> Compute the 160-bit hash of an object. [missing \"of\", which makes the sentence ungrammatical]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-09-15T20:05:16Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Thanks, however I think this code can be left as-is for now.",
+          "created_at": "2025-09-16T11:04:12Z"
+        }
+      ]
+    },
+    {
+      "number": 33392,
+      "title": "wallet, rpc: add UTXO set check and incremental rescan to importdescriptors",
+      "body": "Fixes [#28898](https://github.com/bitcoin/bitcoin/issues/28898)\r\n\r\nWhen importing descriptors, users may accidentally provide an incorrect birthdate (timestamp). This can cause the wallet to miss relevant historical transactions, leading to incorrect or incomplete balances. Currently, the wallet only relies on rescans starting from the provided timestamp.\r\n\r\nThis PR extends the importdescriptors RPC with a new optional argument:\r\n`scan_utxoset` (bool, default=false):\r\nIf enabled, the wallet will compare its calculated trusted balance against UTXO set balance (by generating the `scriptpukeys` of the wallet and comparing it with the chains UTXO set `scriptpubkeys` to get the accurate balance belonging to the wallet and comparing it with the wallet trusted balance).\r\n\r\nIf the balances match, import continues as normal.\r\nIf a discrepancy is detected, the wallet will attempt incremental rescans in chunks of recent blocks until the missing history is found. If the wallet is pruned, incremental rescans will not go earlier than the prune boundary.\r\n\r\nAdditional information is returned in the RPC response under an `\"info\" ` object when `scan_utxoset` is used, such as:\r\n`utxo_check`: whether the UTXO set matched the wallet balance\r\n`scanned_chunks:` number of incremental rescan chunks attempted\r\n`scanned_blocks`: approximate number of blocks scanned during incremental rescans\r\n\r\nThis helps detect and fix balance mismatches caused by wrong descriptor timestamps.\r\n\r\nA big thanks to **fjahr** for suggesting this approach [comment](https://github.com/bitcoin/bitcoin/pull/33392#issuecomment-3300319224)\r\n",
+      "state": "open",
+      "user": "musaHaruna",
+      "created_at": "2025-09-15T16:17:12Z",
+      "updated_at": "2026-01-03T00:19:11Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33392",
+      "labels": [
+        "RPC/REST/ZMQ",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33392.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [rkrux](https://github.com/bitcoin/bitcoin/pull/33392#pullrequestreview-3447945798) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#bitcoin-core/gui/911](https://github.com/bitcoin-core/gui/pull/911) (Adds non-mempool wallet balance to overview by ajtowns)\n* [#34049](https://github.com/bitcoin/bitcoin/pull/34049) (rpc: Disallow captures in RPCMethodImpl by ajtowns)\n* [#33671](https://github.com/bitcoin/bitcoin/pull/33671) (wallet: Add separate balance info for non-mempool wallet txs by ajtowns)\n* [#33135](https://github.com/bitcoin/bitcoin/pull/33135) (wallet: warn against accidental unsafe older() import by Sjors)\n* [#32861](https://github.com/bitcoin/bitcoin/pull/32861) (Have createwalletdescriptor auto-detect an unused(KEY) by Sjors)\n* [#31668](https://github.com/bitcoin/bitcoin/pull/31668) (Added rescan option for import descriptors by saikiran57)\n* [#29136](https://github.com/bitcoin/bitcoin/pull/29136) (wallet: `addhdkey` RPC to add just keys to wallets via new `unused(KEY)` descriptor by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- +    //! Scan UTXO set from coins belonging to the output_scripts -> +    //! Scan UTXO set for coins belonging to output_scripts [“from coins belonging to the output_scripts” is ungrammatical/awkward; “for coins belonging to output_scripts” is clearer and consistent with other comments]\n- +        # Mine 1000 total 1000 more blocksthen send the second tx -> +        # Mine 1000 more blocks then send the second tx [“1000 total 1000 more blocksthen” has duplicated/missing words and “blocksthen” is a typo; corrected to a clear sentence]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-09-15T16:17:17Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "It seems kind of weird to me to add this as an option to `getbalance`. The problem is in the `importdescriptors` call, which is using the wrong birthdate. Have you looked into making this an option of `importdescriptors`? If the performance isn't too bad, this could even be on by default. If that is possible that would seem preferred, since you also write \"However, users may not realize that their wallet balance is incomplete.\", if they don't know they likely also won't call the `getbalance` with this option. So ideally we could \"force\" this on users in a way that they don't feel (much) negative impact from it. If we can't do that then I am not sure this is of much use since the users could just call `rescanblockchain` directly if they are aware that there is a problem with their balances.",
+          "created_at": "2025-09-16T14:17:29Z"
+        },
+        {
+          "user": "musaHaruna",
+          "body": ">  Have you looked into making this an option of importdescriptors? \r\n\r\nI have not looked into making it an option for `importdecriptors`, but I will look into it, and get back to you on that.  \r\n\r\nJust thinking on a high level and somewhat naively because am a new contributor with little knowledge about the codebase,  what if we can atomatically cross check the balance by scanning the utxoset in `importdescriptor` before triggering the rescan, incase of wrong birthtime, seeing that even if they use the new flags in `getbalance`, they might/will eventually have to run `rescanblockchain`.\r\n\r\nThanks for the suggestion. I really appreciate it.\r\n",
+          "created_at": "2025-09-16T16:13:28Z"
+        },
+        {
+          "user": "musaHaruna",
+          "body": "> I have not looked into making it an option for importdecriptors, but I will look into it, and get back to you on that.\r\n\r\nYes, I have looked into adding the option to `importdescriptors` by introducing a `scan_utxoset` flag and it's possible. The idea is that when enabled, the wallet would scan the UTXO set immediately after import to verify balances against chainstate, and if a discrepancy is detected (for example due to an incorrect birthdate), it could automatically trigger a full rescan from height `0` to restore missing history. This way, users wouldn’t have to manually diagnose incomplete balances — the import flow itself would handle it. What Do you think this approach?.\r\n\r\nI don’t yet know the full impact on performance, but I’m thinking of making the trade-offs very clear in the RPC docs so users can decide whether to enable it.",
+          "created_at": "2025-09-16T19:45:09Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> Yes, I have looked into adding the option to importdescriptors by introducing a scan_utxoset flag and it's possible. The idea is that when enabled, the wallet would scan the UTXO set immediately after import to verify balances against chainstate, and if a discrepancy is detected (for example due to an incorrect birthdate), it could automatically trigger a full rescan from height 0 to restore missing history. This way, users wouldn’t have to manually diagnose incomplete balances — the import flow itself would handle it. What Do you think this approach?.\r\n\r\nCool, this is pretty much what I had in mind, I guess I would slightly prefer that full rescan isn't started by default and rather the user receives a clear hint that there might be some funds missing and if they want to make sure to get them they should run a full rescan, basically just like what you are doing now in the return from `getbalance`. But I don't have a strong preference there, either sound fine, maybe wait for some more conceptual feedback from other reviewers. \r\n\r\n> I don’t yet know the full impact on performance, but I’m thinking of making the trade-offs very clear in the RPC docs so users can decide whether to enable it.\r\n\r\nMaybe run some benchmarks on the utxo set scan and full rescan and add them to the PR here. I don't have a good feeling for what the relation is and this might influence what reviewers think is better concerning running a full rescan automatically or just returning a warning/hint from `importdescriptors`.\r\n\r\nAnother idea concerning performance: It seems likely that if the birth date is wrong the user might be off by just a few days or weeks, rather than they have a wallet with the satoshi coins. So instead of a full rescan from the start of the chain the rescan could move backwards from the originally supplied birth date and scan the chain in 1000 (or so) block increments and it could stop once the balance matches the one from the utxo set scan. A nice side effect of this is that it means the rescan is also pruning compatible (for as many blocks that are available) but I guess this could be also achieved by starting from pruneheight instead of 0 if pruning is enabled. It's something you need to keep in mind either way. This would also need benchmarks but I can't imagine moving backwards with somewhat large increments would make the process much slower. And ideally the process would exit early in the most common scenario.",
+          "created_at": "2025-09-16T20:53:18Z"
+        },
+        {
+          "user": "musaHaruna",
+          "body": "> Maybe run some benchmarks on the utxo set scan and full rescan and add them to the PR here. I don't have a good feeling for what the relation is and this might influence what reviewers think is better concerning running a full rescan automatically or just returning a warning/hint from `importdescriptors`.\r\n\r\nI will run some benchmarks on both utxo set scan and full rescan, update the whole PR to use the new approach you suggested i.e to add the feature on `importdescriptors` directly, which I honestly think is better. \r\n\r\n\r\n> Another idea concerning performance: It seems likely that if the birth date is wrong the user might be off by just a few days or weeks, rather than they have a wallet with the satoshi coins. So instead of a full rescan from the start of the chain the rescan could move backwards from the originally supplied birth date and scan the chain in 1000 (or so) block increments and it could stop once the balance matches the one from the utxo set scan. A nice side effect of this is that it means the rescan is also pruning compatible (for as many blocks that are available) but I guess this could be also achieved by starting from pruneheight instead of 0 if pruning is enabled. It's something you need to keep in mind either way. This would also need benchmarks but I can't imagine moving backwards with somewhat large increments would make the process much slower. And ideally the process would exit early in the most common scenario.\r\n\r\nJust to make sure we’re on the same page — my understanding is that the idea is to:\r\n\r\nUse chunked backward rescans starting from the supplied birthdate (e.g. 1000-block increments), and stop as soon as the wallet balance matches the UTXO-set scan. This handles the common case where the birthdate is only off by a few days or weeks, so we don’t need to rescan the entire chain.\r\n\r\nAt the same time, respect the pruneheight as the lower bound if pruning is enabled. That means we only scan back as far as blocks are available, and if the discrepancy still isn’t resolved at that point, we’d warn the user that a reindex is required.",
+          "created_at": "2025-09-17T09:27:39Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> Just to make sure we’re on the same page — my understanding is that the idea is to:\r\n> \r\n> Use chunked backward rescans starting from the supplied birthdate (e.g. 1000-block increments), and stop as soon as the wallet balance matches the UTXO-set scan. This handles the common case where the birthdate is only off by a few days or weeks, so we don’t need to rescan the entire chain.\r\n\r\nRight, so for example if the supplied birthdate was blockheight `800,000` but there is a discrepancy, then, instead rescanning from 0 to 800k right away, scan 799k - 800k and check the balance, exit if it's a match, continue with 798k - 799k and so on. This shouldn't be too complex to implement since the `rescanblockchain` RPC already takes a start and an end height.\r\n\r\n> At the same time, respect the pruneheight as the lower bound if pruning is enabled. That means we only scan back as far as blocks are available, and if the discrepancy still isn’t resolved at that point, we’d warn the user that a reindex is required.\r\n\r\nYeah, there would be some kind of safe abort if the approach for walking backwards runs into unavailable blocks, just like `rescanblockchain` does as well.",
+          "created_at": "2025-09-18T12:58:25Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `Windows-cross to x86_64`: https://github.com/bitcoin/bitcoin/actions/runs/19594797010/job/56117977131</sub>\n<sub>LLM reason (✨ experimental): Compilation failed: wallet::CWallet::ResubmitWalletTransactions is called with a bool where a node::TxBroadcast enum is required.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-11-22T11:43:30Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2026-01-03T00:19:11Z"
+        }
+      ]
+    },
+    {
+      "number": 33391,
+      "title": "test: Prevent disk space warning during node_init_tests",
+      "body": "mzumsande pointed out https://github.com/bitcoin/bitcoin/pull/32345#issuecomment-3286964369 that this test was print a warning:\r\n\r\n```\r\nWarning: Disk space for \"/tmp/test_common bitcoin/node_init_tests/init_test/bf78678cb7723a3e84b5/blocks\" may not accommodate the block files. Approximately 810 GB of data will be stored in this directory.\r\n```\r\n\r\nFix by setting regtest instead of mainnet network before running the test.",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-09-15T13:55:29Z",
+      "updated_at": "2025-09-16T08:50:49Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33391",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33391.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Eunovo](https://github.com/bitcoin/bitcoin/pull/33391#pullrequestreview-3225126615), [janb84](https://github.com/bitcoin/bitcoin/pull/33391#pullrequestreview-3225849802), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33391#pullrequestreview-3225850554), [mzumsande](https://github.com/bitcoin/bitcoin/pull/33391#pullrequestreview-3225928315), [enirox001](https://github.com/bitcoin/bitcoin/pull/33391#pullrequestreview-3226283052), [achow101](https://github.com/bitcoin/bitcoin/pull/33391#issuecomment-3294493195) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-15T13:55:35Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK bdf01c6f61262cd6e211ead3c0dbc66ccb48b32f",
+          "created_at": "2025-09-16T01:11:52Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 30.x in #33356.",
+          "created_at": "2025-09-16T08:50:49Z"
+        }
+      ]
+    },
+    {
+      "number": 33390,
+      "title": "cmake: exclude secp256k1 from all",
+      "body": "Instead of setting the EXCLUDE_FROM_ALL target property, pass EXCLUDE_FROM_ALL to `add_subdirectory()`.\r\n\r\nThis has the following advanteges:\r\n\r\n* It is shorter (obviously).\r\n* Target properties are set only in the `CMakeLists.txt` file that defines the target.\r\n* Install rules defined in the subdirectory are excluded as well. This is what we want, because secp256k1 is linked statically.",
+      "state": "open",
+      "user": "purpleKarrot",
+      "created_at": "2025-09-15T13:11:00Z",
+      "updated_at": "2025-10-14T18:05:47Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33390",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33390.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-15T13:11:06Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "CI [fails](https://github.com/bitcoin/bitcoin/actions/runs/17734216337/job/50391967626):\r\n```\r\nThe following tests FAILED:\r\n\t  4 - secp256k1_noverify_tests (Not Run)\r\n\t  5 - secp256k1_tests (Not Run)\r\n\t  6 - secp256k1_exhaustive_tests (Not Run)\r\nErrors while running CTest\r\n```",
+          "created_at": "2025-09-15T13:14:48Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Could turn into draft while CI is red?",
+          "created_at": "2025-09-26T08:16:00Z"
+        }
+      ]
+    },
+    {
+      "number": 33388,
+      "title": "test: don't throw from the destructor of DebugLogHelper",
+      "body": "Throwing an exception from the destructor of a class is a bad practice because the destructor will be called when an object of that type is alive on the stack and another exception is thrown, which will result in \"exception during the exception\". This would terminate the program without any messages.\r\n\r\nInstead print the message to the standard error output and call `std::abort()`.\r\n\r\n---\r\n\r\nThis change is part of https://github.com/bitcoin/bitcoin/pull/26812. It is an improvement on its own, so creating a separate PR for it following the discussion at https://github.com/bitcoin/bitcoin/pull/32604#discussion_r2345091587. Getting it in will reduce the size of #26812.",
+      "state": "closed",
+      "user": "vasild",
+      "created_at": "2025-09-15T09:03:14Z",
+      "updated_at": "2025-09-24T06:36:46Z",
+      "comments": 15,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33388",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33388.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [optout21](https://github.com/bitcoin/bitcoin/pull/33388#pullrequestreview-3244102600), [Crypt-iQ](https://github.com/bitcoin/bitcoin/pull/33388#issuecomment-3312041876), [furszy](https://github.com/bitcoin/bitcoin/pull/33388#pullrequestreview-3244943259), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33388#issuecomment-3314211120) |\n| Concept ACK | [enirox001](https://github.com/bitcoin/bitcoin/pull/33388#pullrequestreview-3231754426) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#26812](https://github.com/bitcoin/bitcoin/pull/26812) (test: add end-to-end tests for CConnman and PeerManager by vasild)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-15T09:03:19Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "ACK 7f87cddd36f0456be52d795a53887d53294f824e",
+          "created_at": "2025-09-15T14:45:07Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "> Throwing an exception from the destructor of a class is a bad practice because the destructor will be called when an object of that type is alive on the stack and another exception is thrown, which will result in \"exception during the exception\". This would terminate the program without any messages.\r\n\r\nThis is not precisely what happens. If an exception is emitted from a function marked `noexcept(false)`, the current terminate handler will be invoked. It does not matter whether the destructor is called due to another exception or not.\r\nThe default terminate handler would print the exception and then call abort.\r\n\r\nThe proposed implementation prints the error and then calls abort.\r\n\r\nSo basically, the change is that the class is no longer sensitive to a custom terminate handler. Is that really desired?",
+          "created_at": "2025-09-15T14:49:29Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Cap'n Proto has a policy of declaring destructors `noexcept(false)` and using `std::uncaught_exception()` to prevent throwing more than once under the assumption that \"ff another exception is already active, the new exception is assumed to be a side-effect of the main exception, and is either silently swallowed or reported on a side channel.\" It seems like that could be a reasonable approach here. The DebugLogHelper destructor could continue to throw normally, but just log instead in the case where another exception was active. And if caller cared to prevent this, it could call the `check_found` method explicitly outside of the destructor.\r\n\r\nMore information about cap'n proto's policy:\r\n\r\n- https://github.com/capnproto/capnproto/blob/master/style-guide.md#exceptions-can-happen-anywhere-including-destructors\r\n- https://github.com/capnproto/capnproto/blob/master/style-guide.md#exceptions-usage\r\n- https://github.com/capnproto/capnproto/blob/master/doc/cxx.md#c-feature-usage--c11-exceptions\r\n\r\nNot endorsing it generally but it might be a good fit here.",
+          "created_at": "2025-09-15T17:29:24Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> using std::uncaught_exception() to prevent throwing\r\n\r\nhttps://en.cppreference.com/w/cpp/error/uncaught_exception.html indicates `std::uncaught_exception()` is deprecated in C++17 and removed in C++20 - but we could use `std::uncaught_exceptions()`.\r\n\r\nAdded a few comments, thanks for tackling this.\r\n",
+          "created_at": "2025-09-15T20:22:03Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`7f87cddd36...ba6689aa9e`: drop some unrelated changes and pick some suggestions",
+          "created_at": "2025-09-18T14:05:43Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "Unrelated to the PR, but it is error prone that `DebugLogHelper` is copyable: https://godbolt.org/z/YdT5EWzMM\r\n\r\nI suggest to augment the PR with a commit that contains:\r\n```cpp\r\nDebugLogHelper(const DebugLogHelper&) = delete;\r\nDebugLogHelper& operator=(const DebugLogHelper&) = delete;\r\n```",
+          "created_at": "2025-09-18T14:24:54Z"
+        },
+        {
+          "user": "vasild",
+          "body": "@purpleKarrot,\r\n> > Throwing an exception from the destructor of a class is a bad practice because the destructor will be called when an object of that type is alive on the stack and another exception is thrown, which will result in \"exception during the exception\". This would terminate the program without any messages.\r\n\r\n> This is not precisely what happens. If an exception is emitted from a function marked `noexcept(false)`, the current terminate handler will be invoked.\r\n\r\nHmm, not what I observe here:\r\n\r\n```cpp\r\nvoid f() noexcept(false)\r\n{\r\n    throw std::runtime_error(\"exception from f()\");\r\n}\r\n\r\nint main(int, char**)\r\n{\r\n    try {\r\n        f();\r\n    } catch (const std::runtime_error& e) {\r\n        std::cerr << \"catch: \" << e.what() << \"\\n\";\r\n    }\r\n    return 0;\r\n}\r\n```\r\nprints \"catch: exception from f()\". No terminate handler is invoked.\r\n\r\n> It does not matter whether the destructor is called due to another exception or not.\r\n\r\nIt seems to matter because if I extend the program like this:\r\n\r\n```cpp\r\nclass A\r\n{\r\npublic:\r\n    ~A() noexcept(false)\r\n    {\r\n        throw std::runtime_error(\"exception from ~A()\");\r\n    }\r\n};\r\n...\r\n    try {\r\n        A a;\r\n        f();\r\n    } catch ...\r\n```\r\nThen this is printed: \"Terminating due to uncaught exception 0xd800c40110 of type std::runtime_error\" and the program terminates. Note the missing error text from the exception. The same happens with `try { std::vector<A> v(2); } catch ...` as well.\r\n\r\n> The default terminate handler would print the exception and then call abort.\r\n\r\nYes, but without the error message of the exception, just \"exception 0xd800c40110 of type std::runtime_error\".\r\n\r\n> The proposed implementation prints the error and then calls abort.\r\n\r\nPrints the proper, more useful, error message.\r\n\r\n> So basically, the change is that the class is no longer sensitive to a custom terminate handler. Is that really desired?\r\n\r\nThe change is that a bad practice of throwing from a destructor is eliminated.\r\n\r\n---\r\n\r\n@ryanofsky, @l0rinc,\r\n> Cap'n Proto ... std::uncaught_exception() ...\r\n\r\nThe swallowing of the 2nd and subsequent exceptions seems to assume that one has control and has implemented the same policy in all destructors in the program.\r\n\r\n@furszy,\r\n> As `DebugLogHelper` is only used within the unit test framework; could use BOOST_REQUIRE with a message within the destructor too.\r\n\r\nGood idea. I explored this, but it turns out that `BOOST_REQUIRE()` throws an exception on failure :/",
+          "created_at": "2025-09-18T14:30:15Z"
+        },
+        {
+          "user": "vasild",
+          "body": "@purpleKarrot \r\n> I suggest to augment the PR with a commit that contains...\r\n\r\nDone",
+          "created_at": "2025-09-18T14:35:13Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "> If an exception is emitted from a function marked `noexcept(false)`, the current terminate handler will be invoked.\r\n\r\nMy bad. That is the behavior for `noexcept(true)`, of course. I agree that marking a destructor with `noexcept(false)` is bad.",
+          "created_at": "2025-09-18T14:51:26Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "re: https://github.com/bitcoin/bitcoin/pull/33388#issuecomment-3307790546\r\n\r\n> The swallowing of the 2nd and subsequent exceptions seems to assume that one has control and has implemented the same policy in all destructors in the program.\r\n\r\nThat's not true, and wanted to be clear I wasn't advocating the policy generally. I was just pointing out that letting this particular destructor throw as it was designed to do, instead of aborting, is easy to support in practice with the noexcept(false) std::uncaught_exceptions technique. And it seems like a nice and safe way to provide error feedback. But if you think it's better to abort, that also seems fine.",
+          "created_at": "2025-09-18T16:19:20Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "crACK 2dcf0c69b8659886ecfc85b174e59cd7f210f5c0",
+          "created_at": "2025-09-18T20:28:12Z"
+        },
+        {
+          "user": "vasild",
+          "body": "`2dcf0c69b8...2427939935`: take https://github.com/bitcoin/bitcoin/pull/33388#discussion_r2359730526",
+          "created_at": "2025-09-19T09:29:42Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "crACK 2427939",
+          "created_at": "2025-09-19T12:39:12Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Code review reACK 2427939935f3e6669be6bf553be89639e0afabaa",
+          "created_at": "2025-09-19T23:45:02Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33393,
+      "title": "v30 Testing (BUG)",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\n1. It has a very serious vulnerability by defaulting op_return to 100,00 bytes.\n2. No op_return customisation options. \n\n### Expected behaviour\n\nop_return should be no more than 42 bytes.\n\n### Steps to reproduce\n\nUpdated the `bitcoin.conf` file\nAdded `datacarriersize=42`\n\n### Relevant log output\n\n_No response_\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nv30.0rc1\n\n### Operating system and version\n\nUbuntu 22.4 LTS\n\n### Machine specifications\n\n_No response_",
+      "state": "closed",
+      "user": "ghost",
+      "created_at": "2025-09-15T17:08:02Z",
+      "updated_at": "2025-09-16T10:30:52Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33393",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "ghost",
+          "body": "It is sad to see that the report has been closed straight away.\nBitcoin Knots do not have this bug. ",
+          "created_at": "2025-09-15T18:01:12Z"
+        }
+      ]
+    },
+    {
+      "number": 33389,
+      "title": "RFC: Bitcoin Core Node `BlockTemplateManager`",
+      "body": "Bitcoin Core Node `BlockTemplateManager`  main use should be handling block template creation for other components of the node.\nIt should use the low-level block assembler to do that. This `BlockTemplateManager` should be initialized with a pointer to the mempool and a `ChainstateManager` reference. It should have access to the default block creation options and be instantiated during node startup and destroyed when the node is shutting down.\nThis `BlockTemplateManager` should be available via the node interfaces.\n\nDuring instantiation of `BlockTemplateManager`,  it should create an instance of the `BlockAssembler` and subscribe to the validation interface `BlockConnected` notification.\n\nOther components like the Mining interface (`waitNext`, `createNewBlock`), Peer Manager #33191, and Fee Estimation with the mempool #30157 will request a template with their respective block creation options and the number of seconds of how fresh they want the template to be.\n\nThe `BlockTemplateManager` will maintain a vector of previously built block templates as caches and check if there is a template match within the interval specified by the client. If there is, it will return the template; else it will build a new one and add it to the cache.\n\nWhenever a new block is connected, the cache is cleared.\n\n<details>\n<summary>This is the overall flow</summary>\n\n<img width=\"2872\" height=\"1004\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/5b855932-305c-46b6-9947-74a03afbf2d3\" />  \n\n</details>\n\n**Future Improvement**\n\n1. Detect the fee increase in the mempool and create a new template based on that information, not just using a time interval. See discussion here:\n   [https://github.com/bitcoin/bitcoin/pull/31283#discussion\\_r1937451223](https://github.com/bitcoin/bitcoin/pull/31283#discussion_r1937451223)\n   After this, it should be possible to add a push-based technique to the `BlockTemplateManager` where you can make a subscription to get a notification when a better template is available in the mempool or when the chain tip changes. This can effectively be used in `waitNext` and make it better than the current approach, which constantly calls `createBlockTemplate` every second and checks if it is a better template.\n\n2. Low-priority, nice-to-have: prioritize clients; the mining interface should be served first before other components. (This is low-priority because of cache and template sharing between components. If a component calls BlockTemplateManager with the same config before the mining interface, the only overhead should be the shared pointer copy, which is negligible, I think. E.g., mempool-based fee estimation has the same config as the default configs for the mining interface. However, Peer Manager seems to have a diverging config; hence the priority will result in serving it faster and will have measurable improvement.)\n3.  Reuse Block Template with different Config as mentioned by @ajtowns \n    > One thing that might be interesting to think about is whether a cached template can be reused despite different block creation options. I think in practice all the options can be boiled down to \"maximum total weight\" and \"minimum effective feerate\", in which case if you had a 995 kvB template (ie 1MvB with 5kvB reserved), and had a request for a 300 kvB template, you could conceivably quickly generate the latter from the former, without needing to touch the mempool. That could probably be done particularly quickly if you kept a simplified dependency graph of the txs in the template, so that once you had to start dropping some txs, you could easily figure out which ones were missing parents and no longer sensible to consider. (Dealing with a different minimum effective feerate probably requires caching each txs' effective feerate, and with cpfp considerations is probably difficult to do accurately unless you keep the ancestor information or the cluster mempool chunking information).\n\n**FAQ**\n1. Is this useful?\nThe current approach of components each creating its instance of block assembler and effectively its own caching mechanism, as shown in #31664 and #33191, results in duplicate code and does not allow for better resource usage between the components.\n - <details>\n   <summary>See Image</summary>\n   <img width=\"2872\" height=\"2404\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/0e2be732-79b6-4deb-ba61-690e9f80eff8\" />  \n   </details>\n       Using the `BlockTemplateManager` will result in better utilization of resources in the node and avoid wasted work in some cases. Generally, I think this is a better design and allows for sharing of code and the future improvements above.\n\n  2. Is there a POC?\n   Yes, I've attempted this and have a branch here: [https://github.com/ismaelsadeeq/bitcoin/tree/09-2025-minerman](https://github.com/ismaelsadeeq/bitcoin/tree/09-2025-minerman) which has the mining interface `createNewBlock` using the `BlockTemplateManager`.\n \\#30157 will fit in nicely and reduce a large portion of mempool forecaster code, which was the caching code: [https://github.com/ismaelsadeeq/bitcoin/commit/ba9b5876ae453315b57af09654d5b12b664e897a](https://github.com/ismaelsadeeq/bitcoin/commit/ba9b5876ae453315b57af09654d5b12b664e897a)\n \\#33191 will also fit in nicely; see: [https://github.com/ismaelsadeeq/bitcoin/commit/10bd8920fd259aa47d4b96037a2302d7ae6ea41f](https://github.com/ismaelsadeeq/bitcoin/commit/10bd8920fd259aa47d4b96037a2302d7ae6ea41f)\n\n\n",
+      "state": "closed",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-09-15T09:55:15Z",
+      "updated_at": "2025-10-31T17:57:36Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33389",
+      "labels": [
+        "Brainstorming",
+        "Mining"
+      ],
+      "comment_list": [
+        {
+          "user": "ryanofsky",
+          "body": "Another link to the POC branch: https://github.com/bitcoin/bitcoin/compare/master...ismaelsadeeq:bitcoin:09-2025-minerman\n\nThis seems like a good idea. The actual change here doesn't seem very big and it seems like it could avoid some wasted memory and wasted work. It does seem like `BlockTemplateManager` is currently duplicating some logic in `WaitAndCreateNewBlock`, but I think the idea would be to replace it?\n\nThis idea also seems like it might relate to https://github.com/bitcoin/bitcoin/issues/31109 (if that issue is not already resolved by having having BlockTemplate::waitNext()).\n\nAnother minor piece of feedback is I think `shared_ptr<CBlockTemplate>` should be replaced by `shared_ptr<const CBlockTemplate>` in the branch to prevent callers from making changes to shared templates.\n\n\n\n",
+          "created_at": "2025-09-15T18:08:36Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "> [net: Provide block templates to peers on request #33191](https://github.com/bitcoin/bitcoin/pull/33191) will also fit in nicely; see: [ismaelsadeeq@10bd892](https://github.com/ismaelsadeeq/bitcoin/commit/10bd8920fd259aa47d4b96037a2302d7ae6ea41f)\n\nI don't understand this -- peer template sharing seems a really bad fit for a template manager for three reasons:\n\n * the shared templates are probably oversized (2MvB instead of 1MvB) so aren't directly useful to reuse in other contexts (and would be harmful if directly reused, as they would obviously be consensus invalid)\n * we probably want to retain knowledge about precisely when the template was generated to avoid leaking more precise information about when we added a tx to the mempool [[ref]](https://github.com/bitcoin/bitcoin/pull/33191#issuecomment-3194906991)\n * the shared templates for peers are cached even after they're no longer current in order to still be able to reply to requests and potentially to aid compact block reconstruction; so a different caching strategy compared to BlockTemplateManager's is needed anyway\n\nSo as far as I can see these two features don't really get a lot of benefit from each other.\n\nIn an ideal world, I think some of this is better done via cluster mempool -- ie if we're tracking the approximate feerate of the top 1MvB of mempool txs directly via the mempool (as per https://github.com/bitcoin/bitcoin/pull/31283#discussion_r1937550966), then perhaps the fee estimation stuff won't need to invoke createblock at all.\n\nOverall, this seems like a fine idea; at the very least the `static` variables inside `getblocktemplate` always seemed a bit tacky to me, and unifying gbt and the mining interface seems sensible. This seems worth doing even if it's only useful for gbt and the mining interface to me.\n\n> will request a template with their respective block creation options and the number of seconds of how fresh they want the template to be.\n\nOne thing that might be interesting to think about is whether a cached template can be reused despite different block creation options. I think in practice all the options can be boiled down to \"maximum total weight\" and \"minimum effective feerate\", in which case if you had a 995 kvB template (ie 1MvB with 5kvB reserved), and had a request for a 300 kvB template, you could conceivably quickly generate the latter from the former, without needing to touch the mempool. That could probably be done particularly quickly if you kept a simplified dependency graph of the txs in the template, so that once you had to start dropping some txs, you could easily figure out which ones were missing parents and no longer sensible to consider. (Dealing with a different minimum effective feerate probably requires caching each txs' effective feerate, and with cpfp considerations is probably difficult to do accurately unless you keep the ancestor information or the cluster mempool chunking information).\n\nI'd be tempted to call this `BlockTemplateCache` rather than `..Manager` personally, but ymmv.",
+          "created_at": "2025-09-16T05:37:48Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "Thanks for taking a look.\n\n@ryanofsky wrote\n\n> It does seem like BlockTemplateManager is currently duplicating some logic in WaitAndCreateNewBlock, but I think the idea would be to replace it?\n\nFor now I think it won’t exactly replace it; instead,\n\n```cpp\n            auto new_tmpl{BlockAssembler{\n                chainman.ActiveChainstate(),\n                mempool,\n                assemble_options}\n                              .CreateNewBlock()};\n```\n\nshould be replaced with\n\n```cpp\nauto interval = std::chrono::seconds{0s};\nauto new_tmpl = minerman.GetBlockTemplate(assemble_options, interval);\n```\n\nsuch that other components apart from peer manager, as @ajtowns mentioned, can reuse this template since it is very consistent and fresh.\n\nThe logic should be replaced when F.1 1 has been implemented.\n\n> This idea also seems like it might relate to #31109 (if that issue is not already resolved by having having BlockTemplate::waitNext()).\n\nYes, if I understand correctly, F.I 1 solves part of the issue, which is deciding that the mempool fees have increased to the point where we should create a new template (it will just change internally without the CBT calls each second, to users of waitNext() nothing changes I think).\n\n> Another minor piece of feedback is I think shared\\_ptr<CBlockTemplate> should be replaced by shared\\_ptr<const CBlockTemplate> in the branch to prevent callers from making changes to shared templates.\n\nThanks, I will update.\n\n@ajtowns wrote\n\n> the shared templates are probably oversized (2MvB instead of 1MvB) so aren't directly useful to reuse in other contexts (and would be harmful if directly reused, as they would obviously be consensus invalid)\n\nYes, this is correct. But it will benefit from it in the F.I is added (there should be no point in creating a new template when nothing change in the previous one). As of now, it is not benefiting from the cache, and other components won’t benefit from it either (CAVEAT: when your idea is added other components will benefit).\n\n> One thing that might be interesting to think about is whether a cached template can be reused despite different block creation options.\n\nThis is the CAVEAT i mentioned above. I will add that to the list of F.I's.\n\n> we probably want to retain knowledge about precisely when the template was generated to avoid leaking more precise information about when we added a tx to the mempool \\[ref]\n\nThis is trivial to return, because the time of creation is the main trigger for new block template generation.\n\n> the shared templates for peers are cached even after they're no longer current in order to still be able to reply to requests and potentially to aid compact block reconstruction; so a different caching strategy compared to BlockTemplateManager's is needed anyway\n\nI don’t think this means an overlap. `BlockTemplateManager` also doesn't clear when it is not current; it clears when the tip changes. You should be able to ask for all block templates with a particular config and get a list with the time of creation.\n\n> In an ideal world, I think some of this is better done via cluster mempool -- ie if we're tracking the approximate feerate of the top 1MvB of mempool txs directly via the mempool (as per #31283 (comment)), then perhaps the fee estimation stuff won't need to invoke createblock at all.\n\nHmm, yes, that’s correct, and that will be better because the fee estimation only needs the package fee rate data anyway.\nAlthough I am not sure about the concrete approach to do this yet, I will think about it a bit more and also would like to know what @sipa  thinks about this.\n\n> That could probably be done particularly quickly if you kept a simplified dependency graph of the txs in the template, so that once you had to start dropping some txs, you could easily figure out which ones were missing parents and no longer sensible to consider. (Dealing with a different minimum effective feerate probably requires caching each txs' effective feerate, and with cpfp considerations is probably difficult to do accurately unless you keep the ancestor information or the cluster mempool chunking information).\n\nThis is a nice idea 👍🏾 , I will add it to the list of future improvements.\n",
+          "created_at": "2025-09-16T09:34:57Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Interesting discussion. Especially interesting to know about possibility of leaking transaction information if creation times aren't tracked and used correctly. And to know how this could take more advantage of cluster mempool. I also like idea of calling this BlockTemplateCache instead of BlockTemplateManager to give it more focus.\n\nOverall, notion of a shared cache seems useful. In terms of the implementation approach, I think it'd be nice if new code were integrated with existing code sooner rather than later (for example if waitNext could call this in the same PR it was introduced, or if this could be used to replace static BlockAssembler variables) to avoid having duplicate functionality, and make sure the new code is well tested and the interface is practically useful.\n\n> F.I 1\n\nNote: in case anybody else was confused by this, F.I refers the \"Future Improvements\" section of the OP.",
+          "created_at": "2025-09-16T14:42:17Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "> Overall, notion of a shared cache seems useful. In terms of the implementation approach, I think it'd be nice if new code were integrated with existing code sooner rather than later (for example if waitNext could call this in the same PR it was introduced, or if this could be used to replace static BlockAssembler variables) to avoid having duplicate functionality, and make sure the new code is well tested and the interface is practically useful\n\nI will be working on polishing the branch and opening it as a PR",
+          "created_at": "2025-09-17T10:27:11Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "I opened #33421 last week and made an update to it today, I think it is ready for for review now.\n\nThe fuzz test added in the PR also caught an issue on master that should be backported to v30 see https://github.com/bitcoin/bitcoin/pull/33421#issuecomment-3324859282",
+          "created_at": "2025-09-23T17:26:00Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Do you think #33756 would be compatible with this?",
+          "created_at": "2025-10-31T16:42:38Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "> Do you think https://github.com/bitcoin/bitcoin/issues/33756 would be compatible with this?\n\nI have not take a look at that yet, I will do and revert thanks.\n\nClosing this in favour of https://github.com/bitcoin/bitcoin/issues/33758 discussion can continue though.\nThanks for engaging.",
+          "created_at": "2025-10-31T17:57:36Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 8,
+    "issues": 2
+  }
+}

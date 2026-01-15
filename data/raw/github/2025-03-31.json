@@ -1,0 +1,352 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:29:07.140961+00:00",
+  "date": "2025-03-31",
+  "pull_requests": [
+    {
+      "number": 32180,
+      "title": "p2p: Advance pindexLastCommonBlock early after connecting blocks",
+      "body": "As described in #32179, `pindexLastCommonBlock` is updated later than necessary \r\nin master. \r\nIn case of a linear chain with no forks, it can be moved forward at the beginning of \r\n`FindNextBlocksToDownload`, so that the updated value can be used to better estimate `nWindowEnd`. \r\nThis helps the node to request all blocks from peers within the correct 1024-block-window and avoids peers being incorrectly marked as stallers.\r\n\r\nI also changed `p2p_ibd_stalling.py` to cover the situation after a resolved situation, making sure that no additional peers are marked for stalling.\r\n\r\nFixes #32179\r\n\r\n",
+      "state": "closed",
+      "user": "mzumsande",
+      "created_at": "2025-03-31T22:40:42Z",
+      "updated_at": "2025-11-11T14:45:39Z",
+      "comments": 16,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32180",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32180.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Crypt-iQ](https://github.com/bitcoin/bitcoin/pull/32180#issuecomment-3390328037), [sipa](https://github.com/bitcoin/bitcoin/pull/32180#pullrequestreview-3351389434), [stringintech](https://github.com/bitcoin/bitcoin/pull/32180#issuecomment-3479798341) |\n| Concept ACK | [yuvicc](https://github.com/bitcoin/bitcoin/pull/32180#issuecomment-2796118736) |\n| Stale ACK | [furszy](https://github.com/bitcoin/bitcoin/pull/32180#pullrequestreview-3048831581), [achow101](https://github.com/bitcoin/bitcoin/pull/32180#issuecomment-3282783147), [vasild](https://github.com/bitcoin/bitcoin/pull/32180#pullrequestreview-3279732989) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-03-31T22:40:46Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "Concept ACK\r\n\r\nThanks for this PR.\r\n\r\nI have made some [notes](https://github.com/i-am-yuvi/bitcoin-core-issues-prs-notes/blob/master/%2332180.md) regarding this PR and will add some guide for testing as well very soon.",
+          "created_at": "2025-04-11T07:47:23Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "[c69ee2d](https://github.com/bitcoin/bitcoin/commit/c69ee2d5b93296d3008d6978182b2bc29bbeb457) to [b7ff6a6](https://github.com/bitcoin/bitcoin/commit/b7ff6a611a220e9380f6cd6428f1d3483c8d566f): addressed feedback\r\n\r\n\r\n> Is it expected to pass sometimes?\r\n\r\nIt wasn't - but I have tracked this down now. It's a bit involved, I hope the following explanation makes sense:\r\n\r\nThe initial situation is that there are 2 remaining connected peers, the node has just synced blocks up to height 500, but pindexLastCommonBlock is still at 0. The second stall block at height 501 is already requested from one peer, let's say `peer0`.\r\n\r\nIf SendMessages is invoked for `peer0`, it will request no blocks, update `pindexLastCommonBlock` to 500 and won't mark anyone as a staller, because it's already requested from the same peer.\r\nIf after that, `peer1` would be processed, `peer0` would be marked as a staller.\r\nBut if `peer0` is processed twice in a row (which can happen due to the randomization in `ThreadMessageHandler`), we could request block 1025 from it.\r\nIf `peer1` is processed then (for which pindexLastCommonBlock is still at 0), all `1024+1` blocks in the window will already be requested, so we never get to [this point](https://github.com/bitcoin/bitcoin/blob/af6cffa36d12d8b9f504024c080f1559373aba2a/src/net_processing.cpp#L1500) because we always continue [here](https://github.com/bitcoin/bitcoin/blob/af6cffa36d12d8b9f504024c080f1559373aba2a/src/net_processing.cpp#L1496).\r\nI think this could be fixed by exchanging the order of [this](https://github.com/bitcoin/bitcoin/blob/af6cffa36d12d8b9f504024c080f1559373aba2a/src/net_processing.cpp#L1490-L1497) and [this](https://github.com/bitcoin/bitcoin/blob/af6cffa36d12d8b9f504024c080f1559373aba2a/src/net_processing.cpp#L1499-L1507) code block. I'm not sure if this is something that needs fixing though because the current patch should avoid this problem too...\r\n",
+          "created_at": "2025-04-28T20:02:43Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "[b7ff6a6](https://github.com/bitcoin/bitcoin/commit/b7ff6a611a220e9380f6cd6428f1d3483c8d566f) to [3bdff9a](https://github.com/bitcoin/bitcoin/commit/3bdff9a154733f8f9f379448f5595a2e90474bc6): rebased due to conflict with #32868",
+          "created_at": "2025-07-21T15:27:17Z"
+        },
+        {
+          "user": "stringintech",
+          "body": "ACK 3bdff9a\r\n\r\nI think it would be nice to include how the newly added logic would also cover the assumeutxo case in the [commit](https://github.com/bitcoin/bitcoin/commit/e66556082279b21ead21e52e7b81996fa195c205) description; if my understanding is correct, adding something like:\r\n\r\n_After snapshot loading, our tip becomes the snapshot block. Since peers are verified to have the snapshot in their chain, our tip is an ancestor of the peer's best block, hence the general advancement logic will move pindexLastCommonBlock from any pre-snapshot position to the snapshot height automatically._",
+          "created_at": "2025-07-30T10:21:54Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "Thanks! I'll address the nits if / when I have to push again.",
+          "created_at": "2025-08-04T19:44:30Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 3bdff9a154733f8f9f379448f5595a2e90474bc6",
+          "created_at": "2025-09-11T22:09:38Z"
+        },
+        {
+          "user": "vasild",
+          "body": "ACK 3bdff9a154733f8f9f379448f5595a2e90474bc6 but see https://github.com/bitcoin/bitcoin/pull/32180#discussion_r2344157017, non-blocking IMO, would be nice to address",
+          "created_at": "2025-09-12T12:56:37Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "[3bdff9a](https://github.com/bitcoin/bitcoin/commit/3bdff9a154733f8f9f379448f5595a2e90474bc6) to [b2c6cb7](https://github.com/bitcoin/bitcoin/commit/b2c6cb7f026ff704c227e632f8c5c2f09e6f058a):\r\n- Reintroduced test improvement that I unintentionally dropped with the last rebase (https://github.com/bitcoin/bitcoin/pull/32180#discussion_r2344157017)\r\n- changed commit message of \"p2p: remove extra logic for assumeutxo\" (https://github.com/bitcoin/bitcoin/pull/32180#issuecomment-3135699830)",
+          "created_at": "2025-09-15T22:06:58Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "crACK 0a757acf66d905566729ec4140159cbc68a95ac7\r\n\r\n> I think this could be fixed by exchanging the order of [this](https://github.com/bitcoin/bitcoin/blob/af6cffa36d12d8b9f504024c080f1559373aba2a/src/net_processing.cpp#L1490-L1497) and [this](https://github.com/bitcoin/bitcoin/blob/af6cffa36d12d8b9f504024c080f1559373aba2a/src/net_processing.cpp#L1499-L1507) code block. I'm not sure if this is something that needs fixing though because the current patch should avoid this problem too...\r\n\r\nSince the patch only applies when our tip is an ancestor of `pindexBestKnownBlock`, I think this patch does not fix it if that condition is false?",
+          "created_at": "2025-10-08T14:13:26Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "[b2c6cb7](https://github.com/bitcoin/bitcoin/commit/b2c6cb7f026ff704c227e632f8c5c2f09e6f058a) to [01cc20f](https://github.com/bitcoin/bitcoin/commit/01cc20f3307c532f402cdf5dc17f2f14920b725b): changed the approach of the main commit to the suggestion by @sipa. I also added a comment and rewrote the commit message. ",
+          "created_at": "2025-10-09T22:11:38Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "crACK 01cc20f3307c532f402cdf5dc17f2f14920b725b",
+          "created_at": "2025-10-10T14:03:22Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Imagine the following state:\r\n\r\n```mermaid\r\ngraph BT\r\n\r\ng[\"genesis\"];\r\nf[\"fork_point\"];\r\na[\"ActiveTip()\"];\r\nb[\"pindexBestKnownBlock\"];\r\nl[\"pindexLastCommonBlock\"];\r\np[\"P\"];\r\nf-->g;\r\na-->f;\r\nl-->p;\r\nb-->p;\r\np-->f;\r\n```\r\n\r\nIn this situation, I think we want to update `pindexLastCommonBlock` to be `P`, but the current code in this PR will select `fork_point`. Is this a situation that can occur?\r\n\r\nI think that the logic we actually want is selecting the more-work one among `LastCommonAncestor(pindexBestKnownBlock, ActiveTip())` and `LastCommonAncestor(pindexBestKnownBlock, pindexLastCommonBlock)`.",
+          "created_at": "2025-10-13T20:54:56Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> I think that the logic we actually want is selecting the more-work one among `LastCommonAncestor(pindexBestKnownBlock, ActiveTip())` and `LastCommonAncestor(pindexBestKnownBlock, pindexLastCommonBlock)`.\r\n\r\nThat means a situation where a peer reorged to a different chain compared to the last call, while our tip is on yet a third chain - I agree that it would be better to go to P here. However, it would just be an optimization -  without it, we will set `pindexLastCommonBlock` to the `fork_point`, move it along the chain towards P (which may again lead to the delay / unnecessary stalling detections we see on master today).\r\n\r\n> I think that the logic we actually want is selecting the more-work one among LastCommonAncestor(pindexBestKnownBlock, ActiveTip()) and LastCommonAncestor(pindexBestKnownBlock, pindexLastCommonBlock).\r\n\r\nThis would mean a second call to `LastCommonAncestor` though - if we did that, wouldn't we be optimizing for an edge case we'll likely never encounter on mainnet, at the detriment of the usual case of a linear chain?",
+          "created_at": "2025-10-14T15:13:58Z"
+        },
+        {
+          "user": "sipa",
+          "body": "@mzumsande Agree that sounds sufficiently unlikely to optimize for (and sufficiently expensive to intentionally cause).\r\n\r\nCode review ACK on the logic change, but I want to have a look at the tests still.",
+          "created_at": "2025-10-16T02:01:28Z"
+        },
+        {
+          "user": "stringintech",
+          "body": "re-ACK 01cc20f",
+          "created_at": "2025-11-03T10:16:47Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 01cc20f3307c532f402cdf5dc17f2f14920b725b",
+          "created_at": "2025-11-10T16:32:07Z"
+        }
+      ]
+    },
+    {
+      "number": 32177,
+      "title": "TxGraph: Increase fuzz coverage",
+      "body": "Was looking at my local coverage report, and noticed a few spots that will not or cannot be hit.\r\n\r\nCountDistinctClusters, GetAncestorsUnion, and GetDescendantsUnion accept nullptrs, but the test harness never employs them. Disallow them.\r\n\r\nWe never call PullIn whenever there isn't staging, so just enforce that invariant via assertion.\r\n\r\nRemaining places that are not covered:\r\n\r\n1) Relinearize: Currently we seem to always start with a cold (not known to be optimal) cluster, and after one attempt at linearization result into something optimal. This means we never shortcircuit, nor run PostLinearization, nor store the quality as ACCEPTABLE. Reducing iterations causes these lines to be hit. sipa says he will take this on as varying the amount of iterations was meant to be done eventually anyways.\r\n2) We never do a move assignment operator when the lvalue already has a `m_graph` (so we never call UnlinkRef) https://github.com/bitcoin/bitcoin/blob/3358b1d105196647230e6f828b8ec820426b96a0/src/txgraph.cpp#L2097\r\n3) We never use the move constructor: https://github.com/bitcoin/bitcoin/blob/3358b1d105196647230e6f828b8ec820426b96a0/src/txgraph.cpp#L2108\r\n",
+      "state": "closed",
+      "user": "instagibbs",
+      "created_at": "2025-03-31T17:17:16Z",
+      "updated_at": "2025-04-03T01:51:38Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32177",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32177.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [sipa](https://github.com/bitcoin/bitcoin/pull/32177#issuecomment-2767038988), [glozow](https://github.com/bitcoin/bitcoin/pull/32177#pullrequestreview-2737248499) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-31T17:17:20Z"
+        },
+        {
+          "user": "sipa",
+          "body": "utACK a40bd374aaf8e10116fa664fa7b480d85ee2fe59",
+          "created_at": "2025-03-31T18:17:49Z"
+        }
+      ]
+    },
+    {
+      "number": 32176,
+      "title": "net: Prevent accidental circuit sharing when using Tor stream isolation",
+      "body": "Add a class TorsStreamIsolationCredentialsGenerator that generates unique credentials based on a randomly generated session prefix and an atomic counter. Use this in `ConnectThroughProxy` instead of a simple atomic int counter.\r\n\r\nThis makes sure that different launches of the application won't share the same credentials, and thus circuits, even in edge cases.\r\n\r\nExample with `-debug=proxy`:\r\n```\r\n2025-03-31T16:30:27Z [proxy] SOCKS5 sending proxy authentication 0afb2da441f5c105-0:0afb2da441f5c105-0\r\n2025-03-31T16:30:31Z [proxy] SOCKS5 sending proxy authentication 0afb2da441f5c105-1:0afb2da441f5c105-1\r\n```\r\n\r\nThanks to hodlinator in https://github.com/bitcoin/bitcoin/pull/32166#discussion_r2020973352 for the idea.",
+      "state": "closed",
+      "user": "laanwj",
+      "created_at": "2025-03-31T16:23:33Z",
+      "updated_at": "2025-04-15T16:00:43Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32176",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32176.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hodlinator](https://github.com/bitcoin/bitcoin/pull/32176#pullrequestreview-2741168590), [jonatack](https://github.com/bitcoin/bitcoin/pull/32176#pullrequestreview-2747749486), [danielabrozzoni](https://github.com/bitcoin/bitcoin/pull/32176#pullrequestreview-2754306752) |\n| Stale ACK | [1440000bytes](https://github.com/bitcoin/bitcoin/pull/32176#pullrequestreview-2730626780), [eval-exec](https://github.com/bitcoin/bitcoin/pull/32176#pullrequestreview-2731243502) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31650](https://github.com/bitcoin/bitcoin/pull/31650) (refactor: Avoid copies by using const references or by move-construction by maflcko)\n* [#28584](https://github.com/bitcoin/bitcoin/pull/28584) (Fuzz: extend CConnman tests by vasild)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-31T16:23:36Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "[297ddaa430e99ad62e6bbdcc475ede7e04da547f  → ec81a72b369ab9efe23681ebb6e8fab34ce2e0f2](https://github.com/bitcoin/bitcoin/compare/297ddaa430e99ad62e6bbdcc475ede7e04da547f..ec81a72b369ab9efe23681ebb6e8fab34ce2e0f2)\r\n- Updated for @hodlinator's comments",
+          "created_at": "2025-04-03T10:15:03Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "Temporarily cherry-picked #32203 into here for testing fix for CI failure. Will revert this branch back to the old commit afterwards.",
+          "created_at": "2025-04-03T14:55:00Z"
+        }
+      ]
+    },
+    {
+      "number": 32175,
+      "title": "fuzz: doc: add info about `afl-system-config` for macOS",
+      "body": "`afl-system-config` adjusts the shared memory segment size limits and configures kernel parameters for better fuzzing performance. Since macOS has more conservative values on shared memory, it's necessary to run `afl-system-config`, or manually adjust the values to fuzz with AFL++.\r\n\r\ne.g.:\r\n```sh\r\nkern.sysv.shmmax: 524288000\r\nkern.sysv.shmmin: 1\r\nkern.sysv.shmseg: 48\r\nkern.sysv.shmall: 131072000\r\n```\r\n",
+      "state": "closed",
+      "user": "brunoerg",
+      "created_at": "2025-03-31T16:17:45Z",
+      "updated_at": "2025-10-30T13:59:35Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32175",
+      "labels": [
+        "Tests",
+        "Fuzzing"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32175.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [janb84](https://github.com/bitcoin/bitcoin/pull/32175#pullrequestreview-2804587876), [w0xlt](https://github.com/bitcoin/bitcoin/pull/32175#pullrequestreview-2826580160), [Crypt-iQ](https://github.com/bitcoin/bitcoin/pull/32175#pullrequestreview-2859098136) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-03-31T16:17:48Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "Pushed 66572c27454e1464173dc318d62fdfc11d4b7832..6e026606f368d8d1139b266c382076685e76d0b2 to address https://github.com/bitcoin/bitcoin/pull/32175#discussion_r2042642262",
+          "created_at": "2025-04-28T17:56:16Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> I noticed that a couple lines above, the link to \"selecting the best AFL compiler...\" is invalid and has instead moved to https://github.com/AFLplusplus/AFLplusplus/blob/stable/docs/fuzzing_in_depth.md#a-selecting-the-best-afl-compiler-for-instrumenting-the-target. I can open a PR to fix the doc link.\r\n\r\nCool, go ahead.",
+          "created_at": "2025-05-22T12:51:42Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "rfm?",
+          "created_at": "2025-06-13T11:41:19Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "I think we just need to make sure we don't start recreating all the AFL docs, in our own docs, especially not for macOS, given fuzzing is not well supported/seems to be constantly having issues there. IIRC the note about `afl-system-config` is also output by afl itself, so it's not clear that repeating it here is needed?",
+          "created_at": "2025-06-13T12:59:34Z"
+        }
+      ]
+    },
+    {
+      "number": 32174,
+      "title": "test: Verify that a message is not in rpc errors raised (follow-up 31451)",
+      "body": "This follow-up was proposed in https://github.com/bitcoin/bitcoin/pull/31451#discussion_r1884067770.\r\n \r\nVerify that an unwanted message is not among the errors raised by the rpc call, otherwise raise an exception with the details.",
+      "state": "closed",
+      "user": "pablomartin4btc",
+      "created_at": "2025-03-31T15:23:51Z",
+      "updated_at": "2025-10-22T15:13:29Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32174",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32174.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [enirox001](https://github.com/bitcoin/bitcoin/pull/32174#issuecomment-2799863251) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-03-31T15:23:54Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/39708397356</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-31T15:29:36Z"
+        },
+        {
+          "user": "enirox001",
+          "body": "@pablomartin4btc  Based on the commit, I see that an unwanted message variable was added to `test/functional/test_framework/util.py,` along with an assertion to raise an error if that message is encountered. In the `test_failed_migration_cleanup` test case, this unwanted message is now passed to the assertion method.\r\n\r\nI was trying to verify the fix by triggering the error on the master branch (before this change), but I’m not sure how to reproduce it. Could you give me a quick heads-up on how to get the error to appear, so I can confirm that the changes properly prevent it?\r\n\r\nSorry if this is a basic question— I want to make sure I’m testing it correctly. Appreciate the help!",
+          "created_at": "2025-04-05T22:08:19Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "Thanks @EniRox001 for reviewing this PR!\r\n\r\n> Sorry if this is a basic question— I want to make sure I’m testing it correctly. Appreciate the help!\r\n\r\nNo problem. This was a bug that was already fixed in `master`, but we could verify that this change works by detecting \"hidden\" error messages withing the failure response. Not sure if this is the best way to test it but you could just change the line after the `RestoreWallet` call in order to concatenate the \"unwanted\" error message.\r\n\r\n```diff --git a/src/wallet/wallet.cpp b/src/wallet/wallet.cpp\r\n--- a/src/wallet/wallet.cpp\r\n+++ b/src/wallet/wallet.cpp\r\n@@ -4610,7 +4610,7 @@ util::Result<MigrationResult> MigrateLegacyToDescriptor(std::shared_ptr<CWallet>\r\n         // Reload it into memory if the wallet was previously loaded.\r\n         bilingual_str restore_error;\r\n         const auto& ptr_wallet = RestoreWallet(context, temp_backup_location, wallet_name, /*load_on_start=*/std::nullopt, status, restore_error, warnings, /*load_after_restore=*/was_loaded);\r\n-        if (!restore_error.empty()) {\r\n+        if (restore_error.empty()) {\r\n             error += restore_error + _(\"\\nUnable to restore backup of wallet.\");\r\n             return util::Error{error};\r\n         }\r\n```\r\n",
+          "created_at": "2025-04-07T16:33:42Z"
+        },
+        {
+          "user": "enirox001",
+          "body": "ACK. I tested this by modifying the line immediately following RestoreWallet, which triggered the hidden failure message and revealed the unwanted error. This fix successfully ensures that the unwanted message is no longer included in the RPC error outputs.",
+          "created_at": "2025-04-13T08:44:35Z"
+        },
+        {
+          "user": "achow101",
+          "body": "This PR does not seem to have attracted much attention from reviewers. As such, it does not seem important enough right now to keep it sitting idle in the list of open PRs.\r\n\r\nClosing due to lack of interest.",
+          "created_at": "2025-10-22T15:13:28Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32179,
+      "title": "p2p: Inefficiency in block download / stalling algorithm",
+      "body": "When we were in a stalling situation during IBD, we may kick a peer and download the block needed to advance our tip from another peer.\nWhen we then receive the block, that will often result in many (hundreds) of blocks being connected in one go, resolving the stalling situation:  A 1024-blocks window beginning at the new tip now has several open slots.\n\nThere is a bug in what happens next, which results in a less efficient IBD and possibly an unnecessary disconnection of a peer:\n\nIn the next `FindNextBlocksToDownload` call for each peer, `pindexLastCommonBlock` (the last full block both we and that peer have) will not be updated immediately. Instead, we calculate the window of blocks we might request based on the old `pindexLastCommonBlock`, call `FindNextBlocks` with that - `pindexLastCommonBlock` will  only then be moved forward [within that call](https://github.com/bitcoin/bitcoin/blob/3358b1d105196647230e6f828b8ec820426b96a0/src/net_processing.cpp#L1454-L1456).\n\nThis is bad for two reasons:\n1.) We waste one `FindNextBlocksToDownload` call iterating over blocks we won't need to download anyway (just improving `pindexLastCommonBlock` along the way)\n2.) If we, as a consequence, don't request any block from that peer, we will [start a new stalling procedure](https://github.com/bitcoin/bitcoin/blob/74d9598bfbc24c3b7bfe1dad5bf9d988381bf893/src/net_processing.cpp#L5886-L5889) and mark a peer as a possible staller, possibly disconnecting it after a short timeout. This is incorrect, because the stalling situation was already resolved, and can result in unnecessary disconnects.\n\nI think it would be better to adjust  `pindexLastCommonBlock` based on the new tip in `FindNextBlocksToDownload` (because we certainly don't need to download any blocks below that in case of a linear chain with no forks), and calculate `nWindowEnd`  based on that, so that the following `FindNextBlocks` will download blocks based on a 1024-blocks window based on the new, current tip instead of the old one.\n\nI opened #32180 to fix this.",
+      "state": "closed",
+      "user": "mzumsande",
+      "created_at": "2025-03-31T20:17:09Z",
+      "updated_at": "2025-11-10T16:49:00Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32179",
+      "labels": [
+        "P2P"
+      ]
+    },
+    {
+      "number": 32178,
+      "title": "estimateSmartFee error: \"Insufficient data or no feerate found",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nTo estimate fees we use estimateSmartFee and were constantly running into the following error: estimateSmartFee error: \"Insufficient data or no feerate found\"\n\nAs mentioned in other github issues, we could manually delete fee_estimate.dat and mempool.dat from the node. Which isnt scalable, so we moved to testnet4 with the understanding it would provide a more stable testing environment. \n\nUnfortunately, we have now started running into the exact same error on testnet 4, is this expected and are others seeing this issue? Regardless, is there any recommendations on how to bring more stability to getting fees back using estimateSmartFee on testnet4? \n\n### Expected behaviour\n\nFee rate is returned when using estimateSmartFee\n\n### Steps to reproduce\n\nMake a call to estimateSmartFee \n\n### Relevant log output\n\n_No response_\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nv.28.1\n\n### Operating system and version\n\nUbuntu\n\n### Machine specifications\n\n_No response_",
+      "state": "closed",
+      "user": "ChayDragan",
+      "created_at": "2025-03-31T19:17:42Z",
+      "updated_at": "2025-04-25T21:12:40Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32178",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "comment_list": [
+        {
+          "user": "pinheadmz",
+          "body": "As mentioned in [other issues](https://github.com/bitcoin/bitcoin/issues/31116), fee estimation relies on mempool activity. If your node does not have a \"good\" mempool, your fee estimation will break. Check your bitcoin.conf for anything could limit mempool size or network connectivity. \n\nQuoting from other issue:\n\n> It might be helpful to have version of the affected node and debug log output. You may need to run bitcoin-cli logging '[\"estimatefee\"]' to add fee estimation log output. \"mempool\" may be helpful as well but could be spammy\n\nAlso - it looks like testnet4 is not very active. I just took a quick look at a block explorer and there are long stretches of empty blocks. This is when `fallbackfee` is really necessary - the fee estimation algorithm can't provide a result in the total absence of fee pressure.",
+          "created_at": "2025-03-31T20:24:19Z"
+        },
+        {
+          "user": "ronnakamoto",
+          "body": "On regtest, instead of relying on `estimateSmartFee`, you can specify the fee rate directly when creating transactions:\n\n```bash\nbitcoin-cli -named sendtoaddress address=\"YOUR_ADDRESS\" amount=0.1 fee_rate=10 verbose=true\n```",
+          "created_at": "2025-04-16T18:12:44Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "This works as expected, as far as I can see, so closing for now.\n\n \n\n ",
+          "created_at": "2025-04-17T10:21:17Z"
+        },
+        {
+          "user": "ismaelsadeeq",
+          "body": "I've seen this type of issue a few times now #32178, #31116, #31032, and recently, a PR to add a startup option for enabling conservative mode by default: #32329, with the aim to address problems like this.\n\nThe potential causes are:\n1. Low activity on the network.\n2. The node is running in `-blocksonly` mode.\n\nAs @pinheadmz mentioned, you can solve this by setting a `-fallbackfee`, just make sure it’s above both the node’s minimum relay transaction fee rate and the minimum mempool fee rate both of which are dynamic and may change. (Although they are very unlikely to if the root cause is network inactivity.)\n\nA possible longterm solution could be to have the wallet and `estimateSmartfee` use the **maximum** of the minimum relay fee and the minimum mempool fee when there’s very little network activity *AND* the node is not running with `-blocksonly`.\n\nIf that sounds reasonable, I can open a PR for it.\n\ncc @glozow\n",
+          "created_at": "2025-04-25T16:02:19Z"
+        },
+        {
+          "user": "glozow",
+          "body": "I think there have been a few debates about whether it's safer to return nothing (\"insufficient data\") vs a potentially bad guess (mempool min could also be artificially low if we're just starting out). But also, lowballing isn't the end of the world since you should be able to replace transactions that didn't pay enough.",
+          "created_at": "2025-04-25T21:12:40Z"
+        }
+      ]
+    },
+    {
+      "number": 32173,
+      "title": "validation: `CheckBlockIndex` crashes during block reconsideration",
+      "body": "Functional test to reproduce:\n\n```python\nfrom test_framework.test_framework import BitcoinTestFramework\n\nclass CheckBlockIndexBug(BitcoinTestFramework):\n    def set_test_params(self):\n        self.setup_clean_chain = True\n        self.num_nodes = 1\n\n    def run_test(self):\n        self.generatetoaddress(self.nodes[0], 1, \"2N9hLwkSqr1cPQAPxbrGVUjxyjD11G2e1he\");\n        hashes = self.generatetoaddress(self.nodes[0], 1, \"2N9hLwkSqr1cPQAPxbrGVUjxyjD11G2e1he\");\n        self.generatetoaddress(self.nodes[0], 1, \"2N2CmnxjBbPTHrawgG2FkTuBLcJtEzA86sF\");\n\n        res = self.nodes[0].gettxoutsetinfo()\n        self.generatetoaddress(self.nodes[0], 3, \"2N9hLwkSqr1cPQAPxbrGVUjxyjD11G2e1he\");\n        self.log.info(self.nodes[0].invalidateblock(res[\"bestblock\"]))\n        self.generatetoaddress(self.nodes[0], 3, \"2N9hLwkSqr1cPQAPxbrGVUjxyjD11G2e1he\");\n        self.nodes[0].reconsiderblock(hashes[0])\n        self.nodes[0].invalidateblock(hashes[0])\n        self.log.info(self.nodes[0].reconsiderblock(res[\"bestblock\"]))\n\nif __name__ == '__main__':\n    CheckBlockIndexBug(__file__).main()\n```\n\nStack trace:\n```\nbitcoind: validation.cpp:5392: void ChainstateManager::CheckBlockIndex(): Assertion `(pindex->nStatus & BLOCK_FAILED_MASK) == 0' failed.\nAddressSanitizer:DEADLYSIGNAL\n=================================================================\n==3423379==ERROR: AddressSanitizer: ABRT on unknown address 0x000000343c93 (pc 0x7fb83abf0eec bp 0x7fb8348f16c0 sp 0x7fb8348efc30 T6)\n    #0 0x7fb83abf0eec  (/lib/x86_64-linux-gnu/libc.so.6+0x8aeec) (BuildId: 79005c16293efa45b441fed45f4f29b138557e9e)\n    #1 0x7fb83aba1fb1 in raise (/lib/x86_64-linux-gnu/libc.so.6+0x3bfb1) (BuildId: 79005c16293efa45b441fed45f4f29b138557e9e)\n    #2 0x7fb83ab8c471 in abort (/lib/x86_64-linux-gnu/libc.so.6+0x26471) (BuildId: 79005c16293efa45b441fed45f4f29b138557e9e)\n    #3 0x7fb83ab8c394  (/lib/x86_64-linux-gnu/libc.so.6+0x26394) (BuildId: 79005c16293efa45b441fed45f4f29b138557e9e)\n    #4 0x7fb83ab9aec1 in __assert_fail (/lib/x86_64-linux-gnu/libc.so.6+0x34ec1) (BuildId: 79005c16293efa45b441fed45f4f29b138557e9e)\n    #5 0x5578f6306f64 in ChainstateManager::CheckBlockIndex() /bitcoin/build_fuzz/src/./validation.cpp:5392:13\n    #6 0x5578f62fe81a in Chainstate::ActivateBestChain(BlockValidationState&, std::shared_ptr<CBlock const>) /bitcoin/build_fuzz/src/./validation.cpp:3627:16\n    #7 0x5578f5d03436 in ReconsiderBlock(ChainstateManager&, uint256) /bitcoin/build_fuzz/src/./rpc/blockchain.cpp:1669:33\n    #8 0x5578f5e3fbc7 in reconsiderblock()::$_0::operator()(RPCHelpMan const&, JSONRPCRequest const&) const /bitcoin/build_fuzz/src/./rpc/blockchain.cpp:1694:5\n    #9 0x5578f5e3fbc7 in UniValue std::__invoke_impl<UniValue, reconsiderblock()::$_0&, RPCHelpMan const&, JSONRPCRequest const&>(std::__invoke_other, reconsiderblock()::$_0&, RPCHelpMan const&, JSONRPCRequest const&) /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/invoke.h:61:14\n    #10 0x5578f5e3fbc7 in std::enable_if<is_invocable_r_v<UniValue, reconsiderblock()::$_0&, RPCHelpMan const&, JSONRPCRequest const&>, UniValue>::type std::__invoke_r<UniValue, reconsiderblock()::$_0&, RPCHelpMan const&, JSONRPCRequest const&>(reconsiderblock()::$_0&, RPCHelpMan const&, JSONRPCRequest const&) /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/invoke.h:114:9\n    #11 0x5578f5e3fbc7 in std::_Function_handler<UniValue (RPCHelpMan const&, JSONRPCRequest const&), reconsiderblock()::$_0>::_M_invoke(std::_Any_data const&, RPCHelpMan const&, JSONRPCRequest const&) /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/std_function.h:290:9\n    #12 0x5578f717fe3a in std::function<UniValue (RPCHelpMan const&, JSONRPCRequest const&)>::operator()(RPCHelpMan const&, JSONRPCRequest const&) const /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/std_function.h:591:9\n    #13 0x5578f717fe3a in RPCHelpMan::HandleRequest(JSONRPCRequest const&) const /bitcoin/build_fuzz/src/./rpc/util.cpp:684:20\n    #14 0x5578f5dc8455 in CRPCCommand::CRPCCommand(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, RPCHelpMan (*)())::'lambda'(JSONRPCRequest const&, UniValue&, bool)::operator()(JSONRPCRequest const&, UniValue&, bool) const /bitcoin/build_fuzz/src/./rpc/server.h:101:91\n    #15 0x5578f5dc8455 in bool std::__invoke_impl<bool, CRPCCommand::CRPCCommand(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, RPCHelpMan (*)())::'lambda'(JSONRPCRequest const&, UniValue&, bool)&, JSONRPCRequest const&, UniValue&, bool>(std::__invoke_other, CRPCCommand::CRPCCommand(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, RPCHelpMan (*)())::'lambda'(JSONR\nPCRequest const&, UniValue&, bool)&, JSONRPCRequest const&, UniValue&, bool&&) /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/invoke.h:61:14\n    #16 0x5578f5dc8455 in std::enable_if<is_invocable_r_v<bool, CRPCCommand::CRPCCommand(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, RPCHelpMan (*)())::'lambda'(JSONRPCRequest const&, UniValue&, bool)&, JSONRPCRequest const&, UniValue&, bool>, bool>::type std::__invoke_r<bool, CRPCCommand::CRPCCommand(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, RPCHelpMan\n(*)())::'lambda'(JSONRPCRequest const&, UniValue&, bool)&, JSONRPCRequest const&, UniValue&, bool>(CRPCCommand::CRPCCommand(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, RPCHelpMan (*)())::'lambda'(JSONRPCRequest const&, UniValue&, bool)&, JSONRPCRequest const&, UniValue&, bool&&) /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/invoke.h:114:9\n    #17 0x5578f5dc8455 in std::_Function_handler<bool (JSONRPCRequest const&, UniValue&, bool), CRPCCommand::CRPCCommand(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, RPCHelpMan (*)())::'lambda'(JSONRPCRequest const&, UniValue&, bool)>::_M_invoke(std::_Any_data const&, JSONRPCRequest const&, UniValue&, bool&&) /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/std_function.h:290:\n9\n    #18 0x5578f6177d47 in std::function<bool (JSONRPCRequest const&, UniValue&, bool)>::operator()(JSONRPCRequest const&, UniValue&, bool) const /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/std_function.h:591:9\n    #19 0x5578f6177d47 in ExecuteCommand(CRPCCommand const&, JSONRPCRequest const&, UniValue&, bool) /bitcoin/build_fuzz/src/./rpc/server.cpp:512:20\n    #20 0x5578f6177d47 in ExecuteCommands(std::vector<CRPCCommand const*, std::allocator<CRPCCommand const*>> const&, JSONRPCRequest const&, UniValue&) /bitcoin/build_fuzz/src/./rpc/server.cpp:477:13\n    #21 0x5578f6176b16 in CRPCTable::execute(JSONRPCRequest const&) const /bitcoin/build_fuzz/src/./rpc/server.cpp:497:13\n    #22 0x5578f61759e6 in JSONRPCExec(JSONRPCRequest const&, bool) /bitcoin/build_fuzz/src/./rpc/server.cpp:353:31\n    #23 0x5578f6512301 in HTTPReq_JSONRPC(std::any const&, HTTPRequest*) /bitcoin/build_fuzz/src/./httprpc.cpp:217:21\n    #24 0x5578f653449f in std::function<bool (HTTPRequest*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)>::operator()(HTTPRequest*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&) const /usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/bits/std_function.h:591:9\n    #25 0x5578f653449f in HTTPWorkItem::operator()() /bitcoin/build_fuzz/src/./httpserver.cpp:60:9\n    #26 0x5578f653c305 in WorkQueue<HTTPClosure>::Run() /bitcoin/build_fuzz/src/./httpserver.cpp:115:13\n    #27 0x5578f6526470 in HTTPWorkQueueRun(WorkQueue<HTTPClosure>*, int) /bitcoin/build_fuzz/src/./httpserver.cpp:417:12\n    #28 0x7fb83af2c4a2  (/lib/x86_64-linux-gnu/libstdc++.so.6+0xd44a2) (BuildId: 0c47cec75226c7736517d5acb61e373d541a5023)\n    #29 0x5578f56a1b06 in asan_thread_start(void*) asan_interceptors.cpp.o\n    #30 0x7fb83abef1f4  (/lib/x86_64-linux-gnu/libc.so.6+0x891f4) (BuildId: 79005c16293efa45b441fed45f4f29b138557e9e)\n    #31 0x7fb83ac6f89b  (/lib/x86_64-linux-gnu/libc.so.6+0x10989b) (BuildId: 79005c16293efa45b441fed45f4f29b138557e9e)\n```",
+      "state": "open",
+      "user": "dergoegge",
+      "created_at": "2025-03-31T11:50:20Z",
+      "updated_at": "2026-01-15T09:24:32Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32173",
+      "labels": [
+        "Bug",
+        "Validation"
+      ],
+      "comment_list": [
+        {
+          "user": "stratospher",
+          "body": "I came across this error too when playing with @mzumsande's fuzzer in https://github.com/bitcoin/bitcoin/pull/31533! \n\nsince `reconsiderblock` doesn't traverse the whole tree of block headers and only ancestors/descendants, we could have failed blocks which don't descend from invalid blocks. (there's a picture below showing a similar situation.)\n\n2 possible solutions:\n1. modify [the check](https://github.com/bitcoin/bitcoin/blob/15717f0ef3960969ee550a4a41741987b86684dc/src/validation.cpp#L5400) in `CheckBlockIndex()`  so that we check for this condition only on the active chain. \n2. the crash doesn't happen if we remove `BLOCK_FAILED_VALID`/`BLOCK_FAILED_CHILD` distinction  - I have a branch in https://github.com/stratospher/bitcoin/commits/2025_02_remove_block_failed_child/ and some discussion about this idea in \"alternate approach section\" in https://github.com/bitcoin/bitcoin/pull/31835\n\npicture of a similar situation:\n\n![Image](https://github.com/user-attachments/assets/aa11fc67-48e8-40e2-8f5a-c507b64b4c97)\n",
+          "created_at": "2025-03-31T18:14:22Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "A third possible fix: change `pindexFirstInvalid` so that it is set both on `BLOCK_FAILED_VALID` and `BLOCK_FAILED_CHILD`:\n``` diff\ndiff --git a/src/validation.cpp b/src/validation.cpp\nindex fedcb9ca57..4fea14b2a5 100644\n--- a/src/validation.cpp\n+++ b/src/validation.cpp\n@@ -5323,7 +5323,7 @@ void ChainstateManager::CheckBlockIndex()\n \n     while (pindex != nullptr) {\n         nNodes++;\n-        if (pindexFirstInvalid == nullptr && pindex->nStatus & BLOCK_FAILED_VALID) pindexFirstInvalid = pindex;\n+        if (pindexFirstInvalid == nullptr && pindex->nStatus & BLOCK_FAILED_MASK) pindexFirstInvalid = pindex;\n         if (pindexFirstMissing == nullptr && !(pindex->nStatus & BLOCK_HAVE_DATA)) {\n             pindexFirstMissing = pindex;\n         }\n\n```\n\nAlthough removing BLOCK_FAILED_CHILD (Option 2) seems like the best solution long-term.",
+          "created_at": "2025-03-31T18:42:44Z"
+        }
+      ]
+    },
+    {
+      "number": 32172,
+      "title": ".",
+      "body": "",
+      "state": "closed",
+      "user": "mwsmitty",
+      "created_at": "2025-03-31T00:53:18Z",
+      "updated_at": "2025-03-31T00:56:23Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32172",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 4
+  }
+}

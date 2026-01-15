@@ -1,0 +1,262 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:18:44.030791+00:00",
+  "date": "2025-09-24",
+  "pull_requests": [
+    {
+      "number": 33477,
+      "title": "Rollback for dumptxoutset without invalidating blocks",
+      "body": "This is an alternative approach to implement `dumptxoutset` with rollback that was discussed a few times. It does not rely on `invalidateblock` and `reconsiderblock` and instead creates a temporary copy of the coins DB, modifies this copy by rolling back as many blocks as necessary and then creating the dump from this temp copy DB. See also https://github.com/bitcoin/bitcoin/pull/29553#issuecomment-1978480989, https://github.com/bitcoin/bitcoin/issues/32817#issuecomment-3012406102 and #29565 discussions.\r\n\r\nThe nice side-effects of this are that forks can not interfere with the rollback and network activity does not have to be suspended. But there are also some downsides when comparing to the current approach: this does require some additional disk space for the copied coins DB and performance is slower (master took 3m 17s vs 9m 16s in my last test with the code here, rolling back ~1500 blocks). However, there is also not much code being added here, network can stay active throughout and performance would stay constant with this approach while it would impact master if there were forks that needed to be invalidated as well (see #33444 for the alternative approach), so this could still be considered a good trade-off.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-09-24T21:15:11Z",
+      "updated_at": "2025-11-27T00:21:26Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33477",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33477.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [luke-jr](https://github.com/bitcoin/bitcoin/pull/33477#issuecomment-3333347528), [kevkevinpal](https://github.com/bitcoin/bitcoin/pull/33477#pullrequestreview-3274904950), [theStack](https://github.com/bitcoin/bitcoin/pull/33477#issuecomment-3386727879), [mzumsande](https://github.com/bitcoin/bitcoin/pull/33477#pullrequestreview-3385298069) |\n| Stale ACK | [enirox001](https://github.com/bitcoin/bitcoin/pull/33477#issuecomment-3452764833) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33444](https://github.com/bitcoin/bitcoin/pull/33444) (rpc: Fix dumptxoutset rollback with competing forks by enirox001)\n* [#31560](https://github.com/bitcoin/bitcoin/pull/31560) (rpc: allow writing UTXO set to a named pipe, introduce dump_to_sqlite.sh script by theStack)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible places where named args may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- temp_cache.AddCoin(key, std::move(coin), false) in src/rpc/blockchain.cpp\n\n\n\n<sup>2025-11-26</sup>\n",
+          "created_at": "2025-09-24T21:15:20Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "cc @Sjors since you were asking for this approach a few times :)",
+          "created_at": "2025-09-24T21:22:50Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "Concept ACK, this seems cleaner.\r\n\r\n> master took 3m 17s vs 9m 16s in my last test with the code here\r\n\r\nI suspect if you go back further, this approach will end up performing better because we no longer need to roll back forward at the end",
+          "created_at": "2025-09-25T10:40:34Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "Nice!\r\n\r\n> performance is slower (master took 3m 17s vs 9m 16s in my last test with the code here,\r\n\r\nThat probably makes sense. It might be possible to do it faster and with less disk usage for relatively short rollbacks via a two step process:\r\n\r\n * create a read-only snapshot of the db\r\n * create an empty \"coins-delta\" db\r\n * iterate through the rev data to rollback, update the coins-delta db:\r\n    * when you rollback past a coin's creation:\r\n      * if the coin was in the snapshot db, add \"[coin] deleted\"\r\n      * otherwise, if it was in the coins-delta db, remove \"[coin]\"\r\n      * (otherwise, there's a bug)\r\n    * when you rollback past a coin's spend, add \"[coin]\"\r\n * when you've finished the rollback,\r\n   * iterate through the snapshot coins, skipping any where there is a \"[coin] deleted\" entry, reporting them\r\n   * iterate through the non-deleted coins-delta coins, reporting them\r\n * delete the coins-delta db, delete the snapshot\r\n\r\nRather than being direct RPC functionality, maybe it would be better to have an RPC function to export a copy of the utxo set at the current height, and have a separate bitcoin-kernel binary that performs the rollback and utxoset stats calculation itself?",
+          "created_at": "2025-09-29T03:27:34Z"
+        },
+        {
+          "user": "theStack",
+          "body": "Concept ACK",
+          "created_at": "2025-10-09T16:57:40Z"
+        },
+        {
+          "user": "enirox001",
+          "body": "ACK 6d409d5\r\n\r\nThis is a good change. Using a temporary coins DB for the rollback is a much cleaner and safer solution than the `invalidateblock` method. It correctly solves fork-related bugs by isolating the process and avoids the need for network suspension, making it a superior approach to what I proposed in #33444.\r\n\r\nThe code is well-contained, and the new `TemporaryUTXODatabase` class handles the DB lifecycle cleanly. \r\n\r\nI've pulled the branch, compiled, and the full functional test suite passes, including the `rpc_dumptxoutset` test",
+          "created_at": "2025-10-27T18:38:05Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "Thanks for all the feedback so far and sorry for the slow response!\r\n\r\n> Rather than being direct RPC functionality, maybe it would be better to have an RPC function to export a copy of the utxo set at the current height, and have a separate bitcoin-kernel binary that performs the rollback and utxoset stats calculation itself?\r\n\r\nHm, feels like a bit overengineered for this functionality, considering the overhead for test coverage and build changes for this. Maybe I am overcomplicating it in my head, I have not done much with kernel yet. But if this is considerably more complex I would rather first go ahead with this and then I would rather keep it for consideration of a future change.\r\n\r\n> Would be interesting if someone could try out by going back 25k blocks or more, as is usually done for creating snapshots (I can't right now).\r\n\r\nI tried with `880,000`, our v29 param, so `45,000` blocks rollback. It took just under 20min in total and it returned the correct hash.\r\n\r\n```\r\n$ build/bin/bitcoin-cli -rpcclienttimeout=0 -named dumptxoutset ~/Downloads/utxo880k.dat rollback=880000\r\n{\r\n  \"coins_written\": 184821030,\r\n  \"base_hash\": \"000000000000000000010b17283c3c400507969a9c2afd1dcf2082ec5cca2880\",\r\n  \"base_height\": 880000,\r\n  \"path\": \"/Users/FJ/Downloads/utxo880k.dat\",\r\n  \"txoutset_hash\": \"dbd190983eaf433ef7c15f78a278ae42c00ef52e0fd2a54953782175fbadcea9\",\r\n  \"nchaintx\": 1145604538\r\n}\r\n```\r\n\r\n> It might be possible to do it faster and with less disk usage for relatively short rollbacks via a two step process:\r\n\r\nI actually had a similar idea early on but then stayed with the simpler approach. I will try this out with a POC and check the performance impact.",
+          "created_at": "2025-11-26T21:47:11Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `Windows-cross to x86_64`: https://github.com/bitcoin/bitcoin/actions/runs/19718249847/job/56495362448</sub>\n<sub>LLM reason (✨ experimental): Compile errors in rpc/blockchain.cpp due to RPCHelpMan constructor signature mismatch (brace-initializer/API change).</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-11-26T21:52:30Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> > It might be possible to do it faster and with less disk usage for relatively short rollbacks via a two step process:\r\n> \r\n> I actually had a similar idea early on but then stayed with the simpler approach. I will try this out with a POC and check the performance impact.\r\n\r\nI tried to a few different takes on the delta-based idea including some vibe coding tests. [Here](https://github.com/fjahr/bitcoin/commit/a86bbfbd6f0d6e440ff8c5c303e392e51e3eb60b) is the latest one, something is definitely still broken there but the dump it generates is correct. All tests I did had in common that the processing time actually took longer than the current approach, almost 28 min with the latest code version. I am now thinking that longer rollbacks may not be quicker, only shorter ones will be because the big copy overhead in the beginning is saved. But then we also don't have that much to gain. Even if the performance can be improved, now that I have played around with it, it doesn't seem worth the additional code complexity it introduces. It would need to be significantly faster to justify that and I am currently not seeing that.",
+          "created_at": "2025-11-27T00:21:26Z"
+        }
+      ]
+    },
+    {
+      "number": 33476,
+      "title": "[28.x] backports + 28.3rc1",
+      "body": "Includes backports of\r\n- #33106 \r\n- #30125 \r\n- #30948\r\n- #30784",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2025-09-24T19:18:35Z",
+      "updated_at": "2025-10-01T17:42:41Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33476",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33476.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [achow101](https://github.com/bitcoin/bitcoin/pull/33476#issuecomment-3353916233), [stickies-v](https://github.com/bitcoin/bitcoin/pull/33476#pullrequestreview-3288706062) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-24T19:18:41Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Ready for review, though I think the tidy job tripped somehow?",
+          "created_at": "2025-09-26T14:46:31Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Can you do the version bump stuff here?",
+          "created_at": "2025-09-26T21:56:06Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> nit: https://github.com/bitcoin/bitcoin/commit/e3273e03b1aea0c3ee3aeca802c984ab007f91ed and https://github.com/bitcoin/bitcoin/commit/08eeb0d3423cdfb6110794dd2bfdd5571459f751 have two spaces after Rebased-From: instead of the usual one, I'm not sure if that'd break any tooling (it did for me, but was an easy fix)\r\n\r\nSorry about that! I hadn't really thought about the number of spaces, but will keep it in mind in the future.",
+          "created_at": "2025-09-30T17:38:42Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Can you also do `gen-bitcoin-conf.sh` since that will need to update for the new defaults as well.",
+          "created_at": "2025-09-30T19:37:37Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 9968b15937cbc2071c3474bd83f9c9fb4bb3a970",
+          "created_at": "2025-09-30T21:51:50Z"
+        }
+      ]
+    },
+    {
+      "number": 33475,
+      "title": "bugfix: miner: fix `addPackageTxs` unsigned integer overflow",
+      "body": "This PR fixes an unsigned integer overflow in the `addPackageTxs` method of the `BlockAssembler`.\r\n\r\nThe overflow is a rare edge case that might occur on master when a miner reserves 2000 WU and wants to create an block to be empty.\r\n\r\ni.e, by starting with `-blockmaxweight=2000`, `-blockreservedweight=2000`, or just `blockmaxweight=2000`, and then calling the mining interface `createNewBlock` with `blockReservedWeight` set to `2000`.\r\n\r\nInstead of bailing out after going through transactions equivalent to `MAX_CONSECUTIVE_FAILURES`, the loop never breaks until all mempool transactions are visited.\r\n\r\nSee https://github.com/bitcoin/bitcoin/pull/33421#issuecomment-3324859282\r\n\r\nThe fix avoids the overflow by using addition instead adding `BLOCK_FULL_ENOUGH_WEIGHT_DELTA` to the block weight and comparing it with `m_options.nBlockMaxWeight`.\r\n\r\nAnother alternative that preserves the same structure is to use `static_cast`. See https://github.com/bitcoin/bitcoin/pull/33421/commits/c9530cf35d351628eea4992c66fc1df548d1b580.\r\n\r\nThis fix can be tested by cherry-picking the commits from #33421 without the static cast fix and running:\r\n\r\n```bash\r\necho \"AQAAAAAAA\r\nAAnJycnAAAAAAAAAAAAAAAAAA\" | base64 --decode > miner.crash\r\n\r\nFUZZ=block_template_cache ./build_fuzz/bin/fuzz miner.crash\r\n```\r\n\r\n\r\n---\r\n\r\nThis is part of a larger inconsistency in how size/weight is represented in the codebase. It may be worth defining a dedicated type for size/weight.\r\n",
+      "state": "closed",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-09-24T15:41:18Z",
+      "updated_at": "2026-01-13T09:44:37Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33475",
+      "labels": [
+        "Bug"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33475.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [glozow](https://github.com/bitcoin/bitcoin/pull/33475#pullrequestreview-3263812697), [furszy](https://github.com/bitcoin/bitcoin/pull/33475#pullrequestreview-3263830391) |\n| Concept ACK | [luke-jr](https://github.com/bitcoin/bitcoin/pull/33475#pullrequestreview-3267000636) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33421](https://github.com/bitcoin/bitcoin/pull/33421) (node: add `BlockTemplateCache` by ismaelsadeeq)\n* [#28676](https://github.com/bitcoin/bitcoin/pull/28676) (Cluster mempool implementation by sdaftuar)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-24T15:41:24Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 30.x in #33473.",
+          "created_at": "2025-09-25T12:20:17Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #34268.",
+          "created_at": "2026-01-13T09:44:37Z"
+        }
+      ]
+    },
+    {
+      "number": 33474,
+      "title": "[29.x] Backports",
+      "body": "Backports:\r\n* #33446\r\n* #33484\r\n* #33504",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-09-24T14:41:16Z",
+      "updated_at": "2025-10-03T13:28:50Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33474",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33474.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [dergoegge](https://github.com/bitcoin/bitcoin/pull/33474#pullrequestreview-3296841430), [luke-jr](https://github.com/bitcoin/bitcoin/pull/33474#issuecomment-3365167848), [marcofleon](https://github.com/bitcoin/bitcoin/pull/33474#pullrequestreview-3298927301) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-24T14:41:22Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "ACK 2d7ebd2d913ea63c1a23fefa0a09ee06fb069161",
+          "created_at": "2025-10-03T10:22:06Z"
+        }
+      ]
+    },
+    {
+      "number": 33473,
+      "title": "[30.x] Backports & rc3",
+      "body": "Backports:\r\n* #33434\r\n* #33446\r\n* #33453\r\n* #33475\r\n* #33482\r\n* #33484\r\n* #33504\r\n\r\nIncludes changes for `v30.0rc3`:\r\n* Version bump\r\n* Regen manpages\r\n* Regen exmaple .conf",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-09-24T14:11:42Z",
+      "updated_at": "2025-10-06T10:44:51Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33473",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33473.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [marcofleon](https://github.com/bitcoin/bitcoin/pull/33473#pullrequestreview-3300410005), [dergoegge](https://github.com/bitcoin/bitcoin/pull/33473#pullrequestreview-3301502822), [hebasto](https://github.com/bitcoin/bitcoin/pull/33473#pullrequestreview-3302348285), [Zero-1729](https://github.com/bitcoin/bitcoin/pull/33473#pullrequestreview-3302548661) |\n| Concept ACK | [instagibbs](https://github.com/bitcoin/bitcoin/pull/33473#issuecomment-3366258734), [Sjors](https://github.com/bitcoin/bitcoin/pull/33473#issuecomment-3368060495) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-24T14:11:48Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Edited https://github.com/bitcoin-core/bitcoin-devwiki/wiki/v30.0-Release-Notes-Draft to remove the mention of the `libxcb-cursor` runtime requirement.",
+          "created_at": "2025-10-03T14:31:25Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "ACK on https://github.com/bitcoin/bitcoin/pull/33504 and https://github.com/bitcoin/bitcoin/pull/33504 changes",
+          "created_at": "2025-10-03T15:51:38Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK on the #33446 changes.\r\n\r\nCan you add #33229?",
+          "created_at": "2025-10-04T09:14:29Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> Can you add #33229?\r\n\r\nI'm not going to add that here, `rc3` is already late. There might be more multiprocess backporting done, so it could be included there, but that's also blocked on at least https://github.com/bitcoin-core/libmultiprocess/pull/222. ",
+          "created_at": "2025-10-06T09:30:04Z"
+        }
+      ]
+    },
+    {
+      "number": 33472,
+      "title": "guix: documented shasum gathering command",
+      "body": "When a PR requires proof of Guix builds (sha256sums), the PR author or reviewer uses a not well documented command to collect the sha256sums of build outputs or manually gathers them from files.\r\n\r\nThis pull request introduces a new section in the documentation, providing some documentation on the command's functionality and usage.",
+      "state": "open",
+      "user": "janb84",
+      "created_at": "2025-09-24T08:41:36Z",
+      "updated_at": "2025-09-29T08:54:36Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33472",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33472.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Stale ACK | [trevarj](https://github.com/bitcoin/bitcoin/pull/33472#issuecomment-3327942653), [Sjors](https://github.com/bitcoin/bitcoin/pull/33472#issuecomment-3328735722) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-24T08:41:42Z"
+        },
+        {
+          "user": "janb84",
+          "body": "Addressed all the feedback (including the linter's spelling suggestion ) ",
+          "created_at": "2025-09-24T11:13:43Z"
+        },
+        {
+          "user": "trevarj",
+          "body": "ACK [d29ab99](https://github.com/bitcoin/bitcoin/commit/d29ab9946f3c1916032f41e7a365dfcb26af2c46)\r\n\r\nThanks for this",
+          "created_at": "2025-09-24T11:27:05Z"
+        },
+        {
+          "user": "janb84",
+          "body": "Guix Build Output\r\n\r\n```shell\r\n 9e3e3372c1bb063a575e9f6037c53a666537cf6d297116601e2f2de8092cfe61  guix-build-d29ab9946f3c/output/aarch64-linux-gnu/SHA256SUMS.part\r\n 6b1183039d07aa9ba16b50980d10d28f3c5598ad8412bb9088d3c9e66f059f43  guix-build-d29ab9946f3c/output/aarch64-linux-gnu/bitcoin-d29ab9946f3c-aarch64-linux-gnu-debug.tar.gz\r\n d7abff7f58f2bf1813afb76226a96646b057c56f1ff8f4b5a45e309063c9c23e  guix-build-d29ab9946f3c/output/aarch64-linux-gnu/bitcoin-d29ab9946f3c-aarch64-linux-gnu.tar.gz\r\n 72489f49b0136757b90ca8e939253bbbec026cebdf89fb209eb6a0b7b460b16f  guix-build-d29ab9946f3c/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n 86ebc8309c7673998715fceb1deba872736791ced84eb2147786bd5256a0cca6  guix-build-d29ab9946f3c/output/arm-linux-gnueabihf/bitcoin-d29ab9946f3c-arm-linux-gnueabihf-debug.tar.gz\r\n a4b99878c6079aab68a879d4096ef2f4670486baf3935746349d913bf72af1ae  guix-build-d29ab9946f3c/output/arm-linux-gnueabihf/bitcoin-d29ab9946f3c-arm-linux-gnueabihf.tar.gz\r\n 10147946e79c461d3eae68da83d25470b578bce10c3483cd3a0cced01102385f  guix-build-d29ab9946f3c/output/arm64-apple-darwin/SHA256SUMS.part\r\n 907476be489aa8f6708fb9575ed9a9cfbca867a813a33f997e73221f8ced02eb  guix-build-d29ab9946f3c/output/arm64-apple-darwin/bitcoin-d29ab9946f3c-arm64-apple-darwin-codesigning.tar.gz\r\n 9542c68b1480d40969759fb498196a67a50628d00ec4446b1c15925240233177  guix-build-d29ab9946f3c/output/arm64-apple-darwin/bitcoin-d29ab9946f3c-arm64-apple-darwin-unsigned.tar.gz\r\n 2d50cad29f82df2b86837e276322fba316589502ccf68924d834c133c900662e  guix-build-d29ab9946f3c/output/arm64-apple-darwin/bitcoin-d29ab9946f3c-arm64-apple-darwin-unsigned.zip\r\n 1f2043b740c0e21602603904e0ec46b42a4ff8192fc6c6a54bba70620f2cf205  guix-build-d29ab9946f3c/output/dist-archive/bitcoin-d29ab9946f3c.tar.gz\r\n 52055cd6c29dd0fa08adba286fc3c49812a6a0554392761a019bf39dbe87ac54  guix-build-d29ab9946f3c/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n f1e50fe59f14b77ac7da05e46bb732dbe62d61929a976d844c3f1f905b803962  guix-build-d29ab9946f3c/output/powerpc64-linux-gnu/bitcoin-d29ab9946f3c-powerpc64-linux-gnu-debug.tar.gz\r\n c2a3039b2db624c35e6923654364d03d730f07a2541eede3f57a203fd40c3801  guix-build-d29ab9946f3c/output/powerpc64-linux-gnu/bitcoin-d29ab9946f3c-powerpc64-linux-gnu.tar.gz\r\n e07bf8471542fd783a77984049836d4ca257ce603168df00a9ebf39db5a6016f  guix-build-d29ab9946f3c/output/riscv64-linux-gnu/SHA256SUMS.part\r\n 40ab37d32848211041bcec378a168cc8f3d56b64bdc0c94273d099b3cd64867c  guix-build-d29ab9946f3c/output/riscv64-linux-gnu/bitcoin-d29ab9946f3c-riscv64-linux-gnu-debug.tar.gz\r\n 1e1de5f51188ef75273b7a47b7c3903354a52c605a9c4f6e8827026e7679f9ee  guix-build-d29ab9946f3c/output/riscv64-linux-gnu/bitcoin-d29ab9946f3c-riscv64-linux-gnu.tar.gz\r\n 865fb137ed8525d4f2558e83e243336a3d6270cb690a336900cfbd8b5f46e03b  guix-build-d29ab9946f3c/output/x86_64-apple-darwin/SHA256SUMS.part\r\n bfdc26b10616cb1f1b888d4b6de541a525cd5126b35e533a2838b8d949eac015  guix-build-d29ab9946f3c/output/x86_64-apple-darwin/bitcoin-d29ab9946f3c-x86_64-apple-darwin-codesigning.tar.gz\r\n f5d1f3f69009911e90d10474ae8edd008ba5214d12e2a2b4a7f86eb27837465f  guix-build-d29ab9946f3c/output/x86_64-apple-darwin/bitcoin-d29ab9946f3c-x86_64-apple-darwin-unsigned.tar.gz\r\n 48e5fec84e84e72096fa2134dec763b59758ad844cdec1586e89c5bbbe9ca52a  guix-build-d29ab9946f3c/output/x86_64-apple-darwin/bitcoin-d29ab9946f3c-x86_64-apple-darwin-unsigned.zip\r\n cedec07e4299c0b71d7f25961163fdc7e05ed356b1a43f1330c6ec2a534f2000  guix-build-d29ab9946f3c/output/x86_64-linux-gnu/SHA256SUMS.part\r\n 0380317cae8d4fe16efdb145b27977af4e83394715c16a53123005ae519812ce  guix-build-d29ab9946f3c/output/x86_64-linux-gnu/bitcoin-d29ab9946f3c-x86_64-linux-gnu-debug.tar.gz\r\n 44a128e55df41dea54ca5b7a280201201e5cc945e7a6da18842581b339b98003  guix-build-d29ab9946f3c/output/x86_64-linux-gnu/bitcoin-d29ab9946f3c-x86_64-linux-gnu.tar.gz\r\n 11093be7849182d758b93989057f7a72152d776bb3780d8201a4648e54c53f98  guix-build-d29ab9946f3c/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n af473e913ab5e520506483ceb58a02f3965aaca2daa56da0dca014bd19ef9c1b  guix-build-d29ab9946f3c/output/x86_64-w64-mingw32/bitcoin-d29ab9946f3c-win64-codesigning.tar.gz\r\n 2a04bc4aa5f1bc2ca5a86753a55d2b4fe89326d85ecd3d1ce33dc678b83386d9  guix-build-d29ab9946f3c/output/x86_64-w64-mingw32/bitcoin-d29ab9946f3c-win64-debug.zip\r\n 9ade14903b02b7f7a9690051c47e2247bc7f5945f10836b4ea528dd50eee7b75  guix-build-d29ab9946f3c/output/x86_64-w64-mingw32/bitcoin-d29ab9946f3c-win64-setup-unsigned.exe\r\n 123351386ebd20939c9ecbf77da7ee9f8a30cadaf9cd8386c65dc4cdacdb5e34  guix-build-d29ab9946f3c/output/x86_64-w64-mingw32/bitcoin-d29ab9946f3c-win64-unsigned.zip\r\n```",
+          "created_at": "2025-09-24T12:42:21Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK d29ab9946f3c1916032f41e7a365dfcb26af2c46",
+          "created_at": "2025-09-24T14:13:40Z"
+        },
+        {
+          "user": "janb84",
+          "body": "Addressed in :0a97da9\r\n\r\n- added `uname -m`\r\n- added command for tag-based checkouts.\r\n",
+          "created_at": "2025-09-29T08:53:10Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 6,
+    "issues": 0
+  }
+}

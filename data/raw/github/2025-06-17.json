@@ -1,0 +1,274 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T18:14:45.201150+00:00",
+  "date": "2025-06-17",
+  "pull_requests": [
+    {
+      "number": 32768,
+      "title": "wallet: Remove `CWalletTx::fTimeReceivedIsTxTime`",
+      "body": "`CWalletTx::fTimeReceivedIsTxTime` is no longer used and can be removed. This additionally allows the removal of the `upgraded_txs` loop in `LoadWallet`.",
+      "state": "closed",
+      "user": "achow101",
+      "created_at": "2025-06-17T21:28:28Z",
+      "updated_at": "2025-06-25T20:05:09Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32768",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32768.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32768#issuecomment-2990139846), [rkrux](https://github.com/bitcoin/bitcoin/pull/32768#pullrequestreview-2945609080), [Eunovo](https://github.com/bitcoin/bitcoin/pull/32768#issuecomment-2992184354), [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32768#issuecomment-2993037847), [w0xlt](https://github.com/bitcoin/bitcoin/pull/32768#pullrequestreview-2947372525), [PeterWrighten](https://github.com/bitcoin/bitcoin/pull/32768#issuecomment-2993892147) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32763](https://github.com/bitcoin/bitcoin/pull/32763) (wallet: Replace CWalletTx::mapValue and vOrderForm with explicit class members by achow101)\n* [#32685](https://github.com/bitcoin/bitcoin/pull/32685) (wallet: Allow read-only database access for info and dump commands by PeterWrighten)\n* [#27865](https://github.com/bitcoin/bitcoin/pull/27865) (wallet: Track no-longer-spendable TXOs separately by achow101)\n* [#27286](https://github.com/bitcoin/bitcoin/pull/27286) (wallet: Keep track of the wallet's own transaction outputs in memory by achow101)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-17T21:28:31Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 9eb2c82e7c911a066781d67e6846cf6bbbaba6e9",
+          "created_at": "2025-06-20T07:39:35Z"
+        },
+        {
+          "user": "Eunovo",
+          "body": "ACK https://github.com/bitcoin/bitcoin/pull/32768/commits/9eb2c82e7c911a066781d67e6846cf6bbbaba6e9\r\n\r\n`fTimeReceivedIsTxTime` has had no functional impact since it was removed in https://github.com/bitcoin/bitcoin/commit/471426fb3b2c2fa37640c03819c4f7be69ba8301#diff-286fedc8ff8f47bca92c7024d2c75272aa5bcfd733379eac1555e6036528d6b1\r\n ",
+          "created_at": "2025-06-20T16:20:47Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "ACK https://github.com/bitcoin/bitcoin/commit/9eb2c82e7c911a066781d67e6846cf6bbbaba6e9\r\n\r\nThe `fTimeReceivedIsTxTime` once indicated whether a transactions \"time\" was the time the wallet heard about the transaction, or the time that the transaction was included in a block.\r\n\r\nIt was set to [true](https://github.com/bitcoin/bitcoin/blob/4405b78d6059e536c36974088a8ed4d9f0f29898/main.cpp#L2617) for transactions created by the wallet, where presumably we care more about what time we made the transaction then what time we heard about it in a block, but for other transaction's the time that we \"receive\" the transaction may be much later (e.g. IBD) than the time it was included in a block, so we don't want the transaction's \"time\" to be `nTimeReceived` .:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/4405b78d6059e536c36974088a8ed4d9f0f29898/main.cpp#L263-L279 [^1]\r\n\r\nThis field was mistakenly an `unsigned int` rather than a `char`/`bool`:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/4405b78d6059e536c36974088a8ed4d9f0f29898/main.h#L678\r\n\r\n----\r\n\r\nA later commit (e4ff4e6898d378b1a3e83791034a7af455fde3ab), that AFAICT predates the practice of using dummy types for deprecated fields in serialization, attempted to \"fix\" this inefficiency of using 4 bytes to represent a bool. Since the commit was adding an `nVersion` field to the serialized transaction data anyways, and `nVersion` is 4 bytes, it reused the `fTimeReceivedIsTxTime` field as the `nVersion` field, and changed `fTimeReceivedIsTxTime` to a bool and moved it to the end of tx serialization: \r\n\r\n```diff\r\ndiff --git a/main.h b/main.h\r\nindex 7d1145b5ff..dda5f730c7 100644\r\n\r\n-        READWRITE(fTimeReceivedIsTxTime);\r\n+        READWRITE(nVersion);\r\n+        if (fRead && nVersion < 100)\r\n+            const_cast<CWalletTx*>(this)->fTimeReceivedIsTxTime = nVersion;\r\n         READWRITE(nTimeReceived);\r\n         READWRITE(fFromMe);\r\n         READWRITE(fSpent);\r\n+        if (nVersion >= 31404)\r\n+        {\r\n+            READWRITE(fTimeReceivedIsTxTime);\r\n+            READWRITE(fUnused);\r\n+            READWRITE(strFromAccount);\r\n+        }\r\n     )\r\n```\r\n\r\nThis broke transaction times for wallets that were upgraded and then loaded into an older bitcoin client, since these wallets would have giant version numbers like `31404` in the `fTimeReceivedIsTxTime` for every transaction, and `fTimeReceivedIsTxTime` would always be true.\r\n\r\nA later commit (https://github.com/bitcoin/bitcoin/commit/865c3a23832e36d50cb873d38c976032b027b5d3) reverted the above change to fix this upgrade-then-downgrade bug, but it had to include a special case for fixing transactions that had very large `fTimeReceivedIsTxTime` that matched the version numbers that were affected by this bug\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/482d2553764ef1fa3f9c06389b2e13a735d86eda/src/wallet/walletdb.cpp#L1033-L1053\r\n\r\nAnd Bitcoin Core retains this special-case handling today, even though, for a *long* time, even before the introduction of smart time in #1393, `GetTxTime()` has not used `fTimeReceivedIsTxTime` (471426fb3b2c2fa37640c0381): \r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/471426fb3b2c2fa37640c03819c4f7be69ba8301/src/wallet.cpp#L354-L358\r\n\r\n\r\n[^1]: This snippet is from the initial git commit: 4405b78d6059e536c36",
+          "created_at": "2025-06-20T22:20:05Z"
+        },
+        {
+          "user": "PeterWrighten",
+          "body": "ACK https://github.com/bitcoin/bitcoin/commit/9eb2c82e7c911a066781d67e6846cf6bbbaba6e9",
+          "created_at": "2025-06-22T02:38:00Z"
+        }
+      ]
+    },
+    {
+      "number": 32767,
+      "title": "ci: Allow running CI in worktrees",
+      "body": "Fixes #30028 (modulo lint and tidy CI).\r\n\r\nThe error on current master in a worktree is:\r\n\r\n```\r\n$ git worktree add ./main origin/master && cd ./main\r\n$ MAKEJOBS=\"-j$(nproc)\" FILE_ENV=\"./ci/test/00_setup_env_mac_cross.sh\" ./ci/test_run_all.sh\r\n...\r\n+ git config --global ci.base-install-done true\r\nfatal: not a git repository: /root/b-c-ci/.git/worktrees/main\r\n```\r\n\r\nSo just use a plain file, instead of git. Also, enable pipefail while touching this bash script.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-06-17T18:31:04Z",
+      "updated_at": "2025-06-24T13:26:13Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32767",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32767.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [willcl-ark](https://github.com/bitcoin/bitcoin/pull/32767#pullrequestreview-2945349026) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-17T18:31:07Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/44283549226</sub>\n<sub>LLM reason (✨ experimental): The CI failure is caused by errors detected during the lint checks, specifically from the shell script lint warning (SC2086) and a spelling mistake flagged by codespell, indicating that the linting step did not pass.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-06-17T18:35:18Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "added a commit to remove a workaround while touching the ci scripts",
+          "created_at": "2025-06-18T08:28:55Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "added a commit to fix a silent bug in the lint CI install bash script (unrelated, but found while working on this)",
+          "created_at": "2025-06-18T14:29:08Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> I still don't see a particularly \"clean\" way to have the other two jobs work without something more like #31787, as they require the legitimate (i.e. not empty/dummy) `.git` directory to be mounted in the container.\r\n\r\nI haven't tried this, but `git init ./ && git add ./` may be a easy one-line fix for those, but I can try in a follow-up, if someone wants me to.\r\n\r\nThe two other changes/bugfixes here should be independent improvements unrelated to worktrees anyway.",
+          "created_at": "2025-06-20T11:08:09Z"
+        }
+      ]
+    },
+    {
+      "number": 32766,
+      "title": "[28.x] Finalize 28.2",
+      "body": "Version bump for 28.2 final",
+      "state": "closed",
+      "user": "achow101",
+      "created_at": "2025-06-17T18:08:59Z",
+      "updated_at": "2025-06-19T09:18:03Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32766",
+      "labels": [
+        "Backport",
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32766.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [theStack](https://github.com/bitcoin/bitcoin/pull/32766#pullrequestreview-2940980996), [fanquake](https://github.com/bitcoin/bitcoin/pull/32766#pullrequestreview-2942229455) |\n| Stale ACK | [glozow](https://github.com/bitcoin/bitcoin/pull/32766#pullrequestreview-2937024386), [hebasto](https://github.com/bitcoin/bitcoin/pull/32766#pullrequestreview-2938565286) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-17T18:09:02Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "`release-notes.md` is still 28.2rc2. ",
+          "created_at": "2025-06-18T10:03:02Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> `release-notes.md` is still 28.2rc2.\r\n\r\nOops, done.",
+          "created_at": "2025-06-18T17:41:25Z"
+        },
+        {
+          "user": "theStack",
+          "body": "ACK (modulo \"Thanks to ...\" sentence in release notes should go before list of names, see also https://github.com/bitcoin-core/bitcoincore.org/pull/1100#discussion_r1910510272)",
+          "created_at": "2025-06-18T22:34:13Z"
+        },
+        {
+          "user": "achow101",
+          "body": "> ACK (modulo \"Thanks to ...\" sentence in release notes should go before list of names, see also [bitcoin-core/bitcoincore.org#1100 (comment)](https://github.com/bitcoin-core/bitcoincore.org/pull/1100#discussion_r1910510272))\r\n\r\nFixed",
+          "created_at": "2025-06-18T23:01:06Z"
+        }
+      ]
+    },
+    {
+      "number": 32765,
+      "title": "test: Fix list index out of range error in feature_bip68_sequence.py",
+      "body": "Fixes [#32334](https://github.com/bitcoin/bitcoin/issues/32334)\r\n\r\nThe test `feature_bip68_sequence.py` fails with `IndexError: list index out of range` error due to a mismatch between the number of inputs requested (at random) and the number of UTXOs available. The error is reproducible with the randomseed: \r\n``` \r\n$ ./build/test/functional/feature_bip68_sequence.py --randomseed 6169832640268785903 \r\n```\r\nThis PR adds a valid upper bound to randomly select the inputs.\r\n",
+      "state": "closed",
+      "user": "zaidmstrr",
+      "created_at": "2025-06-17T16:09:39Z",
+      "updated_at": "2025-07-03T16:37:15Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32765",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32765.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32765#issuecomment-2981457968), [Prabhat1308](https://github.com/bitcoin/bitcoin/pull/32765#issuecomment-2983397777), [theStack](https://github.com/bitcoin/bitcoin/pull/32765#pullrequestreview-2940925572) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-17T16:09:43Z"
+        },
+        {
+          "user": "Prabhat1308",
+          "body": "Approach ACK\r\n\r\nThe tests passes even with the original suggestion from the issue [here](https://github.com/bitcoin/bitcoin/issues/32334#issuecomment-2827953910) , I wonder why you did not go with that ?\r\n\r\nAlthough I see no issues with the current approach\r\n\r\nUPD: The test did run noticably slower with the original suggestion \r\n",
+          "created_at": "2025-06-17T17:46:25Z"
+        },
+        {
+          "user": "zaidmstrr",
+          "body": "\r\n> The tests passes even with the original suggestion from the issue [here](https://github.com/bitcoin/bitcoin/issues/32334#issuecomment-2827953910) , I wonder why you did not go with that ?\r\n> \r\nThe approach suggested [here](https://github.com/bitcoin/bitcoin/issues/32334#issuecomment-2827953910) is resource inefficient compared to this. You need to create 4000 UTXOs which is 20x more than the current implementation.\r\n\r\n",
+          "created_at": "2025-06-17T18:12:25Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK e285e691b7a311e278f89e9fe423716de1ee268b",
+          "created_at": "2025-06-17T18:41:13Z"
+        },
+        {
+          "user": "Prabhat1308",
+          "body": "re-ACK [`e285e69`](https://github.com/bitcoin/bitcoin/pull/32765/commits/e285e691b7a311e278f89e9fe423716de1ee268b)",
+          "created_at": "2025-06-18T09:25:54Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 29.x in #32589.",
+          "created_at": "2025-06-19T14:07:17Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to 28.x in #32811.",
+          "created_at": "2025-07-03T16:37:15Z"
+        }
+      ]
+    },
+    {
+      "number": 32764,
+      "title": "guix: Build for macOS using Clang only",
+      "body": "This PR makes macOS builds Clang-only by switching the build compiler in depends to `clang` + `libc++`.\r\n\r\nSee: https://github.com/bitcoin/bitcoin/issues/30206.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-06-17T13:39:41Z",
+      "updated_at": "2026-01-15T12:22:50Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32764",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32764.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [w0xlt](https://github.com/bitcoin/bitcoin/pull/32764#pullrequestreview-2937295404) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33775](https://github.com/bitcoin/bitcoin/pull/33775) (guix: use GCC 14.3.0 over 13.3.0 by fanquake)\n* [#32162](https://github.com/bitcoin/bitcoin/pull/32162) (depends: Switch from multilib to platform-specific toolchains by hebasto)\n* [#25573](https://github.com/bitcoin/bitcoin/pull/25573) (guix: produce a `-static-pie` bitcoind by fanquake)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible typos and grammar issues:\n\n- don't attempt -> not attempt (or \"not to attempt\") [Combines with \"tells CMake to use ... and don't attempt\" — grammatically should be \"and not attempt\" or \"and not to attempt\" for parallel infinitive construction]\n\n\n\n<sup>2026-01-14</sup>\n",
+          "created_at": "2025-06-17T13:39:44Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "My Guix build:\r\n```\r\naarch64\r\n8c0763a9a52cbad53dd2e6c6bb9472f3738d1debc31d554117afbc8681ad715a  guix-build-4be8f47a89ef/output/aarch64-linux-gnu/SHA256SUMS.part\r\n668d90736b33c1afac33478f2abb4ddbc67e6383e16fe377a4d3562a3440f453  guix-build-4be8f47a89ef/output/aarch64-linux-gnu/bitcoin-4be8f47a89ef-aarch64-linux-gnu-debug.tar.gz\r\n394a1821a29a7410ea7f9d4d11006ffeb006160ad951a758f074810021f20bf8  guix-build-4be8f47a89ef/output/aarch64-linux-gnu/bitcoin-4be8f47a89ef-aarch64-linux-gnu.tar.gz\r\n601c387159a38e8e2574c4fe6a787eccea9a99cffc4e207cb088a8a6b00a1a80  guix-build-4be8f47a89ef/output/arm-linux-gnueabihf/SHA256SUMS.part\r\na595f2a16018cbbce849def4ca677190d082b3968f4ddfb60cbe6a46ed9140c3  guix-build-4be8f47a89ef/output/arm-linux-gnueabihf/bitcoin-4be8f47a89ef-arm-linux-gnueabihf-debug.tar.gz\r\n8b1305f5eb83c2292aab0579e7d4a662666d54635d875e9242b134e8439f038f  guix-build-4be8f47a89ef/output/arm-linux-gnueabihf/bitcoin-4be8f47a89ef-arm-linux-gnueabihf.tar.gz\r\n181d6c8dc7d8c212120ea6d353659aafa6510214e6302f9e5c96f646e96143d4  guix-build-4be8f47a89ef/output/arm64-apple-darwin/SHA256SUMS.part\r\n6c01be7142ce6d3f4d03d58e9c059ddb78c4518a5a018a8e49494a8ae97331c5  guix-build-4be8f47a89ef/output/arm64-apple-darwin/bitcoin-4be8f47a89ef-arm64-apple-darwin-codesigning.tar.gz\r\nbddf9ea401e06d8fc1ba4e372b092db840ca0320e637c51d1eb7036713ccd970  guix-build-4be8f47a89ef/output/arm64-apple-darwin/bitcoin-4be8f47a89ef-arm64-apple-darwin-unsigned.tar.gz\r\n90526bad3b242fef4d852b4342c6457cb43c9e3634804035820cd2e181cd4341  guix-build-4be8f47a89ef/output/arm64-apple-darwin/bitcoin-4be8f47a89ef-arm64-apple-darwin-unsigned.zip\r\n554e4c6c05306ea04b7470142ce53c8ff72422b9d3186333e98f5f63971088b1  guix-build-4be8f47a89ef/output/dist-archive/bitcoin-4be8f47a89ef.tar.gz\r\n8092dcb17dd9cb62744cbd7567913d7f1a69a88362702b6245af6f5a1cc0c679  guix-build-4be8f47a89ef/output/powerpc64-linux-gnu/SHA256SUMS.part\r\nb8aa6aab308aa40a32c634599c25fa543c15b4580717b8c5f00587411efcdd40  guix-build-4be8f47a89ef/output/powerpc64-linux-gnu/bitcoin-4be8f47a89ef-powerpc64-linux-gnu-debug.tar.gz\r\n31fc45b3590e52257aae41a881096bb10a76e85544790643ba9fb091e1c87e2b  guix-build-4be8f47a89ef/output/powerpc64-linux-gnu/bitcoin-4be8f47a89ef-powerpc64-linux-gnu.tar.gz\r\n727c7ffb480fde86177f8e655aa0ea1b1d11cdf7e382189c9c60e527b136c270  guix-build-4be8f47a89ef/output/riscv64-linux-gnu/SHA256SUMS.part\r\na6e0635c88d647ac2355a7b10f3fa34f271d81d556913586084fdfc9e7185662  guix-build-4be8f47a89ef/output/riscv64-linux-gnu/bitcoin-4be8f47a89ef-riscv64-linux-gnu-debug.tar.gz\r\n0d27f6ecc9c3deb00071801bcb6b1076a1bda0c6a8c9e4d17371ea9478de43df  guix-build-4be8f47a89ef/output/riscv64-linux-gnu/bitcoin-4be8f47a89ef-riscv64-linux-gnu.tar.gz\r\nb4be88490fcfa2fba41087b5cd816ec256897eb6f869196a86bc81dbe46e6f89  guix-build-4be8f47a89ef/output/x86_64-apple-darwin/SHA256SUMS.part\r\n0e8a275fb35ed6e77cfbded5115d7bc0fa567a9651ffbb94fd64a18561e1eac2  guix-build-4be8f47a89ef/output/x86_64-apple-darwin/bitcoin-4be8f47a89ef-x86_64-apple-darwin-codesigning.tar.gz\r\nb3a636d8f53c3cebcc234047950b14927cdd99939bf6ed14b9eccecf1e04c4e1  guix-build-4be8f47a89ef/output/x86_64-apple-darwin/bitcoin-4be8f47a89ef-x86_64-apple-darwin-unsigned.tar.gz\r\nd22453153abbd55dc943971c4cd9b63605908397ca8fd42322ce2dc58ee7401d  guix-build-4be8f47a89ef/output/x86_64-apple-darwin/bitcoin-4be8f47a89ef-x86_64-apple-darwin-unsigned.zip\r\n99f4bb5f3a6c5fa662f2527f5651253fcda2248550bfff8879e4a91fe0299d0e  guix-build-4be8f47a89ef/output/x86_64-linux-gnu/SHA256SUMS.part\r\nba103b6c2cdee03637372b3d0af6011f4f7471b488eac3768d4b538342efda65  guix-build-4be8f47a89ef/output/x86_64-linux-gnu/bitcoin-4be8f47a89ef-x86_64-linux-gnu-debug.tar.gz\r\n68a12d9c4c75f5040d55fca09729af2dd9c4ba986fce78f28a86508a7d97bfbf  guix-build-4be8f47a89ef/output/x86_64-linux-gnu/bitcoin-4be8f47a89ef-x86_64-linux-gnu.tar.gz\r\n88f1e3e6c69341fd3b40e2afffe05ccc574d9fa63fc7c9c77ab8694d6e8e63df  guix-build-4be8f47a89ef/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n36dc8a4b16ad26e260f2539e3cf1147fe3a1bc9807a1bbf143090065c2d8ef4b  guix-build-4be8f47a89ef/output/x86_64-w64-mingw32/bitcoin-4be8f47a89ef-win64-codesigning.tar.gz\r\n9aa9abc97a54c9c690f7e0cdb74c6a123c6eb42782372009e4d83fd746e8ae88  guix-build-4be8f47a89ef/output/x86_64-w64-mingw32/bitcoin-4be8f47a89ef-win64-debug.zip\r\n51580852b8b26f0e0fb0843d56d9978279e9ecaa0b18a38940df9ef437ccc1de  guix-build-4be8f47a89ef/output/x86_64-w64-mingw32/bitcoin-4be8f47a89ef-win64-setup-unsigned.exe\r\n4e9dd52f7b7be6b4eb09740a79e4f4e9fef4244962d707848b916c483792cc27  guix-build-4be8f47a89ef/output/x86_64-w64-mingw32/bitcoin-4be8f47a89ef-win64-unsigned.zip\r\n```",
+          "created_at": "2025-06-18T12:48:54Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "My Guix build matches @hebasto. No opinion on the change though.",
+          "created_at": "2025-06-19T14:05:31Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Rebased to resolve a conflict with the merged bitcoin/bitcoin#33185.",
+          "created_at": "2025-10-28T22:27:28Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "My Guix build:\r\n```\r\naarch64\r\na8613aaa30cc598f8f193932478e57381299399fb1a6a3e8cd27d41ed58e1a2c  guix-build-7c97bae595b0/output/aarch64-linux-gnu/SHA256SUMS.part\r\n6b32bd6a25e2c8b2823efc9deb8d9dc1fd4da7713dc00992ee721171500ebbf0  guix-build-7c97bae595b0/output/aarch64-linux-gnu/bitcoin-7c97bae595b0-aarch64-linux-gnu-debug.tar.gz\r\nfbda951a67c0b02a9c4ed8014b3371ecacf7c41f2f0338653963c2f765e29f7f  guix-build-7c97bae595b0/output/aarch64-linux-gnu/bitcoin-7c97bae595b0-aarch64-linux-gnu.tar.gz\r\nd99914fd2262ca97d50c324273f9c026226aed5895647f08d7072483f23584fa  guix-build-7c97bae595b0/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n37de23fe9c44d52574f533628614f25139deb76b6132b48e1584724d075ac5fb  guix-build-7c97bae595b0/output/arm-linux-gnueabihf/bitcoin-7c97bae595b0-arm-linux-gnueabihf-debug.tar.gz\r\na82ae6dc9e82f8d06e59968b7fec2b830e3bf58e4a822b718261fdf31c198267  guix-build-7c97bae595b0/output/arm-linux-gnueabihf/bitcoin-7c97bae595b0-arm-linux-gnueabihf.tar.gz\r\na1470dcea94f1f0d37b7bb9328d34b25faa5d4a98b4c9cbfadb2a9fb36a26c77  guix-build-7c97bae595b0/output/arm64-apple-darwin/SHA256SUMS.part\r\n84c5710551d7f747818ea30460d172766dc7c09a11a1924ff583e0990a06cd95  guix-build-7c97bae595b0/output/arm64-apple-darwin/bitcoin-7c97bae595b0-arm64-apple-darwin-codesigning.tar.gz\r\n13cfa8fc332c21e10292668e6cf2756a760105c2bff5ec1beea5e497ca3d8f2a  guix-build-7c97bae595b0/output/arm64-apple-darwin/bitcoin-7c97bae595b0-arm64-apple-darwin-unsigned.tar.gz\r\nd4f31163fe3adf542e1ede425f549c259e97ff9904ed06b130403a994f3c389b  guix-build-7c97bae595b0/output/arm64-apple-darwin/bitcoin-7c97bae595b0-arm64-apple-darwin-unsigned.zip\r\n45b8779112cd143e9acdc75c6eb954df5ebc7fc7b78ed3ec9cbf24c4420c27e5  guix-build-7c97bae595b0/output/dist-archive/bitcoin-7c97bae595b0.tar.gz\r\n876d77626c1a811b4b6a6aa6101719044460bf6bbc9765c31cabef77efcd23aa  guix-build-7c97bae595b0/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n3563712930b68ac73631b74bd3a26046bdd412e3e526750f380e6200a1fb1af3  guix-build-7c97bae595b0/output/powerpc64-linux-gnu/bitcoin-7c97bae595b0-powerpc64-linux-gnu-debug.tar.gz\r\n6aba1bbe0a6bbb12150aef858ff003ba24456e7c468a25b2c801601ccbfe0953  guix-build-7c97bae595b0/output/powerpc64-linux-gnu/bitcoin-7c97bae595b0-powerpc64-linux-gnu.tar.gz\r\n247fdd81f408f242ce2ede54d41594b1976bea326b9b1f0530e5f53c28bbac93  guix-build-7c97bae595b0/output/riscv64-linux-gnu/SHA256SUMS.part\r\nf7e60d53d19693120a8c8818991f5389d5441af363508be4934ddeb6cb078c32  guix-build-7c97bae595b0/output/riscv64-linux-gnu/bitcoin-7c97bae595b0-riscv64-linux-gnu-debug.tar.gz\r\n35b08d1387d514ecc535d5449ccd6bc39be398ac57dd6b3db6bb4829e93c6196  guix-build-7c97bae595b0/output/riscv64-linux-gnu/bitcoin-7c97bae595b0-riscv64-linux-gnu.tar.gz\r\n351f54d2a4238c19332ca843716377fdf147b9f736b3835184b09ae4a87a9db1  guix-build-7c97bae595b0/output/x86_64-apple-darwin/SHA256SUMS.part\r\n79206105e4cb2b3aa0fa18c82d0e34ebddf1abbb2babb3cfa297d25fcf2f4a5b  guix-build-7c97bae595b0/output/x86_64-apple-darwin/bitcoin-7c97bae595b0-x86_64-apple-darwin-codesigning.tar.gz\r\n9ffc8d0bde1177eb90d1e7182f41b47b7f935095e9310fde8ff4ce022354ca07  guix-build-7c97bae595b0/output/x86_64-apple-darwin/bitcoin-7c97bae595b0-x86_64-apple-darwin-unsigned.tar.gz\r\n8a04c1d952c1d8e7e812dc925c16b0f01aebfb7ea3cad9dde4ffd86f69bfbd40  guix-build-7c97bae595b0/output/x86_64-apple-darwin/bitcoin-7c97bae595b0-x86_64-apple-darwin-unsigned.zip\r\nb31a168a253ce8cd0f20b0bba8669dd78af619d7ffaf4afe6215763984f73c06  guix-build-7c97bae595b0/output/x86_64-linux-gnu/SHA256SUMS.part\r\n46783dbaddd91f33a8de978ace54cacc5e3f1b3847eb6b3da2b659ceb771aae6  guix-build-7c97bae595b0/output/x86_64-linux-gnu/bitcoin-7c97bae595b0-x86_64-linux-gnu-debug.tar.gz\r\n4c899d06467b3706092a2310eea7e83d2bb1f6ed0e5bca3143e8a3601b0f1b58  guix-build-7c97bae595b0/output/x86_64-linux-gnu/bitcoin-7c97bae595b0-x86_64-linux-gnu.tar.gz\r\n44cbac82e52866d75f348b4f77a124ce0ab1d16dbd1dff791b13b276cfd1bfdd  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n356a3c78d3925ce6d684bed05e01dc5d24519fecad36be2f2658ddaee986e75d  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/bitcoin-7c97bae595b0-win64-codesigning.tar.gz\r\na8e6700f105860060b01589de985747a02f593feb9712296a02e6822ec3ed927  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/bitcoin-7c97bae595b0-win64-debug.zip\r\n74eb43dbc3418071bf338f62adc2d65fd7ef525ba5c0e8dd9d4db20be53da9c2  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/bitcoin-7c97bae595b0-win64-setup-unsigned.exe\r\n75e32936458cc156f3ec6aa86a7054059e35f2e2ef9a11c1d0b061d86270767e  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/bitcoin-7c97bae595b0-win64-unsigned.zip\r\n```\r\n\r\nUPD. Same hashes on `x86_64`.",
+          "created_at": "2025-10-29T01:09:39Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "```\r\n# uname --machine && find guix-build-$(git rev-parse --short=12 HEAD)/output/ -type f -print0 | env LC_ALL=C sort -z | xargs -r0 sha256sum\r\nriscv64\r\na8613aaa30cc598f8f193932478e57381299399fb1a6a3e8cd27d41ed58e1a2c  guix-build-7c97bae595b0/output/aarch64-linux-gnu/SHA256SUMS.part\r\n6b32bd6a25e2c8b2823efc9deb8d9dc1fd4da7713dc00992ee721171500ebbf0  guix-build-7c97bae595b0/output/aarch64-linux-gnu/bitcoin-7c97bae595b0-aarch64-linux-gnu-debug.tar.gz\r\nfbda951a67c0b02a9c4ed8014b3371ecacf7c41f2f0338653963c2f765e29f7f  guix-build-7c97bae595b0/output/aarch64-linux-gnu/bitcoin-7c97bae595b0-aarch64-linux-gnu.tar.gz\r\nd99914fd2262ca97d50c324273f9c026226aed5895647f08d7072483f23584fa  guix-build-7c97bae595b0/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n37de23fe9c44d52574f533628614f25139deb76b6132b48e1584724d075ac5fb  guix-build-7c97bae595b0/output/arm-linux-gnueabihf/bitcoin-7c97bae595b0-arm-linux-gnueabihf-debug.tar.gz\r\na82ae6dc9e82f8d06e59968b7fec2b830e3bf58e4a822b718261fdf31c198267  guix-build-7c97bae595b0/output/arm-linux-gnueabihf/bitcoin-7c97bae595b0-arm-linux-gnueabihf.tar.gz\r\na1470dcea94f1f0d37b7bb9328d34b25faa5d4a98b4c9cbfadb2a9fb36a26c77  guix-build-7c97bae595b0/output/arm64-apple-darwin/SHA256SUMS.part\r\n84c5710551d7f747818ea30460d172766dc7c09a11a1924ff583e0990a06cd95  guix-build-7c97bae595b0/output/arm64-apple-darwin/bitcoin-7c97bae595b0-arm64-apple-darwin-codesigning.tar.gz\r\n13cfa8fc332c21e10292668e6cf2756a760105c2bff5ec1beea5e497ca3d8f2a  guix-build-7c97bae595b0/output/arm64-apple-darwin/bitcoin-7c97bae595b0-arm64-apple-darwin-unsigned.tar.gz\r\nd4f31163fe3adf542e1ede425f549c259e97ff9904ed06b130403a994f3c389b  guix-build-7c97bae595b0/output/arm64-apple-darwin/bitcoin-7c97bae595b0-arm64-apple-darwin-unsigned.zip\r\n45b8779112cd143e9acdc75c6eb954df5ebc7fc7b78ed3ec9cbf24c4420c27e5  guix-build-7c97bae595b0/output/dist-archive/bitcoin-7c97bae595b0.tar.gz\r\n876d77626c1a811b4b6a6aa6101719044460bf6bbc9765c31cabef77efcd23aa  guix-build-7c97bae595b0/output/powerpc64-linux-gnu/SHA256SUMS.part\r\n3563712930b68ac73631b74bd3a26046bdd412e3e526750f380e6200a1fb1af3  guix-build-7c97bae595b0/output/powerpc64-linux-gnu/bitcoin-7c97bae595b0-powerpc64-linux-gnu-debug.tar.gz\r\n6aba1bbe0a6bbb12150aef858ff003ba24456e7c468a25b2c801601ccbfe0953  guix-build-7c97bae595b0/output/powerpc64-linux-gnu/bitcoin-7c97bae595b0-powerpc64-linux-gnu.tar.gz\r\n247fdd81f408f242ce2ede54d41594b1976bea326b9b1f0530e5f53c28bbac93  guix-build-7c97bae595b0/output/riscv64-linux-gnu/SHA256SUMS.part\r\nf7e60d53d19693120a8c8818991f5389d5441af363508be4934ddeb6cb078c32  guix-build-7c97bae595b0/output/riscv64-linux-gnu/bitcoin-7c97bae595b0-riscv64-linux-gnu-debug.tar.gz\r\n35b08d1387d514ecc535d5449ccd6bc39be398ac57dd6b3db6bb4829e93c6196  guix-build-7c97bae595b0/output/riscv64-linux-gnu/bitcoin-7c97bae595b0-riscv64-linux-gnu.tar.gz\r\n351f54d2a4238c19332ca843716377fdf147b9f736b3835184b09ae4a87a9db1  guix-build-7c97bae595b0/output/x86_64-apple-darwin/SHA256SUMS.part\r\n79206105e4cb2b3aa0fa18c82d0e34ebddf1abbb2babb3cfa297d25fcf2f4a5b  guix-build-7c97bae595b0/output/x86_64-apple-darwin/bitcoin-7c97bae595b0-x86_64-apple-darwin-codesigning.tar.gz\r\n9ffc8d0bde1177eb90d1e7182f41b47b7f935095e9310fde8ff4ce022354ca07  guix-build-7c97bae595b0/output/x86_64-apple-darwin/bitcoin-7c97bae595b0-x86_64-apple-darwin-unsigned.tar.gz\r\n8a04c1d952c1d8e7e812dc925c16b0f01aebfb7ea3cad9dde4ffd86f69bfbd40  guix-build-7c97bae595b0/output/x86_64-apple-darwin/bitcoin-7c97bae595b0-x86_64-apple-darwin-unsigned.zip\r\nb31a168a253ce8cd0f20b0bba8669dd78af619d7ffaf4afe6215763984f73c06  guix-build-7c97bae595b0/output/x86_64-linux-gnu/SHA256SUMS.part\r\n46783dbaddd91f33a8de978ace54cacc5e3f1b3847eb6b3da2b659ceb771aae6  guix-build-7c97bae595b0/output/x86_64-linux-gnu/bitcoin-7c97bae595b0-x86_64-linux-gnu-debug.tar.gz\r\n4c899d06467b3706092a2310eea7e83d2bb1f6ed0e5bca3143e8a3601b0f1b58  guix-build-7c97bae595b0/output/x86_64-linux-gnu/bitcoin-7c97bae595b0-x86_64-linux-gnu.tar.gz\r\n44cbac82e52866d75f348b4f77a124ce0ab1d16dbd1dff791b13b276cfd1bfdd  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n356a3c78d3925ce6d684bed05e01dc5d24519fecad36be2f2658ddaee986e75d  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/bitcoin-7c97bae595b0-win64-codesigning.tar.gz\r\na8e6700f105860060b01589de985747a02f593feb9712296a02e6822ec3ed927  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/bitcoin-7c97bae595b0-win64-debug.zip\r\n74eb43dbc3418071bf338f62adc2d65fd7ef525ba5c0e8dd9d4db20be53da9c2  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/bitcoin-7c97bae595b0-win64-setup-unsigned.exe\r\n75e32936458cc156f3ec6aa86a7054059e35f2e2ef9a11c1d0b061d86270767e  guix-build-7c97bae595b0/output/x86_64-w64-mingw32/bitcoin-7c97bae595b0-win64-unsigned.zip\r\n",
+          "created_at": "2025-11-02T15:44:59Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Looks like this still using the GNU binutils for building native tools.",
+          "created_at": "2025-11-03T12:50:39Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Looks like this still using the GNU binutils for building native tools.\r\n\r\nShould be fixed now.",
+          "created_at": "2025-12-09T01:15:54Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Rebased due to a conflict with the merged bitcoin/bitcoin#33775.",
+          "created_at": "2026-01-14T12:32:44Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "My Guix build on both `x86_64` and `aarch64`:\r\n```\r\n$ find guix-build-$(git rev-parse --short=12 HEAD)/output/ -type f -print0 | env LC_ALL=C sort -z | xargs -r0 sha256sum\r\na402679b4aa86250b5968a7af1692aaff22f9e73aa539b563a1e1493cea986cf  guix-build-9b86140164a0/output/aarch64-linux-gnu/SHA256SUMS.part\r\nd52f462ba53e2423279b4628b70044fe7e4d004d776ff6bbd824bab2c5b36a21  guix-build-9b86140164a0/output/aarch64-linux-gnu/bitcoin-9b86140164a0-aarch64-linux-gnu-debug.tar.gz\r\n8d2e2d63de1986c4edcad946ec94f8d43234c1d3497fb608d81ddf80083a02d6  guix-build-9b86140164a0/output/aarch64-linux-gnu/bitcoin-9b86140164a0-aarch64-linux-gnu.tar.gz\r\nc8d3625e72a93daa07d93af515db276b43b64ee3de6f83f2755ad4080c9e2367  guix-build-9b86140164a0/output/arm-linux-gnueabihf/SHA256SUMS.part\r\n0c6556054f21faa34ed393d29bfa6fa148d3f35bd84f29a1e0046b5712f4089d  guix-build-9b86140164a0/output/arm-linux-gnueabihf/bitcoin-9b86140164a0-arm-linux-gnueabihf-debug.tar.gz\r\n939ed8e8d1d95fbb11f87c6ef05093f7a2c008c9f3e152b6f9233487eb7b62d3  guix-build-9b86140164a0/output/arm-linux-gnueabihf/bitcoin-9b86140164a0-arm-linux-gnueabihf.tar.gz\r\n79ad29757bf97b17b7676473d09eab2daf6d7932cc3c1c5a6e8ea8855dfd75e4  guix-build-9b86140164a0/output/arm64-apple-darwin/SHA256SUMS.part\r\n0b794f40651cd4c62001568f028e70d374c14768405091ababdf4a29d19a730f  guix-build-9b86140164a0/output/arm64-apple-darwin/bitcoin-9b86140164a0-arm64-apple-darwin-codesigning.tar.gz\r\n845be090e1a63cf117cf7e071396b67c57c0c9645fb82d47ba1f8c08a1eaa43a  guix-build-9b86140164a0/output/arm64-apple-darwin/bitcoin-9b86140164a0-arm64-apple-darwin-unsigned.tar.gz\r\n3929f5000780de6ae1b770be8c6ca53028273b87a4b51f0af7a582cbbf081ff4  guix-build-9b86140164a0/output/arm64-apple-darwin/bitcoin-9b86140164a0-arm64-apple-darwin-unsigned.zip\r\n71824fabc1cd0b100a97649a799c3854cc3f1e31862995752de7941fc1c0ccf3  guix-build-9b86140164a0/output/dist-archive/bitcoin-9b86140164a0.tar.gz\r\n30ba69bf969c833574e1283d6f8debb1052eaea22ab9ba7a2349595cf07f514a  guix-build-9b86140164a0/output/powerpc64-linux-gnu/SHA256SUMS.part\r\nee704e54055a95e5f25222a6a485064952760826206448cb6c33029729c63c2c  guix-build-9b86140164a0/output/powerpc64-linux-gnu/bitcoin-9b86140164a0-powerpc64-linux-gnu-debug.tar.gz\r\n6df11753a8730bfed2408803ec3bf739910d969737217ba950c0bd3c26e41f52  guix-build-9b86140164a0/output/powerpc64-linux-gnu/bitcoin-9b86140164a0-powerpc64-linux-gnu.tar.gz\r\nae3957df94348c52882e0d492e7a209d8d2bbecc58df50721c56fc8d6f9c4af4  guix-build-9b86140164a0/output/riscv64-linux-gnu/SHA256SUMS.part\r\nf95f48b492df4e30d432a845cc088c13d3a18fdc0d126e5df1137f8863dcc7c7  guix-build-9b86140164a0/output/riscv64-linux-gnu/bitcoin-9b86140164a0-riscv64-linux-gnu-debug.tar.gz\r\nb9c19f12fc059e2381b3eb486570b8a45bca2b7e542408e669d68b8f43444f87  guix-build-9b86140164a0/output/riscv64-linux-gnu/bitcoin-9b86140164a0-riscv64-linux-gnu.tar.gz\r\n17b31c840b2a2ae6b361f22ffb3bf8c914615e53f6703e5282849529f100838e  guix-build-9b86140164a0/output/x86_64-apple-darwin/SHA256SUMS.part\r\nad3a47cae5dd13eba676b9778ffac72dcab9b28fdabc845d0865ac98ce61ce45  guix-build-9b86140164a0/output/x86_64-apple-darwin/bitcoin-9b86140164a0-x86_64-apple-darwin-codesigning.tar.gz\r\nc3fe8e10686af285c52330640a221371139f2601ee1c8ef3d389a98343943dba  guix-build-9b86140164a0/output/x86_64-apple-darwin/bitcoin-9b86140164a0-x86_64-apple-darwin-unsigned.tar.gz\r\n0e43d2fae8600176a0ce198808017bbfca08187e4e9d1096372b72a3253edf8b  guix-build-9b86140164a0/output/x86_64-apple-darwin/bitcoin-9b86140164a0-x86_64-apple-darwin-unsigned.zip\r\n5afc772e023f631f5985bcb9e92e6c4ae03904538f0d26927b7254cc29569d25  guix-build-9b86140164a0/output/x86_64-linux-gnu/SHA256SUMS.part\r\n419ee33f20e28476429ce2dece867c6d4295f1f8062e47ab621e9652b436bde9  guix-build-9b86140164a0/output/x86_64-linux-gnu/bitcoin-9b86140164a0-x86_64-linux-gnu-debug.tar.gz\r\n926e7f62512ed3f6fc2e4273159d5603bf66d2b49cd7f9bb8b1a025eb8c68f55  guix-build-9b86140164a0/output/x86_64-linux-gnu/bitcoin-9b86140164a0-x86_64-linux-gnu.tar.gz\r\n5bf6e054539817b27baf28d19ee38ee037be4ead99ae7b3de83737d0035f7c4a  guix-build-9b86140164a0/output/x86_64-w64-mingw32/SHA256SUMS.part\r\n668586959a17f334c3ce012e999edd887b1918d831aaca4d148fac77ca865f33  guix-build-9b86140164a0/output/x86_64-w64-mingw32/bitcoin-9b86140164a0-win64-codesigning.tar.gz\r\n82766dc0d580aff243cfc9d2fe0cc99637a8310d12eb86f51e1fc61a334a62c0  guix-build-9b86140164a0/output/x86_64-w64-mingw32/bitcoin-9b86140164a0-win64-debug.zip\r\n15f3492cb99a17ed59ad8f1f075bf9f5c8ae64c4b81cadac5eb428627e3a2bd7  guix-build-9b86140164a0/output/x86_64-w64-mingw32/bitcoin-9b86140164a0-win64-setup-unsigned.exe\r\n802fc1094db69bc06011b818248cfc7f01b0e16ff05eb69013431e0fcb305524  guix-build-9b86140164a0/output/x86_64-w64-mingw32/bitcoin-9b86140164a0-win64-unsigned.zip\r\n```",
+          "created_at": "2026-01-14T15:41:36Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Did another guix build on x86_64, matches @hebasto's.",
+          "created_at": "2026-01-15T12:22:50Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32769,
+      "title": "Reduce OP_RETURN to 43 Bytes",
+      "body": "### Please describe the feature you'd like to see added.\n\nSatoshi’s True Vision is True Money.\n\n### Is your feature related to a problem, if so please describe it.\n\n_No response_\n\n### Describe the solution you'd like\n\n_No response_\n\n### Describe any alternatives you've considered\n\n_No response_\n\n### Please leave any additional context\n\n_No response_",
+      "state": "closed",
+      "user": "nakamotoprophet",
+      "created_at": "2025-06-17T21:33:31Z",
+      "updated_at": "2025-06-17T21:37:26Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32769",
+      "labels": [
+        "Feature"
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 1
+  }
+}

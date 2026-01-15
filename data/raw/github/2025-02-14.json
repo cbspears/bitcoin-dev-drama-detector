@@ -1,0 +1,625 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:17:38.061520+00:00",
+  "date": "2025-02-14",
+  "pull_requests": [
+    {
+      "number": 31875,
+      "title": "WIP: speed up `BatchWrite` by sorting the batches in descending order",
+      "body": "Work In Progress - I still need to investigate if it's possible to do the sorting in-place somehow instead of allocating extra memory.\r\n\r\n---\r\n\r\nThis is an extension of https://github.com/bitcoin/bitcoin/pull/31645 - drafted for now to receive comments.\r\n\r\nIt looks like sorting the coins before flushing speeds up `MemTable` insertion considerably (will move the image to comments, after undrafting):\r\n![descending sort](https://github.com/user-attachments/assets/ba30667c-bd83-4e15-a218-f5edf8545abe)\r\n\r\nRan a few `assumeUTXO` loads and a few complete reindexes to check the LevelDB write batch size increase with/without sorting:\r\n\r\n# assumeUTXO final dumps:\r\n\r\n<details>\r\n<summary>Details</summary>\r\n\r\n```bash\r\n/mnt/my_storage/bitcoin # tail -3 ../logs/debug-35bf426e02210c1bbb04926f4ca2e0285fbfcd11.log \r\n2025-01-14T00:46:32Z [warning] Flushing large (26 GiB) UTXO set to disk, it may take several minutes\r\n2025-01-14T01:18:53Z Shutdown: done\r\n\r\n/mnt/my_storage/bitcoin # tail -3 ../logs/debug-256a5c04f2eb190e45ec7d7ffb058c189174780a.log \r\n2025-01-14T13:44:14Z [warning] Flushing large (26 GiB) UTXO set to disk, it may take several minutes\r\n2025-01-14T14:06:10Z Shutdown: done\r\n\r\n/mnt/my_storage/bitcoin # tail -3 ../logs/debug-a5920ec25f02b8b66b6f23f00e696a86b5352d69.log \r\n2025-01-15T02:15:49Z [warning] Flushing large (26 GiB) UTXO set to disk, it may take several minutes\r\n2025-01-15T02:24:16Z Shutdown: done\r\n```\r\n\r\n</details>\r\n\r\n> 35bf426e02210c1bbb04926f4ca2e0285fbfcd11 (master):         Duration: 0:32:21\r\n> 256a5c04f2eb190e45ec7d7ffb058c189174780a (64 << 20):       Duration: 0:21:56\r\n> a5920ec25f02b8b66b6f23f00e696a86b5352d69 (SortedWrite 64): Duration: 0:08:27\r\n\r\nMeaning that the `64 MiB batch size increase` + `descending sorting` improves the final UTXO set dump from **32 minutes** to **8 minutes**.\r\n\r\n# reindex-chainstate until 878k blocks\r\n\r\n<details>\r\n<summary>Details</summary>\r\n\r\n```bash\r\nhyperfine --runs 2 --parameter-list COMMIT 35bf426e02210c1bbb04926f4ca2e0285fbfcd11,256a5c04f2eb190e45ec7d7ffb058c189174780a,a5920ec25f02b8b66b6f23f00e696a86b5352d69 --prepare 'rm -f /mnt/my_storage/BitcoinData/debug.log && git checkout {COMMIT} && git clean -fxd && git reset --hard && cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_UTIL=OFF -DBUILD_TX=OFF -DBUILD_TESTS=OFF -DENABLE_WALLET=OFF -DINSTALL_MAN=OFF && cmake --build build -j$(nproc)' --cleanup 'mv /mnt/my_storage/BitcoinData/debug.log /mnt/my_storage/logs/debug-{COMMIT}.log' 'COMMIT={COMMIT} ./build/src/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=878000 -dbcache=30000 -reindex-chainstate -connect=0'\r\n\r\nBenchmark 1: COMMIT=35bf426e02210c1bbb04926f4ca2e0285fbfcd11 ./build/src/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=878000 -dbcache=30000 -reindex-chainstate -connect=0\r\n  Time (mean ± σ):     23766.362 s ±  5.864 s    [User: 36042.690 s, System: 701.176 s]\r\n  Range (min … max):   23762.216 s … 23770.509 s    2 runs\r\n \r\nBenchmark 2: COMMIT=256a5c04f2eb190e45ec7d7ffb058c189174780a ./build/src/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=878000 -dbcache=30000 -reindex-chainstate -connect=0\r\n  Time (mean ± σ):     22966.570 s ± 97.248 s    [User: 35741.689 s, System: 642.797 s]\r\n  Range (min … max):   22897.805 s … 23035.335 s    2 runs\r\n \r\nBenchmark 3: COMMIT=a5920ec25f02b8b66b6f23f00e696a86b5352d69 ./build/src/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=878000 -dbcache=30000 -reindex-chainstate -connect=0\r\n  Time (mean ± σ):     22119.481 s ± 50.626 s    [User: 35457.379 s, System: 578.014 s]\r\n  Range (min … max):   22083.683 s … 22155.279 s    2 runs\r\n```\r\n\r\n</details>\r\n\r\n```bash\r\nSummary\r\n  COMMIT=a5920ec25f02b8b66b6f23f00e696a86b5352d69 ./build/src/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=878000 -dbcache=30000 -reindex-chainstate -connect=0 ran\r\n    1.04 ± 0.00 times faster than COMMIT=256a5c04f2eb190e45ec7d7ffb058c189174780a ./build/src/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=878000 -dbcache=30000 -reindex-chainstate -connect=0\r\n    1.07 ± 0.00 times faster than COMMIT=35bf426e02210c1bbb04926f4ca2e0285fbfcd11 ./build/src/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=878000 -dbcache=30000 -reindex-chainstate -connect=0\r\n```\r\n\r\nIndicating that the two changes combined result in 7% faster reindex (and likely IBD).\r\n\r\n---\r\n\r\nOne of the drawbacks of this approach that I'd like guidance on (as noted by @sipa in the [64-MiB-bump PR](https://github.com/bitcoin/bitcoin/pull/31645#issuecomment-2587500105) as well), is that this will increase max memory usage temporarily at a critical time (e.g. while dumping the calculated final UTXO set), when we are already using the most memory.\r\nThis can likely be mitigated in a few ways as far as I can tell:\r\n1) similarly to how we [warn on low disk storage space](https://github.com/bitcoin/bitcoin/blob/master/src/init.cpp#L1775-L1791), we could warn at the beginning when `dbcache` size is unrealistically big. (`bitcoind -dbcache=300000` (300GiB) simply prints `Using 299990.0 MiB for in-memory UTXO set` - we could add a warning at least in this case).\r\n2) merge https://github.com/bitcoin/bitcoin/pull/30611 by @andrewtoth and lose at most 1 hour's worth of work.\r\n3) make the upstream [LevelDB batch](https://github.com/google/leveldb/blob/main/include/leveldb/write_batch.h#L33) sortable (or automatically sort itself before insertion).\r\n",
+      "state": "closed",
+      "user": "l0rinc",
+      "created_at": "2025-02-14T22:34:47Z",
+      "updated_at": "2025-02-17T14:22:24Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31875",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31875.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#30673](https://github.com/bitcoin/bitcoin/pull/30673) (coins: remove logic for spent-and-FRESH cache entries and writing non-DIRTY entries by andrewtoth)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-14T22:34:50Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/37259194829</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-02-15T00:46:38Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Closing for now to avoid needless reviews, since further benchmarks cast doubt on the validity of this finding, will reopen after I clarify the source of this ambiguity.",
+          "created_at": "2025-02-17T14:22:24Z"
+        }
+      ]
+    },
+    {
+      "number": 31874,
+      "title": "qa wallet: Activate dormant checks in wallet_multisig_descriptor_psbt.py",
+      "body": "Conditions had virtually no effect, lets activate them.",
+      "state": "closed",
+      "user": "hodlinator",
+      "created_at": "2025-02-14T22:30:12Z",
+      "updated_at": "2025-03-27T21:23:22Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31874",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31874.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/31874#issuecomment-2753665544), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/31874#pullrequestreview-2722957738), [l0rinc](https://github.com/bitcoin/bitcoin/pull/31874#pullrequestreview-2722972767) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n",
+          "created_at": "2025-02-14T22:30:15Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Thanks for having a look @l0rinc!\r\n\r\n> Can we use `assert_equal(all(), True)` for consistency?\r\n\r\nI prefer `assert_true(all())`, since the condition may span the full line, so having what we are testing against at the beginning of the line is more readable. One could go Yoda-style and `assert_equal(True, all())` to solve that issue, but why not bite the bullet and support `assert_true(all())`? Other frameworks like GoogleTest [have `ASSERT_TRUE()`](https://google.github.io/googletest/reference/assertions.html#EXPECT_TRUE).\r\n\r\n> *) Can we convert the remaining assert all() constructs to whatever we will end up using here?\r\n\r\nMy first preference is to just have `assert_true()` roll out organically. But I am open to authoring scripted diffs if there is enough support.\r\n\r\n`git grep \"assert_equal.*, True)$\" |wc -l` => 228\r\nThis seems like a reasonable candidate for conversion.\r\n\r\n`git grep \"^ *assert\\b\" *.py |wc -l` => 1592\r\nI'm a bit more reluctant to change all built-in assert usages in a scripted diff as some may be intentionally intended to be internal checks for non-optimized runs. See discussion in other PR: https://github.com/bitcoin/bitcoin/pull/30529#discussion_r1910688540. Maybe I could do a scripted diff for `git grep -E \"^ *assert (all|any)\" *.py |wc -l` => 30.\r\n\r\n---\r\n\r\nWant to point out that I don't want to spend too much of our time bikeshedding, I'm okay with switching back to mis-using `assert` for now and kick this can down the road. In practice it's very rare that anyone attempts to run tests in optimized mode, evidenced by [several tests failing if run that way](https://github.com/bitcoin/bitcoin/pull/30529#discussion_r1893728563).",
+          "created_at": "2025-02-15T16:04:23Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> why not bite the bullet and support\r\n\r\nI don't really see what it adds, but won't block if others are in favor.\r\n\r\nCan we separate the two problems?\r\nI mean adding back the assertions in one PR (though I'd vote for fixing all remaining `assert (all|any` in the same PR that fixes the unasserted ones), and proposing the new `assert_true` together with a scripted diff that applies it, to see if reviewers (or at least the author) thinks that `assert_true` is indeed better than `assert_equals(True,`.",
+          "created_at": "2025-02-15T16:44:49Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "> I don't really see what it adds, but won't block if others are in favor.\r\n>\r\n> Can we separate the two problems?\r\n\r\nLets see what others think. I think the PR content & size is okay as-is, both fixing a minor issue and demonstrating a slight use-case for `assert_true()`, but am open to expand it with scripted diffs if others agree. Not too keen on both expanding and splitting it at the same time though.",
+          "created_at": "2025-02-15T19:31:45Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Tend towards approach NACK for now, concerning `PYTHONOPTIMIZE`, due to the outstanding issues mentioned in https://github.com/bitcoin/bitcoin/pull/31874#discussion_r1957179722\r\n\r\n",
+          "created_at": "2025-02-17T14:38:19Z"
+        },
+        {
+          "user": "hodlinator",
+          "body": "Switched to stripped-down version of this PR without the former attempt to introduce `assert_true()`. It seemed fortuitous that I found these examples to illustrate it with, but will kick that can down the road for now.",
+          "created_at": "2025-03-26T08:57:05Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 35d17cd5eecabd36a2a14b35a47de22726ede0f8",
+          "created_at": "2025-03-26T09:04:10Z"
+        }
+      ]
+    },
+    {
+      "number": 31872,
+      "title": "Update CONTRIBUTING.md",
+      "body": "in line number 11 i changed the sentence because it is overstructured sentence in normal content from this line to \"Open source often naturally revolves around a meritocracy where contributors earn trust from the developer community over time.\"  to this \"In open source projects, contributors gradually earn trust from the developer community, forming a natural meritocracy.\"\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "Syed-AbdurRahaman2006",
+      "created_at": "2025-02-14T19:08:53Z",
+      "updated_at": "2025-02-14T19:37:31Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31872",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31872.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n",
+          "created_at": "2025-02-14T19:08:57Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "@Syed-AbdurRahaman2006, please stop this random spam!",
+          "created_at": "2025-02-14T19:37:30Z"
+        }
+      ]
+    },
+    {
+      "number": 31871,
+      "title": "Update README.md",
+      "body": "i changed line number 16 from further to for more because of increasing the readability.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "Syed-AbdurRahaman2006",
+      "created_at": "2025-02-14T18:51:03Z",
+      "updated_at": "2025-02-14T18:51:59Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31871",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31871.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n",
+          "created_at": "2025-02-14T18:51:07Z"
+        }
+      ]
+    },
+    {
+      "number": 31870,
+      "title": "fuzz: split `coinselection` harness",
+      "body": "This PR splits the `coinselection` fuzz harness into 3 targets (`coinselection_bnb`, `coinselection_knapsack`, `coinselection_srd`). The goal is to be able to fuzz each algorithm separately (to avoid performance issues) and also all of them together.",
+      "state": "closed",
+      "user": "brunoerg",
+      "created_at": "2025-02-14T18:09:50Z",
+      "updated_at": "2025-03-21T19:04:47Z",
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31870",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31870.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [janb84](https://github.com/bitcoin/bitcoin/pull/31870#issuecomment-2683121579), [marcofleon](https://github.com/bitcoin/bitcoin/pull/31870#pullrequestreview-2683023589), [zaidmstrr](https://github.com/bitcoin/bitcoin/pull/31870#pullrequestreview-2686505153), [maflcko](https://github.com/bitcoin/bitcoin/pull/31870#issuecomment-2742747821) |\n| Concept ACK | [yancyribbens](https://github.com/bitcoin/bitcoin/pull/31870#issuecomment-2725268217) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31806](https://github.com/bitcoin/bitcoin/pull/31806) (fuzz: coinselection: cover `SetBumpFeeDiscount` by brunoerg)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-14T18:09:55Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "Force-pushed addressing https://github.com/bitcoin/bitcoin/pull/31870#discussion_r1957893638, https://github.com/bitcoin/bitcoin/pull/31870#discussion_r1957883443 and https://github.com/bitcoin/bitcoin/pull/31870#discussion_r1957883107. Thanks, @maflcko.",
+          "created_at": "2025-02-17T13:23:19Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "> Hey, I'm reviewing this PR, as the description says that we can test each target separately, (`coinselection_bnb`, `coinselection_knapsack`, `coinselection_srd`) which is fine, but for the combined test I can't find any fuzz target there like `coinselection`.\r\n\r\nI just updated the description. I removed the `coinselection` target, so there are 3 ones.",
+          "created_at": "2025-02-17T20:37:19Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": "Force-pushed addressing https://github.com/bitcoin/bitcoin/pull/31870#discussion_r1965528993",
+          "created_at": "2025-02-21T16:27:33Z"
+        },
+        {
+          "user": "janb84",
+          "body": "Tested ACK [ba82240](https://github.com/bitcoin/bitcoin/pull/31870/commits/ba82240553ddd534287845e10bc76b46b45329fe)\r\n\r\nThe change to fuzz each algorithm independently seems an okay idea. The implementation/separation in the code also makes it easier to read, review, and reason about.\r\n\r\n- Built and ran fuzzers, minimum of 15 minutes each. \r\n- Reviewed code changes line-by-line\r\n- Tried to compile CodeCoverage of new Fuzz targets but I failed at that (not a code issue) \r\n\r\nI also wrote a [review note](https://github.com/janb84/Bitcoin-Core_review-notes/blob/main/reviews/PR-%2331870.md) on the PR to document my learning journey",
+          "created_at": "2025-02-25T19:47:44Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Concept ACK.  I'm curious if there should be any doc updates accompanying this change.",
+          "created_at": "2025-03-14T17:05:23Z"
+        },
+        {
+          "user": "brunoerg",
+          "body": ">  I'm curious if there should be any doc updates accompanying this change.\r\n\r\nNo, it's a test-only change.",
+          "created_at": "2025-03-14T18:44:45Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "cc @dergoegge ",
+          "created_at": "2025-03-21T08:54:54Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review ACK ba82240553ddd534287845e10bc76b46b45329fe 👐\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK ba82240553ddd534287845e10bc76b46b45329fe 👐\r\nAaLQ7VClMZd8vRGNIiLsK54KJFAUcqCKCnsGUSXGGyDuhdZGVtjAVzTOih3F0roC5Z2Bh/o/YP/kBeS9oRttCQ==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-03-21T09:05:36Z"
+        },
+        {
+          "user": "murchandamus",
+          "body": "Oh I had missed this, and noticed it via the new fuzz target corpora. Great idea!",
+          "created_at": "2025-03-21T18:58:56Z"
+        }
+      ]
+    },
+    {
+      "number": 31869,
+      "title": "cmake: Add `libbitcoinkernel` target",
+      "body": "This PR amends https://github.com/bitcoin/bitcoin/pull/31844 by:\r\n1.  Adding a convenience `libbitcoinkernel` target as a synonym for `bitcoinkernel`.\r\n2. Renaming the `bitcoinkernel` component to `libbitcoinkernel`, as initially intended in https://github.com/bitcoin/bitcoin/pull/31844\r\n\r\nHere is an example of usage:\r\n```sh\r\ncmake -B build -DBUILD_UTIL_CHAINSTATE=ON\r\ncmake --build build --target libbitcoinkernel\r\ncmake --install build --component libbitcoinkernel\r\n```",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-02-14T17:09:55Z",
+      "updated_at": "2025-02-17T15:31:15Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31869",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31869.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [theuni](https://github.com/bitcoin/bitcoin/pull/31869#pullrequestreview-2618778587), [s373nZ](https://github.com/bitcoin/bitcoin/pull/31869#issuecomment-2661469280), [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/31869#pullrequestreview-2619681387), [BrandonOdiwuor](https://github.com/bitcoin/bitcoin/pull/31869#pullrequestreview-2621071470) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31884](https://github.com/bitcoin/bitcoin/pull/31884) (cmake: Make implicit `libbitcoinkernel` dependencies explicit by hebasto)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-14T17:09:59Z"
+        },
+        {
+          "user": "s373nZ",
+          "body": "ACK https://github.com/bitcoin/bitcoin/commit/3a914ab96bdeb70cdf848dd74deda5a80d0a7f78\r\n\r\nTested compilation as per the usage example in the description with the same results -- no rebuild between targets `libbitcoinkernel` and `bitcoinkernel`. Kernel library is installable via `--component libbitcoinkernel`, but `--component bitcoinkernel` is not recognized. Works as expected.\r\n\r\nWhile testing, I learned to generate with a clean `build` directory, or pass `--fresh` so that `-DBUILD_KERNEL_LIB` didn't preserve the cached default value from `-DBUILD_UTIL_CHAINSTATE` of the last build.",
+          "created_at": "2025-02-16T14:58:58Z"
+        }
+      ]
+    },
+    {
+      "number": 31868,
+      "title": "[IBD] specialize block serialization",
+      "body": "This change is part of [[IBD] - Tracking PR for speeding up Initial Block Download](https://github.com/bitcoin/bitcoin/pull/32043)\r\n\r\n---\r\n\r\nThis PR is drafted until I remeasure everything after the recent merges and I need to find a way to simplify the 1 byte writes more nicely, I don't like all the specializations.\r\n\r\n---\r\n\r\n### Summary\r\n\r\nThis PR contain a few different optimization I found by IBD profiling, and via the newly added block seralization benchmarks. It also takes advantage of the recently merged [`std::span` changes](https://github.com/bitcoin/bitcoin/pull/31519) enabling propagating static extents.\r\n\r\nThe commits merge similar (de)serialization methods, and separates them internally with  `if constexpr` - similarly to how it has been [done here before](https://github.com/bitcoin/bitcoin/pull/28203). This enabled further `SizeComputer` optimizations as well.\r\n\r\n### Context\r\nOther than these, since single byte writes are used very often (used for every `(u)int8_t` or `std::byte` or `bool` and for every `VarInt`'s first byte which is also needed for every `(pre)Vector`), it makes sense to avoid the generalized serialization infrastructure that isn't needed:\r\n* `AutoFile` write doesn't need to allocate 4k buffer for a single byte now;\r\n* `VectorWriter` and `DataStream` avoids memcpy/insert calls;\r\n* `CSHA256::Write` can avoid `memcpy`.\r\n\r\n`DeserializeBlock` is dominated by the hash calculations so the optimizations barely affect it.\r\n\r\n### Measurements\r\n\r\n<details>\r\n<summary>C compiler ............................ AppleClang 16.0.0.16000026</summary>\r\n\r\n> Before:\r\n\r\n|            ns/block |             block/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|          195,610.62 |            5,112.20 |    0.3% |     11.00 | `SerializeBlock`\r\n|           12,061.83 |           82,906.19 |    0.1% |     11.01 | `SizeComputerBlock`\r\n\r\n> After:\r\n\r\n|            ns/block |             block/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|          174,569.19 |            5,728.39 |    0.6% |     10.89 | `SerializeBlock`\r\n|           10,241.16 |           97,645.21 |    0.0% |     11.00 | `SizeComputerBlock`\r\n\r\n</details>\r\n\r\n> `SerializeBlock` - ~12.% faster\r\n> `SizeComputerBlock` - ~17.7% faster\r\n\r\n-----\r\n\r\n\r\n<details>\r\n<summary>C++ compiler .......................... GNU 13.3.0</summary>\r\n\r\n> Before:\r\n\r\n|            ns/block |             block/s |    err% |       ins/block |       cyc/block |    IPC |      bra/block |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          867,857.55 |            1,152.26 |    0.0% |    8,015,883.90 |    3,116,099.08 |  2.572 |   1,517,035.87 |    0.5% |     10.81 | `SerializeBlock`\r\n|           30,928.27 |           32,332.88 |    0.0% |      221,683.03 |      111,055.84 |  1.996 |      53,037.03 |    0.8% |     11.03 | `SizeComputerBlock`\r\n\r\n> After:\r\n\r\n|            ns/block |             block/s |    err% |       ins/block |       cyc/block |    IPC |      bra/block |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          615,000.56 |            1,626.01 |    0.0% |    8,015,883.64 |    2,208,340.88 |  3.630 |   1,517,035.62 |    0.5% |     10.56 | `SerializeBlock`\r\n|           25,676.76 |           38,945.72 |    0.0% |      159,390.03 |       92,202.10 |  1.729 |      42,131.03 |    0.9% |     11.00 | `SizeComputerBlock`\r\n\r\n</details>\r\n\r\n> `SerializeBlock` - ~41.1% faster\r\n> `SizeComputerBlock` - ~20.4% faster\r\n\r\n----\r\n\r\nWhile this wasn't the main motivation for the change, IBD on Ubuntu/GCC on SSD with i9 indicates a 2% speedup as well:\r\n\r\n<details>\r\n<summary>Details</summary>\r\n\r\n```bash\r\nCOMMITS=\"05314bde0b06b820225f10c6529b5afae128ff81 1cd94ec2511874ec68b92db34ad7ec7d9534fed1\"; \\\r\nSTOP_HEIGHT=880000; DBCACHE=10000; \\\r\nC_COMPILER=gcc; CXX_COMPILER=g++; \\\r\nhyperfine \\\r\n--export-json \"/mnt/my_storage/ibd-${COMMITS// /-}-${STOP_HEIGHT}-${DBCACHE}-${C_COMPILER}.json\" \\\r\n--runs 3 \\\r\n--parameter-list COMMIT ${COMMITS// /,} \\\r\n--prepare \"killall bitcoind || true; rm -rf /mnt/my_storage/BitcoinData/*; git checkout {COMMIT}; git clean -fxd; git reset --hard; cmake -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_WALLET=OFF -DCMAKE_C_COMPILER=$C_COMPILER -DCMAKE_CXX_COMPILER=$CXX_COMPILER && cmake --build build -j$(nproc) --target bitcoind && ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=1 -printtoconsole=0 || true\" \\\r\n--cleanup \"cp /mnt/my_storage/BitcoinData/debug.log /mnt/my_storage/logs/debug-{COMMIT}-$(date +%s).log || true\" \\\r\n\"COMPILER=$C_COMPILER COMMIT={COMMIT} ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=$STOP_HEIGHT -dbcache=$DBCACHE -prune=550 -printtoconsole=0\"\r\nBenchmark 1: COMPILER=gcc COMMIT=05314bde0b06b820225f10c6529b5afae128ff81 ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=880000 -dbcache=10000 -prune=550 -printtoconsole=0\r\n  Time (mean ± σ):     33647.918 s ± 508.655 s    [User: 71503.409 s, System: 4404.899 s]\r\n  Range (min … max):   33283.439 s … 34229.026 s    3 runs\r\n \r\nBenchmark 2: COMPILER=gcc COMMIT=1cd94ec2511874ec68b92db34ad7ec7d9534fed1 ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=880000 -dbcache=10000 -prune=550 -printtoconsole=0\r\n  Time (mean ± σ):     33062.491 s ± 183.335 s    [User: 71246.532 s, System: 4318.490 s]\r\n  Range (min … max):   32888.211 s … 33253.706 s    3 runs\r\n \r\nSummary\r\n  COMPILER=gcc COMMIT=1cd94ec2511874ec68b92db34ad7ec7d9534fed1 ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=880000 -dbcache=10000 -prune=550 -printtoconsole=0 ran\r\n    1.02 ± 0.02 times faster than COMPILER=gcc COMMIT=05314bde0b06b820225f10c6529b5afae128ff81 ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=880000 -dbcache=10000 -prune=550 -printtoconsole=0\r\n```\r\n\r\n</details>",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-02-14T16:48:23Z",
+      "updated_at": "2026-01-15T15:20:23Z",
+      "comments": 16,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31868",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31868.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33878](https://github.com/bitcoin/bitcoin/pull/33878) (refactor, docs: Embedded ASMap [2/3]: Refactor asmap internals and add documentation by fjahr)\n* [#33026](https://github.com/bitcoin/bitcoin/pull/33026) (test, refactor: Embedded ASMap [1/3]: Selected minor preparatory work by fjahr)\n* [#32729](https://github.com/bitcoin/bitcoin/pull/32729) (test,refactor: extract script template helpers & widen sigop count coverage by l0rinc)\n* [#31682](https://github.com/bitcoin/bitcoin/pull/31682) ([IBD] specialize CheckBlock's input & coinbase checks by l0rinc)\n* [#28792](https://github.com/bitcoin/bitcoin/pull/28792) (build: Embedded ASMap [3/3]: Build binary dump header file by fjahr)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible places where named args for integral literals may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- Transform(s, buf, 1) in src/crypto/sha256.cpp\n\n\n\n<sup>2026-01-15</sup>\n",
+          "created_at": "2025-02-14T16:48:28Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Drafting until https://github.com/bitcoin/bitcoin/pull/31519 is merged, as recommended in https://github.com/bitcoin/bitcoin/pull/31868#discussion_r1956480589",
+          "created_at": "2025-03-09T23:59:46Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/38458137649</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-10T00:09:11Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> but I am not really reproducing any of the performance changes on my machine yet\r\n\r\nI just removed the single-byte specializations, they were quite ugly, will have to add it back somehow later - will draft it until I do that, thanks for checking!",
+          "created_at": "2025-04-17T12:28:08Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "@TheCharlatan, I've added back the single-byte optimizations (simplified slightly after rebase), your feedback is appreciated.",
+          "created_at": "2025-04-17T12:50:53Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> While this wasn't the main motivation for the change, IBD on Ubuntu/GCC on SSD with i9 indicates a 2% speedup as well:\r\n\r\nIf IBD speedup is not the main motivation, what else is the motivation, given that the title mentions `[IBD]`?\r\n\r\nAlso, what code part is hitting this during IBD, given that reads and writes are now buffered?",
+          "created_at": "2025-04-17T15:40:56Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> what code part is hitting this during IBD\r\n\r\nDuring serialization we have very many 1 byte writes, this change avoids the heavy allocations.\r\nBut drafting until I have time to properly remeasure everything after the recent merge.",
+          "created_at": "2025-04-17T15:47:52Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I understand that there are many 1-byte writes, but they go into the BufferedReader/Writer, which is not modified here. The Buffered* then passes them to AutoFile, which is modified here, but never receives 1-byte writes anymore",
+          "created_at": "2025-04-17T15:50:50Z"
+        },
+        {
+          "user": "sedited",
+          "body": "> If IBD speedup is not the main motivation, what else is the motivation, given that the title mentions [IBD]?\r\n\r\nI think block serialization being fast could be useful for future kernel users. Reading and de-serializing blocks is one of the common operations I'd expect outside of just pure block validation.",
+          "created_at": "2025-05-01T15:43:00Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > If IBD speedup is not the main motivation, what else is the motivation, given that the title mentions [IBD]?\r\n> \r\n> I think block serialization being fast could be useful for future kernel users. Reading and de-serializing blocks is one of the common operations I'd expect outside of just pure block validation.\r\n\r\nOk, seems fine. It would be good to list the main motivation(s) in the OP. Currently, it only says IBD and that IBD *isn't* the main motivation. However, I don't understand how this could have any effect at all, from looking at the code, see https://github.com/bitcoin/bitcoin/pull/31868#issuecomment-2813398761. ",
+          "created_at": "2025-05-04T13:15:13Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "I will work on this more in the upcoming weeks, drafted it for now since I don't like the current single-byte specializations, have to find a better way. Suggestions are welcome.",
+          "created_at": "2025-05-04T13:49:40Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "My guess is that the concept specialization here at most could have an effect on xor'd IO? This is because anything not xor'd won't need a buffer to (un)do the xor before reading or writing.\r\n\r\nThus, it just seems easier to use the existing BufferedReader/Writer in places that could benefit from it?\r\n\r\nHowever, for block serialization they are already used.\r\n\r\n(Edit: I misunderstood that this has benefits outside of BufferedReader. Please ignore this comment)\r\n\r\nAgain, no objection here, but it would be good to explain:\r\n\r\n* What is the goal of the changes here, and what real-world usage do they affect\r\n* How is it achieved and how do the benchmarks represent the real-world usage\r\n\r\nRight now:\r\n\r\n* It only states IBD as motivation and also that IBD isn't the motivation. Also the IBD speedup measurement seems outdated.\r\n* The added benchmark is about test-only code paths (DataStream) or p2p code paths (VectorWriter). It is unclear what the `AutoFile` changes are about. Also, it is unclear how this could possibly affect the kernel, given that the kernel doesn't call into test-only or p2p-only code paths and instead uses BufferedReader/Writer.\r\n",
+          "created_at": "2025-05-04T14:46:48Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Rebased to solve conflict, the PR is still in draft mode until I remeasure its effect on IBD - and I need to find a nicer way to do the single-byte specializations, since they have a measurable effect but make the code super-ugly... Suggestions are welcome.\r\nIn the meantime I have split out the first refactor into https://github.com/bitcoin/bitcoin/pull/33093.",
+          "created_at": "2025-07-29T23:34:29Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Are you still working on this?",
+          "created_at": "2025-09-01T10:35:57Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Of course, paused it since I'm not exactly sure how do handle single-byte entries: they measurably speed up the scenarios, but the resulting code is quite ugly. Do you have a suggestion? Should I attempt that in a separate PR and ignore it here?\r\n\r\nEdit: draft because of the requests in https://github.com/bitcoin/bitcoin/pull/31868#issuecomment-2849258766 which I will need to remeasure",
+          "created_at": "2025-09-01T18:12:11Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "What was the speedup? I can only see your last comment, which says:\r\n\r\n> the PR is still in draft mode until I remeasure its effect on IBD",
+          "created_at": "2025-09-02T07:26:25Z"
+        }
+      ]
+    },
+    {
+      "number": 31867,
+      "title": "Update README.md",
+      "body": "Line 6:\r\nBefore: For an immediately usable, binary version of the Bitcoin Core software, see https://bitcoincore.org/en/download/. After: For an immediately usable binary version of the Bitcoin Core software, visit [Bitcoin Core Downloads](https://bitcoincore.org/en/download/). Removed the comma after \"usable\" for better flow, replaced \"see\" with \"visit\" for action-oriented language, and turned the URL into a clickable link. Line 16:\r\nBefore: Further information about Bitcoin Core is available in the doc folder. After: For more information about Bitcoin Core, refer to the doc folder. Simplified the phrasing for better clarity and directness. Line 21:\r\nBefore: Bitcoin Core is released under the terms of the MIT license. After: Bitcoin Core is released under the MIT License. Capitalized \"MIT License\" for correctness and consistency. These changes improve clarity, readability, and consistency in the document.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "closed",
+      "user": "Syed-AbdurRahaman2006",
+      "created_at": "2025-02-14T16:44:46Z",
+      "updated_at": "2025-02-14T17:03:21Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31867",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31867.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/31867#issuecomment-2659840197) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-02-14T16:44:50Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "NACK - opinionated random changes",
+          "created_at": "2025-02-14T17:01:52Z"
+        }
+      ]
+    },
+    {
+      "number": 31866,
+      "title": "test, refactor: Add TestNode.binaries to hold binary paths",
+      "body": "Add new `TestNode.binaries` object to manage paths to bitcoin binaries.\r\n\r\nThe `binaries` object makes it possible for the test framework to exercise the bitcoin wrapper executable introduced in https://github.com/bitcoin/bitcoin/pull/31375 and also makes it easier in general to add new binaries, and new options and environment variables controlling how they are invoked, because logic for invoking them that was previously spread out is now consolidated in one place.\r\n\r\nThese changes were originally part of #31375 but made that PR harder to review because they were unrelated to the other changes there. If this PR can get merged first, python changes in #31375 will be simple, and the test framework changes here should also get a higher quality review.",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2025-02-14T15:45:20Z",
+      "updated_at": "2025-03-20T13:06:29Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31866",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31866.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [vasild](https://github.com/bitcoin/bitcoin/pull/31866#pullrequestreview-2698335900), [maflcko](https://github.com/bitcoin/bitcoin/pull/31866#issuecomment-2736992858), [Sjors](https://github.com/bitcoin/bitcoin/pull/31866#issuecomment-2739873757) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31723](https://github.com/bitcoin/bitcoin/pull/31723) (qa debug: Add --debug_runs/-waitfordebugger [DRAFT] by hodlinator)\n* [#31375](https://github.com/bitcoin/bitcoin/pull/31375) (multiprocess: Add bitcoin wrapper executable by ryanofsky)\n* [#30437](https://github.com/bitcoin/bitcoin/pull/30437) (multiprocess: add bitcoin-mine test program by ryanofsky)\n* [#29838](https://github.com/bitcoin/bitcoin/pull/29838) (Feature: Use different datadirs for different signets by BrandonOdiwuor)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-14T15:45:25Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/37426971220</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-02-18T20:39:27Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Updated 11615b1025a09e62f12224ae55c92fe85c42b24c -> 8f5228d9239464ece06f3a56372aeec29685801c ([`pr/wrapp.2`](https://github.com/ryanofsky/bitcoin/commits/pr/wrapp.2) -> [`pr/wrapp.3`](https://github.com/ryanofsky/bitcoin/commits/pr/wrapp.3), [compare](https://github.com/ryanofsky/bitcoin/compare/pr/wrapp.2..pr/wrapp.3)) to fix lint errors https://cirrus-ci.com/task/6024617585803264",
+          "created_at": "2025-02-18T20:39:49Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review ACK 8f5228d9239464ece06f3a56372aeec29685801c 😸\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: review ACK 8f5228d9239464ece06f3a56372aeec29685801c 😸\r\net5ca1pe7unBgpCKoxG/XauMAz7SfwmVFTEe7+IgI/62K1awvsuMRPfCjwxGCyBqSTmRCIRRmrzoZ3Czy4lkCQ==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-02-19T16:17:25Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Concept ACK. Reviewed as part of #31375, but did not check if they're identical.",
+          "created_at": "2025-02-19T16:33:39Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "> Concept ACK. Reviewed as part of #31375, but did not check if they're identical.\r\n\r\nThanks I should probably just rearrange the commits in the other PR now that this PR was created, but they are identical and this can be checked with:\r\n\r\n```shell\r\n$ git range-diff origin/pull/31866/head~2..origin/pull/31866/head origin/pull/31375/head~5..origin/pull/31375/head~3\r\n1:  e60ff180c29d = 1:  a92ecaba9521 test, refactor: Add TestNode.binaries to hold binary paths\r\n2:  8f5228d92394 = 2:  6c457f40436a test, contrib: Fix signer/miner command line escaping\r\n```\r\n\r\n",
+          "created_at": "2025-02-28T17:21:27Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "just a no-op rebase\r\n\r\nre-review-ACK d190f0facc8379da7610d7161e532d57c6a7eb96 🍓\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: re-review-ACK d190f0facc8379da7610d7161e532d57c6a7eb96 🍓\r\nTL006pm8bEokNuBq2n0MBfD7GE7BUKL1D0Fh9Y0f2qkNlK3oLFkGcZsFQOgc+N184U5Mn4Jr2eo5vrYMBEstCw==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-03-19T15:07:09Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK d190f0facc8379da7610d7161e532d57c6a7eb96\r\n\r\nI verified that the commits here match 095801b8999851b10e43567389cd293fd7957497 and 45d439dab13153a3b570957a9eab63e3e6274611 in #31375 where I reviewed them.",
+          "created_at": "2025-03-20T10:24:13Z"
+        }
+      ]
+    },
+    {
+      "number": 31865,
+      "title": "build: move `rpc/external_signer` to node library",
+      "body": "Move `rpc/external_signer` from `bitcoin_common` to `bitcoin_node`.\r\nRemove the check-deps suppression.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-02-14T15:45:13Z",
+      "updated_at": "2025-02-16T07:42:40Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31865",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31865.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/31865#issuecomment-2659736131), [TheCharlatan](https://github.com/bitcoin/bitcoin/pull/31865#pullrequestreview-2618309064), [achow101](https://github.com/bitcoin/bitcoin/pull/31865#issuecomment-2660374335) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#30437](https://github.com/bitcoin/bitcoin/pull/30437) (multiprocess: add bitcoin-mine test program by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-14T15:45:17Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK e501246e77cc36cff222fb07aed2fd1316e11e19",
+          "created_at": "2025-02-14T16:12:04Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK e501246e77cc36cff222fb07aed2fd1316e11e19",
+          "created_at": "2025-02-14T22:20:12Z"
+        }
+      ]
+    },
+    {
+      "number": 31864,
+      "title": "doc: add missing copyright headers",
+      "body": "Add & amends a number of copyright headers.\r\nRemove some now obselete doc/code.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-02-14T15:44:40Z",
+      "updated_at": "2025-05-20T11:19:32Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31864",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31864.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [willcl-ark](https://github.com/bitcoin/bitcoin/pull/31864#pullrequestreview-2853699729) |\n| Stale ACK | [i-am-yuvi](https://github.com/bitcoin/bitcoin/pull/31864#pullrequestreview-2619570364), [l0rinc](https://github.com/bitcoin/bitcoin/pull/31864#pullrequestreview-2623350599) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32562](https://github.com/bitcoin/bitcoin/pull/32562) (doc: remove // for ... comments by fanquake)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-02-14T15:44:44Z"
+        }
+      ]
+    },
+    {
+      "number": 31863,
+      "title": "random: Initialize variables in hardware RNG functions",
+      "body": "See: https://github.com/bitcoin/bitcoin/pull/31826#discussion_r1955045279 , So this PR want to prevent potential uninitialized value issues and improve code clarity.\n",
+      "state": "closed",
+      "user": "eval-exec",
+      "created_at": "2025-02-14T09:08:56Z",
+      "updated_at": "2025-02-17T08:41:27Z",
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31863",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31863.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [sipa](https://github.com/bitcoin/bitcoin/pull/31863#issuecomment-2660238149), [achow101](https://github.com/bitcoin/bitcoin/pull/31863#issuecomment-2660417019) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-02-14T09:09:01Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "> improve code clarity.\r\n\r\nInitializing variables that do not need initializing is *worse* for code clarity.\r\n\r\nIf you want to silence buggy static analysis, I don't mind (~0), but it's not a code clarity fix...",
+          "created_at": "2025-02-14T19:57:16Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Eagerly awaiting C++26's explicit `[[indeterminate]]` [initialization](https://en.cppreference.com/w/cpp/language/attributes/indeterminate).",
+          "created_at": "2025-02-14T20:01:33Z"
+        },
+        {
+          "user": "sipa",
+          "body": "utACK 99755e04ffadd5daad53c686f4f0feee2232eeb2",
+          "created_at": "2025-02-14T20:51:14Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 99755e04ffadd5daad53c686f4f0feee2232eeb2",
+          "created_at": "2025-02-14T22:43:40Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Eagerly awaiting C++26's explicit `[[indeterminate]]` [initialization](https://en.cppreference.com/w/cpp/language/attributes/indeterminate).\r\n\r\nMaybe I am missing something, but I don't think `[[indeterminate]]` should be used here either. My understanding is that `[[indeterminate]]` in C++26 is simply a way to restore pre-C++-26 UB. However, if there really is UB in one of those functions, we'd want the C++26 erroneous behavior so that the implementation is encouraged to issue a diagnostic (and possibly abort) to notify about the incorrect program code.\r\n\r\nThough, given that no implementation exists for `[[indeterminate]]` (nor C++26 erroneous values), it is hard to say what the overhead would be for one over the other and in what cases the compiler can optimize and rule out the erroneous handling.",
+          "created_at": "2025-02-17T08:41:25Z"
+        }
+      ]
+    },
+    {
+      "number": 31862,
+      "title": "doc: Fix and clarify description of ZMQ message format",
+      "body": "This change stresses that all ZMQ messages share the same structure and that they differ only in the format of the bodies. Previously this was not clear.\r\n\r\nFurther it removes the notion of endianness of 32-byte hashes, as it was misleading, and replaces it with the term 'reversed byte order' (as opposed to natural or normal byte order produced by hashing functions).\r\n\r\nAdditionally, it states that ZMQ 32-byte hashes are in the same format as in RPC. Previously it incorrectly stated that the two were in different formats.\r\n\r\n[Rendered](https://github.com/jirijakes/bitcoin/blob/zmq-doc/doc/zmq.md).\r\n\r\nFixes #31856.",
+      "state": "closed",
+      "user": "jirijakes",
+      "created_at": "2025-02-14T07:32:11Z",
+      "updated_at": "2025-04-16T23:26:22Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31862",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/31862.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [ryanofsky](https://github.com/bitcoin/bitcoin/pull/31862#pullrequestreview-2730448961), [w0xlt](https://github.com/bitcoin/bitcoin/pull/31862#issuecomment-2773855079), [achow101](https://github.com/bitcoin/bitcoin/pull/31862#issuecomment-2811076715) |\n| Concept ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/31862#issuecomment-2659824080) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31375](https://github.com/bitcoin/bitcoin/pull/31375) (multiprocess: Add bitcoin wrapper executable by ryanofsky)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-02-14T07:32:15Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Concept ACK",
+          "created_at": "2025-02-14T16:53:57Z"
+        },
+        {
+          "user": "jirijakes",
+          "body": "Switched to draft because I found another thing to fix in this PR. Will get to it within a day.",
+          "created_at": "2025-02-20T03:21:29Z"
+        },
+        {
+          "user": "jirijakes",
+          "body": "Ready for review again.\r\n\r\nWhen trying to use ZMQ, I realized that the description of `sequence` was not clear about the format of the message. Therefore I expanded this PR to also clarify that.\r\n\r\nThis PR now:\r\n\r\n- clarifies that all messages share the same structure (three parts)\r\n- adds that sequence numbers are distinct for each topic\r\n- replaces endianness of 32-byte hashes with their byte order\r\n- puts note about byte order before specification of body formats\r\n- from descriptions of topics removes information that feels redundant\r\n\r\nNote that source code diff is not too useful, rendered one is clearer.",
+          "created_at": "2025-02-21T01:57:22Z"
+        },
+        {
+          "user": "jirijakes",
+          "body": "Reflected @ryanofsky's comments (thanks!) and used his suggestions.\r\n\r\n- format of messages is now first outlined in a single table\r\n- explanation of each topic follows the table in dedicated subsections\r\n- format of numbers is consistent\r\n- sequence numbers are referred to as either _message sequence number_ or _mempool sequence number_ to stress the difference\r\n- the last subsection of “Usage” section is now called “Implementing ZMQ client” to separate it from previous sections; additionally, the command included in this section was turned into a code block (previously was unformatted)\r\n\r\n[Rendered view](https://github.com/jirijakes/bitcoin/blob/zmq-doc/doc/zmq.md#message-format).\r\n",
+          "created_at": "2025-03-30T04:24:57Z"
+        },
+        {
+          "user": "w0xlt",
+          "body": "Code review ACK https://github.com/bitcoin/bitcoin/pull/31862/commits/7a93544cdcc2874a18a8b6d528a75e84ac007880",
+          "created_at": "2025-04-02T22:17:35Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 7a93544cdcc2874a18a8b6d528a75e84ac007880",
+          "created_at": "2025-04-16T23:17:23Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 31873,
+      "title": "guix: Unable to reproduce macOS SDK tarball on Fedora 40",
+      "body": "On Fedora 40, following the instructions in [`contrib/macdeploy/README.md`](https://github.com/bitcoin/bitcoin/tree/master/contrib/macdeploy#readme) to generate the macOS SDK tarball that is used during GUIX builds, I am not able to reproduce the hash in the readme for the generated tarball. I have reproduced this on two different Fedora 40 machines, and with a Fedora 40 docker image, but the issue does not appear when generating the tarball in an Ubuntu 24.04 docker image, or on a macOS Sequoia arm device, I've included reproduction instructions below.\n\n# Steps to reproduce\n\nYou first have to acquire the `Xcode_15.xip` archive according to the instructions in [`contrib/macdeploy/README.md`](https://github.com/bitcoin/bitcoin/tree/master/contrib/macdeploy#readme). The steps below assume you have placed this archive at `~/xcode/Xcode_15.xip`.\n\n## Making the bad tarball using Fedora 40\n### Container setup\n```bash\nsha256sum ~/xcode/Xcode_15.xip\n# 4daaed2ef2253c9661779fa40bfff50655dc7ec45801aba5a39653e7bcdde48e  /home/user/xcode/Xcode_15.xip\ndocker pull fedora:40\ndocker run -it \\\n  -v ~/xcode:/xcode \\\n  fedora:40 \\\n  /bin/bash\n```\n\n### In the container\n\n```bash\nsha256sum /xcode/Xcode_15.xip\n# 4daaed2ef2253c9661779fa40bfff50655dc7ec45801aba5a39653e7bcdde48e  /xcode/Xcode_15.xip\ndnf install cpio git python -y\ngit clone --depth 1 https://github.com/bitcoin/bitcoin.git\ngit clone --depth 1 https://github.com/bitcoin-core/apple-sdk-tools.git\npython3 apple-sdk-tools/extract_xcode.py -f /xcode/Xcode_15.xip | cpio -d -i\n# 23498380 blocks\n/bitcoin/contrib/macdeploy/gen-sdk Xcode.app/\n# Found Xcode (version: 15.0, build id: 15A240d)\n# Found MacOSX SDK (version: 14.0, build id: 23A334)\n# Creating output .tar.gz file...\n# Adding MacOSX SDK 14.0 files...\n# Done! Find the resulting gzipped tarball at:\n/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\nsha256sum Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n# 5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765  Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n# Wrong hash!\n```\n\n## Making a good tarball using Ubuntu 24.04\n\n### Container setup\n```bash\nsha256sum ~/xcode/Xcode_15.xip\n# 4daaed2ef2253c9661779fa40bfff50655dc7ec45801aba5a39653e7bcdde48e  /home/user/xcode/Xcode_15.xip\ndocker pull ubuntu:24.04\ndocker run -it \\\n  -v ~/xcode:/xcode \\\n  ubuntu:24.04 \\\n  /bin/bash\n```\n\n### In the container\n```bash\nexport DEBIAN_FRONTEND=noninteractive # prevents apt from halting to interact\nsha256sum /xcode/Xcode_15.xip\n# 4daaed2ef2253c9661779fa40bfff50655dc7ec45801aba5a39653e7bcdde48e  /xcode/Xcode_15.xip\napt update\napt install cpio git python3 -y\ngit clone --depth 1 https://github.com/bitcoin/bitcoin.git\ngit clone --depth 1 https://github.com/bitcoin-core/apple-sdk-tools.git\npython3 apple-sdk-tools/extract_xcode.py -f /xcode/Xcode_15.xip | cpio -d -i\n# 23498380 blocks\n/bitcoin/contrib/macdeploy/gen-sdk Xcode.app/\n# Found Xcode (version: 15.0, build id: 15A240d)\n# Found MacOSX SDK (version: 14.0, build id: 23A334)\n# Creating output .tar.gz file...\n# Adding MacOSX SDK 14.0 files...\n# Done! Find the resulting gzipped tarball at:\n# /Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\nsha256sum Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n# c0c2e7bb92c1fee0c4e9f3a485e4530786732d6c6dd9e9f418c282aa6892f55d  Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n```\n\n# Further investigation\n\n## `pkgdiff`\n\n`pkgdiff` reports the contents of the two tarballs are identical:\n\n```console\n$ sha256sum badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765  badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n$ sha256sum goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\nc0c2e7bb92c1fee0c4e9f3a485e4530786732d6c6dd9e9f418c282aa6892f55d  goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n$ pkgdiff badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\nReading packages ...\nComparing packages ...\ncreating report ...\nresult: UNCHANGED\n```\n<details> \n\n<summary> pkgdiff report screenshot </summary>\n\n![Image](https://github.com/user-attachments/assets/364c072b-bcb1-412a-92b0-ea2491878865)\n\n</details>\n\n## Python and zlib versions\n\n| os     | python | zlib          | pyenv / repo | hash                                                             |\n|--------|--------|---------------|---------------|------------------------------------------------------------------|\n| ubuntu | 3.12.3 | 1.3           | repo          | c0c2e7bb92c1fee0c4e9f3a485e4530786732d6c6dd9e9f418c282aa6892f55d |\n| fedora | 3.12.8 | 1.3.1.zlib-ng | repo          | 5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765 |\n| ubuntu | 3.12.3 | 1.3           | pyenv         | c0c2e7bb92c1fee0c4e9f3a485e4530786732d6c6dd9e9f418c282aa6892f55d |\n| fedora | 3.12.3 | 1.3           | pyenv         | 5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765 |\n| ubuntu | 3.12.8 | 1.3.1.zlib-ng | pyenv         | 5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765 \n| ubuntu | 3.12.3 | 1.3.1.zlib-ng | pyenv         | 5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765 ",
+      "state": "closed",
+      "user": "davidgumberg",
+      "created_at": "2025-02-14T22:10:00Z",
+      "updated_at": "2025-11-27T15:03:52Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31873",
+      "labels": [
+        "Bug",
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "achow101",
+          "body": "> `pkgdiff` reports the contents of the two tarballs are identical:\n\nTry `diffoscope` (be prepared for very long output, and probably very long runtime).",
+          "created_at": "2025-02-14T22:50:18Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> Try `diffoscope` (be prepared for very long output, and probably very long runtime).\n\n`diffoscope` says:\n\n> Format-specific differences are supported for Gzipped files but no file-specific differences were detected; falling back to a binary diff.`\n\n```bash\ndiffoscope --no-default-limits --max-page-diff-block-line 16384 --html diffoscope.html badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz  goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n```\n\nand the binary seems totally different to my untrained eyes:\n\nFirst 16,000 lines of diff: https://davidgumberg.github.io/fg/other/sdkdiffoscope.html\n\n<details>\n\n<summary> screenshot of diffoscope html output </summary>\n\n![Image](https://github.com/user-attachments/assets/cebc6149-ce83-434c-8f94-671cff66feb6)\n\n</details>",
+          "created_at": "2025-02-14T23:50:08Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Can you `gunzip` the files and compare the `.tar`s?",
+          "created_at": "2025-02-15T00:02:05Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> Can you `gunzip` the files and compare the `.tar`s?\n\nNice, the `gunzip`'ed tars are identical:\n\n```console\n$ gunzip badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n$ gunzip goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n$ sha256sum badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar\nd91d39ca0dbff805677afc46abe0064056e7406728aa58e67ad98e147ef0e04c  badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar\n$ sha256sum goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar\nd91d39ca0dbff805677afc46abe0064056e7406728aa58e67ad98e147ef0e04c  goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar\n```\n\nFedora 40 has gzip 1.13 and Ubuntu 24.04 has gzip 1.12, I'll see if this issue occurs with gzip 1.13 on ubuntu.\n\n---\nEdit: No change after swapping out gzip version on both Fedora and Ubuntu, and I realized that python's gzip module doesn't rely on the system's gzip binary\n\n```python\nimport zlib\nprint(zlib.ZLIB_VERSION)\n```\n\n1.3.1.zlib-ng on Fedora 40 and 1.3 on Ubuntu 24.04",
+          "created_at": "2025-02-15T00:21:31Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "Tried Fedora with the same zlib and python version as Ubuntu 24.04 and I still get the same bad hash.\n\n<details>\n\n<summary> python 3.12.3  w/ zlib-1.3 on fedora </summary>\n\n```bash\nsudo dnf install -y gcc openssl-devel xz-devel\ncurl -L https://github.com/madler/zlib/releases/download/v1.3/zlib-1.3.tar.gz | tar xzvf -\ncd zlib-1.3 && ./configure && make -j $(nproc) && make install && cd ..\n\ncurl https://pyenv.run | bash\nexport PYENV_ROOT=\"$HOME/.pyenv\"\n[[ -d $PYENV_ROOT/bin ]] && export PATH=\"$PYENV_ROOT/bin:$PATH\"\neval \"$(pyenv init - bash)\"\n\npyenv install 3.12.3\npyenv global 3.12.3\n\n# verify zlib version\npython -c \"import zlib; print(zlib.ZLIB_VERSION)\"\n# 1.3\n\n# regenerate Xcode.app\nrm -rf Xcode.app/ && python3 apple-sdk-tools/extract_xcode.py -f /xcode/Xcode_15.xip | cpio -d -i\n/bitcoin/contrib/macdeploy/gen-sdk Xcode.app/\nsha256sum Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n# 5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765  Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n```\n\n</details>\n\nI also tried the opposite on ubuntu,  python 3.12.8 with the zlib-ng \"1.3\" and I got the same bad hash as fedora 40:\n\n<details>\n\n<summary> python 3.12.8 w/ zlib-ng 1.3.1 on ubuntu </summary>\n\n```bash\napt install -y build-essential curl liblzma-dev libssl-dev pkg-config\ncurl -L https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.2.3.tar.gz | tar xzvf -\ncd zlib-ng-2.2.3/ && ./configure --zlib-compat && make -j $(nproc) && make install && cd ../\n\ncurl https://pyenv.run | bash\nexport PYENV_ROOT=\"$HOME/.pyenv\"\n[[ -d $PYENV_ROOT/bin ]] && export PATH=\"$PYENV_ROOT/bin:$PATH\"\neval \"$(pyenv init - bash)\"\n\npyenv install 3.12.8\npyenv global 3.12.8\n\n# verify zlib version\npython -c \"import zlib; print(zlib.ZLIB_VERSION)\"\n# 1.3.1.zlib-ng\n\n\n# try gen-sdk again\nrm -rf Xcode.app/ && python apple-sdk-tools/extract_xcode.py -f /xcode/Xcode_15.xip | cpio -d -i\n/bitcoin/contrib/macdeploy/gen-sdk Xcode.app/\nsha256sum Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n# 5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765  Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n```\n\n</details>\n\nA bit mysterious,  I'll keep experimenting.\n\n\n\n\n",
+          "created_at": "2025-02-15T03:26:25Z"
+        },
+        {
+          "user": "sedited",
+          "body": "Is the output of `tar tvvf` the same for both archives?",
+          "created_at": "2025-02-15T07:01:59Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "> Is the output of `tar tvvf` the same for both archives?\n\nDiffing `tar tvvf` of the two archives results in no output.\n\n```console\n$ sha256sum badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n5b1a05d3e79fd14f5c8f6d3565762c89a522c7f5e7efbed4353d878410f2d765  badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n$ sha256sum goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\nc0c2e7bb92c1fee0c4e9f3a485e4530786732d6c6dd9e9f418c282aa6892f55d  goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz\n$ diff <(tar tvvf badsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz) <(tar tvvf goodsdk/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers.tar.gz)\n# no output\n```",
+          "created_at": "2025-02-15T16:22:52Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "@davidgumberg did you follow up any further here?",
+          "created_at": "2025-03-05T11:32:59Z"
+        },
+        {
+          "user": "dongcarl",
+          "body": "This is likely because [python >= 3.11 delegates `gzip.compress` to `zlib.compress`](https://docs.python.org/3/library/gzip.html#gzip.compress), which then delegates to the `zlib` specified at configure-time for python.\n\nOn Ubuntu 24.04, this is `zlib`/`zlib1g`: https://packages.ubuntu.com/noble/python3.12-minimal\nOn Fedora 40, this is `zlib-ng-compat`: https://packages.fedoraproject.org/pkgs/python3.11/python3.11-libs/fedora-40.html",
+          "created_at": "2025-03-05T16:59:25Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "@dongcarl Nice find. I wonder if we can just set `mtime` to 1, and avoid the delegation.",
+          "created_at": "2025-03-06T14:39:53Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Looks like even if that worked now, it wouldn't work in future (Python 3.14+), as the \"only delegate to zlib if mtime is 0\" condition has been removed, in favour of always delegating: https://github.com/python/cpython/commit/08d09cf5ba041c9c5c3860200b56bab66fd44a23.",
+          "created_at": "2025-03-06T15:11:29Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Opened #32009 to discuss.",
+          "created_at": "2025-03-06T16:26:17Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 13,
+    "issues": 1
+  }
+}

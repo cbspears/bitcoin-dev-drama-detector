@@ -1,0 +1,259 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:51:30.074649+00:00",
+  "date": "2025-06-21",
+  "pull_requests": [
+    {
+      "number": 32791,
+      "title": "checkqueue: implement a new scriptcheck worker pool with atomic variables",
+      "body": "    TL;DR\r\n    This patchset proposes a new design of scriptcheck worker pool with\r\n    atomic variables to leverage more cpu resource on a machine which the\r\n    current mutex version cannot. Achieve about 45% boost in performance.\r\n    \r\n    Main Idea:\r\n    \r\n    The current version of worker pool use mutex to do the synchronization\r\n    between worker threads, which makes the performance downgrade after\r\n    worker_threads_num >= 14. One root cause is the high contention on the\r\n    queue's mutex among worker threads. Workers repeatedly sleep and be woken\r\n    up in short time, leading to heavy context switching.\r\n    The idea is to use atomic variables to protect the queue, workers\r\n    acquire it and increase it with a batch_size(a small number). This\r\n    significantly reduces context switching.\r\n    \r\n    Implementation\r\n    \r\n    To implement it, below changes are made:(enabled in atomic mode)\r\n    - atomic<int> nNext is used to indicate the next available indice in the\r\n      queue\r\n    - atomic<int> nTodo2 is used to indicate the number of tasks left\r\n    - nBatchSize is the batch size of tasks everytime a worker consumes\r\n      it should be small to keep workload balance among workers\r\n    - m_mutex is still used, to protect m_result and conditional vars\r\n    - fAtomic to indicate which mode is enabled\r\n    - about the queue:\r\n    \r\n      - the queue is used as queue, not stacks any more\r\n      - the queue is 'add only', which means only adding tasks to it, don't\r\n        remove used tasks.\r\n    \r\n        the above two are a must to make this idea achievable, and the\r\n        second sacrifices space\r\n    \r\n      - start the workers only after all the tasks have been added to the\r\n        queue\r\n    \r\n        this is a trade-off to make the implementaion simple, a worker can\r\n        compare nNext + nBatchSize to queue.size() to find if there are\r\n        tasks undone in the queue, otherwise another atomic<int> tail is\r\n        needed, and race condition may exist in this way (need more\r\n        investigation). From my test, it's not 100% to say this is a\r\n        'trade-off' since it also brings something good, pros && cons:\r\n        - pros:\r\n            1. no contention among producer and consumers when adding tasks\r\n               to the queue\r\n            2. the adding period is very short compared to the verification\r\n               period\r\n        - cons:\r\n            1. the workers start later\r\n    \r\n    For details, please refer to the worker handler code\r\n    \r\n    Tests:\r\n    \r\n    - Numbers\r\n      - For blocks/s numbers\r\n        `./build/bin/bench_bitcoin --filter=ConnectBlockMixedEcdsaSchnor`\r\n      - For cpu usage numbers\r\n        `NANOBENCH_ENDLESS=ConnectBlockAllEcdsa ./build/bin/bench_bitcoin --filter=ConnectBlockAllEcdsa`\r\n    \r\n      - Some data is missing because the machine was billed by time, and there wasn't\r\n        enough time to complete all measurements.\r\n      - Some cells contain a range instead of a single value due to high fluctuations\r\n      - The numbers represent the average of multiple test runs.\r\n    \r\n               |     mutex verion       |   atomic version\r\n    nr_workers | blocks/s  | cpu usage  | blocks/s  | cpu usage2\r\n    -----------|-----------|------------|-----------|-------------\r\n    0          | 4.22      | 100%       | 4.2       | 100%\r\n    1          | 8.23      | 198%       | 8         | 191.3%\r\n    2          | 12.08     | 293.7%     | 11.6      | 276%\r\n    3          | 16        | 386.7%     | 14.9      | 354.5%\r\n    4          | 19.8      | 476.3%     |           |\r\n    5          | 23.12     | 565.4%     |           |\r\n    6          | 27.3      | 654%       | 23        | 560%\r\n    7          | 28.5      | 738%       |           |\r\n    8          | 33.8      | 809%       |           |\r\n    9          | 33.5      | 868%       | 28.5      | 730%\r\n    10         | 37.4      | 910%       | 30.5      | 777%\r\n    11         | 33~40     | 880%~928%  | 32        | 825%\r\n    12         | 22~39     | 860%~925%  | 32.5      | 830%\r\n    13         | 27.8~37   | 700%~913%  | 34.8      | 928%\r\n    15         | 24.8~38.9 | 640%~719%  | 38        | 1000%\r\n    19         | 18~23     | 370%~510%  | 41        | 1161%\r\n    22         | 7~18      | 270%~400%  |           |\r\n    25         | 6.4       | 260%       | 46        | 1400%\r\n    30         | 5         | 270%       | 49        | 1560%\r\n    60         | 5         | 280%       | 50~58     | 2100%\r\n    \r\n    - Env:\r\n     A virtual machine on cloud\r\n       Architecture:          x86_64\r\n       CPU op-mode(s):        32-bit, 64-bit\r\n       Address sizes:         46 bits physical, 48 bits virtual\r\n       Byte Order:            Little Endian\r\n       CPU(s):                64\r\n       On-line CPU(s) list:   0-63\r\n       Vendor ID:             GenuineIntel\r\n       Model name:            Intel Xeon Processor (Cascadelake)\r\n       CPU family:            6\r\n       Model:                 85\r\n       Thread(s) per core:    2\r\n       Core(s) per socket:    16\r\n       Socket(s):             2\r\n       Stepping:              6\r\n       BogoMIPS:              5985.93\r\n     Virtualization features:\r\n       Hypervisor vendor:     KVM\r\n       Virtualization type:   full\r\n     Caches (sum of all):\r\n       L1d:                   2 MiB (64 instances)\r\n       L1i:                   2 MiB (64 instances)\r\n       L2:                    128 MiB (32 instances)\r\n       L3:                    32 MiB (2 instances)\r\n     NUMA:\r\n       NUMA node(s):          2\r\n       NUMA node0 CPU(s):     0-31\r\n       NUMA node1 CPU(s):     32-63\r\n    \r\n    Signed-off-by: Hao Xu <hao.xu@linux.dev>\r\n",
+      "state": "open",
+      "user": "HowHsu",
+      "created_at": "2025-06-21T12:58:58Z",
+      "updated_at": "2025-12-16T00:31:57Z",
+      "comments": 19,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32791",
+      "labels": [
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32791.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32699](https://github.com/bitcoin/bitcoin/pull/32699) (docs: adds correct updated documentation links by Zeegaths)\n* [#32692](https://github.com/bitcoin/bitcoin/pull/32692) (checkqueue: set MAX_SCRIPTCHECK_THREADS to nCores - 1 by HowHsu)\n* [#31132](https://github.com/bitcoin/bitcoin/pull/31132) (validation: fetch block inputs on parallel threads 10% faster IBD by andrewtoth)\n* [#28690](https://github.com/bitcoin/bitcoin/pull/28690) (build: Introduce internal kernel library by TheCharlatan)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-21T12:59:01Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `no wallet, libbitcoinkernel`: https://github.com/bitcoin/bitcoin/runs/44527955551</sub>\n<sub>LLM reason (✨ experimental): The CI failed due to a linker error: undefined reference to `GetNumCores()`, indicating a missing implementation or linkage of this function.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-06-21T14:21:13Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "hmmm...Ok, I realized that this may only be suitable for when all the preout Coin are in CCoinsViewCache, otherwise the `Add()` is not fast due to I/O there.",
+          "created_at": "2025-06-22T15:16:37Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "Hi folks, any hints on how to see node logs of failed CI tests, It's not easy to create all the environements including OS and libs and to run it locally: \r\n> [11:09:03.884] \u001b[0;36m test  2025-06-26T15:09:03.311909Z TestFramework (ERROR): Test failed. Test logging available at /ci_container_base/ci/scratch/test_runner/test_runner_₿_🏃_20250626_150635/wallet_fundrawtransaction_252/test_framework.log \u001b[0m\r\n[11:09:03.884] \u001b[0;36m test  2025-06-26T15:09:03.312354Z TestFramework (ERROR): \u001b[0m\r\n[11:09:03.884] \u001b[0;36m test  2025-06-26T15:09:03.312746Z TestFramework (ERROR): Hint: Call /ci_container_base/test/functional/combine_logs.py '/ci_container_base/ci/scratch/test_runner/test_runner_₿_🏃_20250626_150635/wallet_fundrawtransaction_252' to consolidate all logs \u001b[0m\r\n[11:09:03.884] \u001b[0;36m test  2025-06-26T15:09:03.312954Z TestFramework (ERROR): \u001b[0m\r\n[11:09:03.884] \u001b[0;36m test  2025-06-26T15:09:03.313070Z TestFramework (ERROR): If this failure happened unexpectedly or intermittently, please file a bug and provide a link or upload of the combined log. \u001b[0m\r\n[11:09:03.884] \u001b[0;36m test  2025-06-26T15:09:03.313299Z TestFramework (ERROR): https://github.com/bitcoin/bitcoin/issues \u001b[0m\r\n[11:09:03.884] \u001b[0;36m test  2025-06-26T15:09:03.313452Z TestFramework (ERROR): \u001b[0m\r\n[11:09:03.884] \r\n[11:09:03.884] \u001b[0;32m node1 stderr libc++abi: terminating \u001b[0m\r\n[11:09:03.884] \r\n[11:09:03.884] \u001b[1mTEST                                                   | STATUS    | DURATION\r\n[11:09:03.884] \r\n[11:09:03.884] \u001b[0m\u001b[0;32mmempool_ephemeral_dust.py                              | ✓ Passed  | 76 s\r\n[11:09:03.884] \u001b[0m\u001b[0;32mmempool_persist.py                                     | ✓ Passed  | 25 s\r\n[11:09:03.884] \u001b[0m\u001b[0;32mmining_getblocktemplate_longpoll.py                    | ✓ Passed  | 69 s\r\n[11:09:03.884] \u001b[0m\u001b[0;32mp2p_opportunistic_1p1c.py                              | ✓ Passed  | 140 s\r\n[11:09:03.884] \u001b[0m\u001b[0;32mp2p_segwit.py                                          | ✓ Passed  | 113 s\r\n[11:09:03.884] \u001b[0m\u001b[0;32mwallet_conflicts.py                                    | ✓ Passed  | 63 s\r\n[11:09:03.884] \u001b[0m\u001b[0;31mwallet_fundrawtransaction.py                           | ✖ Failed  | 2 s\r\n[11:09:03.884] \u001b[0m\u001b[0;31m\u001b[1m\r\n[11:09:03.884] ALL                                                    | ✖ Failed  | 488 s (accumulated) \r\n[11:09:03.884] \u001b[0m\u001b[0mRuntime: 143 s",
+          "created_at": "2025-06-26T15:28:58Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Hi folks, any hints on how to see node logs of failed CI tests, It's not easy to create all the environements including OS and libs and to run it locally:\r\n\r\nYou can follow the \" View more details on Cirrus CI \" link: https://cirrus-ci.com/task/6753181050339328\r\n\r\nIt says system error, so you are likely launching enough threads to run into a system limit.",
+          "created_at": "2025-06-26T15:42:37Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "For the CI docs, see https://github.com/bitcoin/bitcoin/tree/master/ci#ci-scripts, but you'll likely have to run that on a 64 core system to recreate the system error",
+          "created_at": "2025-06-26T15:43:45Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "> For the CI docs, see https://github.com/bitcoin/bitcoin/tree/master/ci#ci-scripts, but you'll likely have to run that on a 64 core system to recreate the system error\r\n\r\nThanks, maflcko. The thing is this patchset is to extend numbers of scriptcheck threads to nCores-1, so I guess it is bound to fail the CI tests. What should I do now.",
+          "created_at": "2025-06-26T16:29:34Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "> Hint: Call /ci_container_base/test/functional/combine_logs.py '/ci_container_base/ci/scratch/test_runner/test_runner_₿_🏃_20250626_150635/wallet_fundrawtransaction_252'\r\n\r\nIn my local run, I can do something like this to see the bitcoind log (node log as I said), but how can I see the bitcoind log on Cirrus CI, seems no way to do that since that is not exposed.",
+          "created_at": "2025-06-26T16:38:00Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> is not exposed.\r\n\r\nit is: See \" View more details on Cirrus CI \" on the checks page",
+          "created_at": "2025-06-26T16:43:34Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "> > is not exposed.\r\n> \r\n> it is: See \" View more details on Cirrus CI \" on the checks page\r\n\r\nI'm so sorry, there is node logs, I missed them, thanks again.",
+          "created_at": "2025-06-26T16:53:26Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "From the CI log, seems too much threads causes failure, I'll temporarily set a smaller number limitation of scriptcheck workers to sort of confirm it.",
+          "created_at": "2025-06-26T17:00:15Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "> hmmm...Ok, I realized that this may only be suitable for when all the preout Coin are in CCoinsViewCache, otherwise the `Add()` is not fast due to I/O there.\r\n\r\nWith #31132 , this one makes sense again, need to test them together in all-cache-miss case",
+          "created_at": "2025-06-29T13:25:27Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-06-30T13:56:03Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "Are the first two commits related to the PR? Seem REST-related?\r\n\r\nBenchmark results suggest a 12-thread crossover to become faster than master, any chance that I'm reading this wrong?",
+          "created_at": "2025-07-17T14:52:42Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "> Are the first two commits related to the PR? Seem REST-related?\r\n> \r\n\r\nNo, they appears here after I rebase against the origin/master and then push -f.\r\n\r\n> Benchmark results suggest a 12-thread crossover to become faster than master, any chance that I'm reading this wrong?\r\n\r\nthe master behaves a little bit better when the number of threads is small, just like the table I put in the PR description. The crossover point is machine/hardware related, and it is usually around 12~15 threads. After that, with the number of threads increasing, performance of master branch rapidly decreases, while in this PR branch the performance still goes up.\r\n\r\n",
+          "created_at": "2025-07-17T16:45:36Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> With #31132 , this one makes sense again, need to test them together in all-cache-miss case\r\n\r\nIf you are waiting on that one, it could make sense to mark this one as draft for now? If not, you'll have to rebase.",
+          "created_at": "2025-07-17T16:48:26Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "> > With #31132 , this one makes sense again, need to test them together in all-cache-miss case\r\n> \r\n> If you are waiting on that one, it could make sense to mark this one as draft for now? If not, you'll have to rebase.\r\n\r\nDone. Thanks Malmö.",
+          "created_at": "2025-07-17T16:51:09Z"
+        },
+        {
+          "user": "HowHsu",
+          "body": "> > hmmm...Ok, I realized that this may only be suitable for when all the preout Coin are in CCoinsViewCache, otherwise the `Add()` is not fast due to I/O there.\r\n> \r\n> With #31132 , this one makes sense again, need to test them together in all-cache-miss case\r\n\r\nTested this one and [](https://github.com/bitcoin/bitcoin/pull/31132) combined with about 100+ contiguous real blocks in mainnet from height 840000, by the method I mentioned in [](https://github.com/bitcoin/bitcoin/issues/33375#issuecomment-3292198687).\r\nBut the result tells another story, this atomic version of work pool doesn't perform better than the master branch one, while it's a result on a 15-physical-core machine, I'll test it on a machine with more cores when I manage to get such a machine..",
+          "created_at": "2025-09-18T11:06:30Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--13523179cfe9479db18ec6c5d236f789-->\n⌛ There hasn't been much activity lately and the patch still needs rebase. What is the status here?\n\n* Is it still relevant? ➡️ Please solve the conflicts to make it ready for review and to ensure the CI passes.\n* Is it no longer relevant? ➡️ Please close.\n* Did the author lose interest or time to work on this? ➡️ Please close it and mark it with one of the labels 'Up for grabs' or 'Insufficient Review', so that it can be picked up in the future.\n",
+          "created_at": "2025-12-16T00:31:57Z"
+        }
+      ]
+    },
+    {
+      "number": 32790,
+      "title": "rpc, test: allow multiple data outputs in `createrawtransaction` & `createpsbt`",
+      "body": "Since #32406 is merged we can remove the check for multiple data outputs in `createrawtransaction` and `createpsbt` rpc.\r\n\r\n**Keeping this in draft and review is currently not required as this is in milestone 31.0**\r\n\r\naddresses: #32478 ",
+      "state": "open",
+      "user": "yuvicc",
+      "created_at": "2025-06-21T12:27:18Z",
+      "updated_at": "2025-11-04T03:58:03Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32790",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32790.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [luke-jr](https://github.com/bitcoin/bitcoin/pull/32790#issuecomment-3009784226) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-21T12:27:21Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "> If not, could you clarify the motivation behind removing this check? Thanks!\r\n\r\nsee #32478, we have policy change merged to remove data outputs size. So this check should be removed from the rpc's as well!",
+          "created_at": "2025-06-23T07:37:14Z"
+        },
+        {
+          "user": "Dorex45",
+          "body": "> > If not, could you clarify the motivation behind removing this check? Thanks!\r\n> \r\n> see #32478, we have policy change merged to remove data outputs size. So this check should be removed from the rpc's as well!\r\n\r\nThanks for the pointer to #32478 , that clears it up!\r\nSince multiple data outputs are now valid, would it make sense to reflect that in the RPC help text or release notes for clarity? Also, adding a test with multiple data entries could help future-proof this change.\r\nNice cleanup overall!",
+          "created_at": "2025-06-23T10:16:39Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "Concept NACK. Stop trying to enable spam.",
+          "created_at": "2025-06-26T19:58:15Z"
+        },
+        {
+          "user": "mikekelly",
+          "body": "@yuvicc FYI - there are failing checks on this. If you make this build green then it could be proposed as part of v30 release.",
+          "created_at": "2025-10-06T10:34:29Z"
+        },
+        {
+          "user": "mikekelly",
+          "body": "fwiw - I think if this is going in to 30.0 it would need some kind of warning to tell users that they may face propagation issues. If it's delayed to 30.1 then a warning probably isn't necessary.",
+          "created_at": "2025-10-06T10:36:38Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "@mikekelly see the [comment](https://github.com/bitcoin/bitcoin/issues/32478#issuecomment-2876030352), this changes will come in the next release 31.0. Will update this one soon and mark it for review.",
+          "created_at": "2025-10-16T08:04:47Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "Ready for review.",
+          "created_at": "2025-11-04T03:58:03Z"
+        }
+      ]
+    },
+    {
+      "number": 32789,
+      "title": "net: fix critical integer overflow vulnerability in compact block handling",
+      "body": "### Summary\r\nFixed a critical integer overflow vulnerability in PartiallyDownloadedBlock::InitData() that could lead to memory corruption and potential remote code execution via malicious compact blocks.\r\n\r\n### Vulnerability Details\r\nThe vulnerable code performed unsafe integer arithmetic when processing prefilled transactions:\r\n\r\n```cpp// BEFORE (vulnerable)\r\nint32_t lastprefilledindex = -1;\r\nfor (size_t i = 0; i < cmpctblock.prefilledtxn.size(); i++) {\r\n    lastprefilledindex += cmpctblock.prefilledtxn[i].index + 1; // Can overflow!\r\n    if (lastprefilledindex > std::numeric_limits<uint16_t>::max())\r\n        return READ_STATUS_INVALID;\r\n    // ... out-of-bounds access risk in txn_available[lastprefilledindex]\r\n}\r\n```\r\n**Attack Vector**: An attacker could send a malicious compact block with 32,769+ prefilled transactions using maximum uint16_t indices (65,535). The cumulative sum would overflow the int32_t variable:\r\n\r\nStarting value: -1\r\nAfter overflow: -1 + 32769 * 65536 = 2,147,549,183 > 2^31-1\r\nResult: Wraps to negative value, bypassing bounds checks → out-of-bounds array access\r\n### Fix Implementation\r\n```cpp// AFTER (secure)\r\n#include <util/overflow.h>\r\n\r\nconst auto checked_sum = CheckedAdd(lastprefilledindex, \r\n                                  static_cast<int32_t>(cmpctblock.prefilledtxn[i].index) + 1);\r\nif (!checked_sum.has_value()) {\r\n    return READ_STATUS_INVALID;\r\n}\r\nlastprefilledindex = checked_sum.value();\r\n```\r\n### Changes Made\r\nAdded overflow-safe arithmetic: Replaced unsafe addition with CheckedAdd() utility\r\nProper error handling: Returns READ_STATUS_INVALID on overflow detection instead of crashing\r\nFixed misleading comment: Removed incorrect claim that overflow was impossible\r\nAdded comprehensive test: PrefilledTransactionIndexOverflowTest validates the fix\r\n### Security Impact\r\nSeverity: Critical (remote exploitable without authentication)\r\nAttack Surface: P2P network protocol\r\nMitigation: Complete - malicious blocks now safely rejected\r\nBackward Compatibility: Maintained (no protocol changes)\r\n### Testing\r\nThe new test case constructs a compact block that triggers the overflow condition and verifies it's properly rejected. Standalone verification confirms:\r\n\r\nOld code: Overflows to -2,147,418,113 (vulnerable)\r\nNew code: Safely detects overflow and returns error (secure)\r\nThis fix eliminates a significant attack vector against Bitcoin Core's P2P layer while maintaining full compatibility with legitimate compact blocks.",
+      "state": "closed",
+      "user": "hamed-ta",
+      "created_at": "2025-06-21T04:25:07Z",
+      "updated_at": "2025-06-21T09:07:21Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32789",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32789.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-06-21T04:25:12Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "The previous code is already correct, so I'll close this for now. Regardless, security research and vulnerability fixing is important and encouraged. However, in the future, please follow the project security guidelines and responsible disclosure. You can find more details on https://github.com/bitcoin/bitcoin/security, as well as https://bitcoincore.org/en/security-advisories/ or https://bitcoincore.org/en/contact/ or https://en.wikipedia.org/wiki/Coordinated_vulnerability_disclosure. Finally, all of the code, the test, as well as the description looks LLM generated. Generally, the author is expected to verify and understand the problem and the code themselves, beside the other requirements explained in the contribution guidelines, such as https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#copyright. So my recommendation for the future would be to independently verify and reproduce the security issue (and the fix) yourself and then report it according to the security guideline.",
+          "created_at": "2025-06-21T09:07:21Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32793,
+      "title": "wallet_keypool sleep(1.1) might be flakey",
+      "body": "I got a test failure on  PR #32061  that does affect `walletpassphrase` because of `RPCRunLater()` because of replacing libevent's timing loop with `CScheduler`:\n\nhttps://github.com/bitcoin/bitcoin/actions/runs/15790841634/job/44516161778?pr=32061#step:7:3079\n\nHowever, I'm having a very hard time reproducing the test failure.\n\nWe expect wallet to lock in 1 second, sleep for 1.1 seconds and then assert that wallet is locked.\n\nAccording to the log, the time between unlock and the check was 1.22 seconds:\n```\n node0 2025-06-21T02:07:38.682985Z [httpworker.11] [rpc/request.cpp:243] [parse] [rpc] ThreadRPCServer method=walletpassphrase user=__cookie__ \n...\n node0 2025-06-21T02:07:39.902062Z [httpworker.13] [rpc/request.cpp:243] [parse] [rpc] ThreadRPCServer method=getwalletinfo user=__cookie__ \n```\n\nHowever in the failed assertion, `unlocked_until == 1750471659` (instead of expected 0) which translates to `2025-06-21 2:07:39`.\n\nI'm about to push to this branch again so we'll get to see if it fails again. I just thought I'd document the behavior in an issue for now, maybe bumping the test's sleep to 2 full seconds is prudent, or implementing some other kind of `wait_until` logic",
+      "state": "closed",
+      "user": "pinheadmz",
+      "created_at": "2025-06-21T16:41:00Z",
+      "updated_at": "2025-06-22T21:41:14Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32793",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "pinheadmz",
+          "body": "Same test passed on next run: https://github.com/bitcoin/bitcoin/actions/runs/15797667410/job/44531836608?pr=32061\n\n",
+          "created_at": "2025-06-21T17:07:47Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "Closing, this is an issue with the PR, specifically, we lose a little timer resolution switching from libevent to `CScheduler`",
+          "created_at": "2025-06-22T21:41:12Z"
+        }
+      ]
+    },
+    {
+      "number": 32792,
+      "title": "cmake with gui fails on macos 15.5 unless qt@5 is the only installed version",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nwhen qt@5 is installed along side default brew qt or qt@6 the cmake system will break and deployed application will not build.\n\nIn the build requirements qt@6 is mentioned however the app will not build on this version of qt\n\n### Expected behaviour\n\nI expected the compiler to use qt@6 as that is what is listed in the build requirement docs.\n\n### Steps to reproduce\n\nbuild the app on macos 15.5 with any version of qt greater than qt@5 or when qt@5 is installed alongside any newer version of QT\n\n### Relevant log output\n\n-- Could NOT find Qt5 (missing: Qt5_DIR)\nCMake Error at /opt/homebrew/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:227 (message):\n  Could NOT find Qt (missing: Qt5_DIR) (Required is at least version\n  \"5.11.3\")\nCall Stack (most recent call first):\n  /opt/homebrew/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:591 (_FPHSA_FAILURE_MESSAGE)\n  cmake/module/FindQt.cmake:59 (find_package_handle_standard_args)\n  CMakeLists.txt:179 (find_package)\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nv29.0\n\n### Operating system and version\n\nMacOS 15.5\n\n### Machine specifications\n\nM2 pro Macbook pro",
+      "state": "closed",
+      "user": "csd113",
+      "created_at": "2025-06-21T15:18:50Z",
+      "updated_at": "2025-06-23T08:18:59Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32792",
+      "labels": [
+        "GUI",
+        "macOS",
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "duplicate of https://github.com/bitcoin/bitcoin/issues/31009 ?",
+          "created_at": "2025-06-23T06:54:01Z"
+        },
+        {
+          "user": "yuvicc",
+          "body": "> duplicate of [#31009](https://github.com/bitcoin/bitcoin/issues/31009) ?\n\nIndeed",
+          "created_at": "2025-06-23T06:58:14Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 3,
+    "issues": 2
+  }
+}

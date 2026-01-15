@@ -1,0 +1,118 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:11:56.313397+00:00",
+  "date": "2025-09-06",
+  "pull_requests": [
+    {
+      "number": 33328,
+      "title": "Mapping for Lockedpool",
+      "body": "   support: Optimize LockedPool::free with O(log n) arena lookup\r\n   \r\n   Replace O(n) linear search with O(log n) map-based lookup using\r\n   arena base addresses. Improves performance for frequent \r\n   allocation/deallocation patterns in wallet operations.",
+      "state": "closed",
+      "user": "iajhff",
+      "created_at": "2025-09-06T20:41:03Z",
+      "updated_at": "2025-09-09T00:56:43Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33328",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33328.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-06T20:41:08Z"
+        }
+      ]
+    },
+    {
+      "number": 33325,
+      "title": "crypto: optimize SipHash Write() method with chunked processing",
+      "body": "## Summary\r\n\r\nThe current default `Write()` implementation of Siphash uses a byte-by-byte approach to iterate the span. This results in significant overhead for large inputs due to repeated bounds checking and span manipulations, without any help from the compiler.\r\n\r\nThis PR aims at optimizing Siphash by replacing byte-by-byte processing in CSipHasher::Write() with an optimized\r\nchunked approach that processes data in 8-byte aligned blocks when possible.\r\n\r\n## Details\r\n\r\nThe new implementation is divided in 3 stages that process:\r\n\r\n1. initial unaligned bytes to reach an 8-byte boundary\r\n2. aligned 8-byte chunks directly using memcpy for efficiency\r\n3. remaining bytes at the end\r\n\r\nevery change was thoroughly tested and benchmarked to avoid overfitting, but replicating is welcomed and encouraged.\r\n\r\n## Benchmarks\r\n\r\n```shell\r\ntaskset -c 1 ./bin/bench_bitcoin -filter=\"(WalletIsMineMigratedDescriptors|WalletIsMineDescriptors|GCSFilterConstruct|AddrManSelect)\" -output-csv=bench_old.csv --min-time=60000\r\n```\r\n\r\n> Before:\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|       12,983,090.72 |               77.02 |    0.1% |     66.00 | `GCSFilterConstruct`\r\n\r\n> After:\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|       11,155,751.42 |               89.64 |    0.1% |     65.99 | `GCSFilterConstruct`\r\n\r\ncompared to master:\r\n\r\n- `GCSFilterConstruct` **+16%** faster",
+      "state": "closed",
+      "user": "Raimo33",
+      "created_at": "2025-09-06T18:52:12Z",
+      "updated_at": "2025-10-24T09:04:16Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33325",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33325.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Approach NACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/33325#issuecomment-3436142482) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-06T18:52:17Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "This seems like a good idea to me, I will review this in more detail soon.\r\n\r\nTo set your expectations, these fundamental changes can take a long time to review - and we need very good reasons to risk introducing a potential error and making the code more complicated for a speedup that the users might never notice.\r\n\r\nI like that you're explaining it in a lot of detail in the commit message, it's not a trivial change! We may be able to use more C++20 alignment-specific methods there (e.g. like the `std::assume_aligned` we used in https://github.com/bitcoin/bitcoin/pull/31144/files#diff-f26d4597a7f5a5d4aa30053032d49427b402ef4fd7a1b3194cb75b2551d58ca4R44) - but I haven't gone deep yet, I could be wrong here, I just glanced at it so far.\r\n\r\nIn the meantime, please check if there's any way to split this into even smaller commits to make it even easier for reviewers, check if the current tests cover each branch (e.g. the big-endian ones), different architectures, etc.\r\n\r\nBut as far as I can tell this doesn't affect most caching scenarios since we have dedicated siphash methods for those.\r\nTo be sure, I can run some reindexes once the change is settled to make sure it doesn't make it slower at least.",
+          "created_at": "2025-09-06T19:55:38Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "I just realized this was attempted in the past. merged in Bitcoin knots 19. restored to match Core's implementation in knots 29. 🤔.\r\nhttps://github.com/bitcoin/bitcoin/pull/18014\r\n",
+          "created_at": "2025-09-07T01:44:49Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "> We may be able to use more C++20 alignment-specific methods there (e.g. like the `std::assume_aligned` we used in\r\n\r\nI tried with\r\n```diff\r\n- uint64_t chunk;\r\n- std::memcpy(&chunk, ptr, 8);\r\n+ auto aligned_ptr = std::assume_aligned<8>(ptr);\r\n+ uint64_t chunk = *reinterpret_cast<const uint64_t *>(aligned_ptr);\r\n```\r\nbut no luck. performance is identical. `memcpy` is extremely optimized.",
+          "created_at": "2025-09-07T02:15:47Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "> In the meantime, please check if there's any way to split this into even smaller commits to make it even easier for reviewers\r\n\r\nI've just split the PR into 3 commits, diff should now be simpler\r\n",
+          "created_at": "2025-09-17T17:28:06Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "> I just realized this was attempted in the past. merged in Bitcoin knots 19. restored to match Core's implementation in knots 29. 🤔.\r\n\r\n#18014 is still in Knots 29...",
+          "created_at": "2025-09-18T01:33:13Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "@luke-jr where is this general writer needed? We already have separate specialized siphash implementation for the critical usecases...",
+          "created_at": "2025-09-18T01:46:17Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "I have looked into this again.\r\n\r\nI have printed the actual span sizes during runtime (IBD or reindex or reindex chainstate) and it seems to me most of the span sizes are tiny:\r\n<img width=\"855\" height=\"516\" alt=\"image\" src=\"https://github.com/user-attachments/assets/826de36e-53a1-4386-a4a1-353028eafab6\" />\r\n\r\nThe benchmarks however use bigger values of different distribution (e.g. 16, 22, 23, 25, 32, 34).\r\nThey do show some speedup for your mentioned cases:\r\n<img width=\"1489\" height=\"859\" alt=\"image\" src=\"https://github.com/user-attachments/assets/c02bc66c-38d0-4077-9f94-6898a7ea1c70\" />\r\n\r\n<details>\r\n<summary>Benchmarks</summary>\r\n\r\n```\r\nfor commit in 36e40417de3fcaa776fb7bb8ebf3a23db4266572 7dde00f23d335fb5bf5835ebb811793b17b5b987 720045094b805f37bd4792f8ca49c09fd55ac256 5ba5198c45625486a5be3210709155abdc432b83; do \\\r\ngit fetch origin $commit >/dev/null 2>&1 && git checkout $commit >/dev/null 2>&1 && git log -1 --pretty='%h %s' && \\\r\nrm -rf build && \\\r\ncmake -B build -DBUILD_BENCH=ON -DENABLE_IPC=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null 2>&1 && \\\r\ncmake --build build -j$(nproc) >/dev/null 2>&1 && \\\r\nfor i in 1 2; do \\\r\n  build/bin/bench_bitcoin -filter='WalletIsMineMigratedDescriptors|WalletIsMineDescriptors|GCSFilterConstruct|AddrManSelect' -min-time=5000; \\\r\ndone; \\\r\ndone\r\n```\r\n\r\n36e40417de Merge bitcoin-core/gui#884: Fix compatibility with `-debuglogfile` command-line option\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|               70.33 |       14,218,742.61 |    0.5% |      5.54 | `AddrManSelect`\r\n|        3,766,398.94 |              265.51 |    0.2% |      5.35 | `GCSFilterConstruct`\r\n|               30.02 |       33,315,107.96 |    0.7% |      5.48 | `WalletIsMineDescriptors`\r\n|               29.95 |       33,390,477.67 |    0.1% |      5.51 | `WalletIsMineMigratedDescriptors`\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|               70.39 |       14,205,833.32 |    0.5% |      5.52 | `AddrManSelect`\r\n|        3,766,733.09 |              265.48 |    0.1% |      5.35 | `GCSFilterConstruct`\r\n|               30.62 |       32,655,356.28 |    0.1% |      5.29 | `WalletIsMineDescriptors`\r\n|               30.78 |       32,486,484.45 |    0.5% |      5.30 | `WalletIsMineMigratedDescriptors`\r\n\r\n7dde00f23d refactor: replace span with pointer\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|               68.89 |       14,516,583.77 |    0.3% |      5.50 | `AddrManSelect`\r\n|        3,737,364.51 |              267.57 |    0.1% |      5.34 | `GCSFilterConstruct`\r\n|               30.63 |       32,650,170.36 |    0.1% |      5.26 | `WalletIsMineDescriptors`\r\n|               30.31 |       32,994,438.71 |    0.1% |      5.27 | `WalletIsMineMigratedDescriptors`\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|               68.59 |       14,579,049.65 |    0.5% |      5.52 | `AddrManSelect`\r\n|        3,732,675.34 |              267.90 |    0.1% |      5.34 | `GCSFilterConstruct`\r\n|               29.68 |       33,689,750.87 |    0.3% |      5.50 | `WalletIsMineDescriptors`\r\n|               29.74 |       33,625,670.63 |    0.1% |      5.52 | `WalletIsMineMigratedDescriptors`\r\n\r\n720045094b optimize: handle unaligned bytes separately\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|               69.58 |       14,372,223.10 |    0.7% |      5.52 | `AddrManSelect`\r\n|        3,748,722.62 |              266.76 |    0.1% |      5.34 | `GCSFilterConstruct`\r\n|               30.05 |       33,278,839.89 |    0.2% |      5.25 | `WalletIsMineDescriptors`\r\n|               30.25 |       33,062,965.52 |    0.1% |      5.51 | `WalletIsMineMigratedDescriptors`\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|               69.59 |       14,370,240.65 |    0.8% |      5.54 | `AddrManSelect`\r\n|        3,747,784.27 |              266.82 |    0.1% |      5.35 | `GCSFilterConstruct`\r\n|               30.94 |       32,322,539.81 |    0.1% |      5.28 | `WalletIsMineDescriptors`\r\n|               30.21 |       33,099,540.82 |    0.1% |      5.50 | `WalletIsMineMigratedDescriptors`\r\n\r\n5ba5198c45 crypto: optimize SipHash Write() method with chunked processing\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|               69.11 |       14,468,871.77 |    0.1% |      5.52 | `AddrManSelect`\r\n|        3,157,427.53 |              316.71 |    0.2% |      5.29 | `GCSFilterConstruct`\r\n|               23.14 |       43,223,027.78 |    0.1% |      5.52 | `WalletIsMineDescriptors`\r\n|               23.11 |       43,276,911.75 |    0.2% |      5.51 | `WalletIsMineMigratedDescriptors`\r\n\r\n|               ns/op |                op/s |    err% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------:|:----------\r\n|               68.83 |       14,528,112.71 |    1.0% |      5.55 | `AddrManSelect`\r\n|        3,154,843.34 |              316.97 |    0.2% |      5.26 | `GCSFilterConstruct`\r\n|               23.08 |       43,320,920.01 |    0.2% |      5.51 | `WalletIsMineDescriptors`\r\n\r\n</details>\r\n\r\nBut then again, they're not run that often and run with tiny values and are not performance critical code and the resulting code is a lot more complicated:\r\n\r\n| Benchmark | μs saved/op | Speedup |\r\n|-----------|-------------|---------|\r\n| **GCSFilterConstruct** | 610.38 | **+19.3%** |\r\n| **WalletIsMineMigratedDescriptors** | 0.00725 | **+31.4%** |\r\n| **WalletIsMineDescriptors** | 0.00721 | **+31.2%** |\r\n| **AddrManSelect** | 0.00139 | **+2.0%** |\r\n\r\nSo having this considerable complication (e.g. where did the big-endian condition come from in your code, how did you check that, where is it explained, why not use spans, why are pointers better, etc) for an artificial speedup of 0.6ms for data that isn't representative, that's an Approach NACK from me, while keeping the Concept ACK if you can simplify it considerably.",
+          "created_at": "2025-10-23T10:13:15Z"
+        },
+        {
+          "user": "Raimo33",
+          "body": "Thank you for the realistic benchmarks, you're right, the diff is currently too complex. Marking as draft for now.",
+          "created_at": "2025-10-24T08:58:23Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33327,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "HTM31-cyber",
+      "created_at": "2025-09-06T20:16:31Z",
+      "updated_at": "2025-09-06T21:28:01Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33327",
+      "labels": []
+    },
+    {
+      "number": 33326,
+      "title": ".",
+      "body": "",
+      "state": "closed",
+      "user": "HTM31-cyber",
+      "created_at": "2025-09-06T19:54:53Z",
+      "updated_at": "2025-09-06T21:29:02Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33326",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 2,
+    "issues": 2
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:40:31.890237+00:00",
+  "date": "2025-05-12",
+  "pull_requests": [
+    {
+      "number": 32473,
+      "title": "Introduce per-txin sighash midstate cache for legacy/p2sh/segwitv0 scripts",
+      "body": "This introduces a per-txin cache for sighash midstate computation to the script interpreter for legacy (bare), P2SH, P2WSH, and (as collateral effect, but not actually useful) P2WPKH. This reduces the impact of certain types of quadratic hashing attacks that use standard transactions. It is not known to improve the situation for attacks involving non-standard transaction attacks.\r\n\r\nThe cache works by remembering for each of the 6 sighash modes a `(scriptCode, midstate)` tuple, which gives a midstate `CSHA256` object right before the appending of the sighash type itself (to permit all 256, rather than just the 6 ones that match the modes). The midstate is only reused if the `scriptCode` matches. This works because - within a single input - only the sighash type and the `scriptCode` affect the actual sighash used.\r\n\r\nThe PR implements two different approaches:\r\n* The initial commits introduce the caching effect always, for both consensus and relay relation validation. Despite being primarily intended for improving the situation for standard transactions only, I chose this approach as the code paths are already largely common between the two, and this approach I believe involves fewer code changes than a more targetted approach, and furthermore, it should not hurt (it may even help common multisig cases slightly). \r\n* The final commit changes the behavior to only using the cache for non-consensus script validation. I'm open to feedback about whether adding this commit is worth it.\r\n\r\nFunctional tests are included that construct contrived cases with many sighash types (standard and non-standard ones) and `OP_CODESEPARATOR`s in all script types (including P2TR, which isn't modified by this PR).",
+      "state": "closed",
+      "user": "sipa",
+      "created_at": "2025-05-12T17:49:17Z",
+      "updated_at": "2026-01-12T20:16:47Z",
+      "comments": 18,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32473",
+      "labels": [
+        "Validation"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32473.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [dergoegge](https://github.com/bitcoin/bitcoin/pull/32473#pullrequestreview-3100133201), [darosior](https://github.com/bitcoin/bitcoin/pull/32473#pullrequestreview-3101115871), [achow101](https://github.com/bitcoin/bitcoin/pull/32473#issuecomment-3169555193) |\n| Concept ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/32473#issuecomment-3140801943) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32301](https://github.com/bitcoin/bitcoin/pull/32301) (test: cover invalid codesep positions for signature in taproot by instagibbs)\n* [#32247](https://github.com/bitcoin/bitcoin/pull/32247) (BIP-348 (OP_CHECKSIGFROMSTACK) (regtest only) by jamesob)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-12T17:49:20Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "@darosior just noting the tests are specifically written to not worry about standardness, so at least these would have to be augmented to cover the cases this PR is ostensibly supporting",
+          "created_at": "2025-05-13T18:14:35Z"
+        },
+        {
+          "user": "sipa",
+          "body": "@instagibbs Yes and no, depending on the meaning of standardness I guess. The worrisome transactions *are* non-standard (in the sense that they are not relayed/accepted), but are standard in the `IsStandard()` sense, and thus not immediately rejected before script execution even begins.",
+          "created_at": "2025-05-13T18:21:46Z"
+        },
+        {
+          "user": "theuni",
+          "body": "Hmm, not relevant to what's being addressed here, but couldn't the per-tx `cache->hashPrevouts` and `cache->hashSequence` be replaced with a similar midstate cache trick?\r\n\r\nEdit: Given their size I guess that's not nearly as interesting.",
+          "created_at": "2025-05-13T20:16:00Z"
+        },
+        {
+          "user": "sipa",
+          "body": "@darosior I did it slightly differently, but added a commit that makes the use of the sighash cache optional. I avoided using default values as they can result in unexpected/missed call sites.",
+          "created_at": "2025-07-09T21:02:12Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `tidy`: https://github.com/bitcoin/bitcoin/runs/45674313491</sub>\n<sub>LLM reason (✨ experimental): Clang-tidy reported argument comment mismatches caused by warnings treated as errors, leading to build failure.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-07-09T21:32:29Z"
+        },
+        {
+          "user": "darosior",
+          "body": "Here is a fuzz test which asserts the cached and not cached versions of the sighash function always return the same result: https://github.com/bitcoin/bitcoin/commit/3c056d766d6311e4120d43705b53059e3b1b0bb1. Running it for a while here did not reveal anything.\r\n\r\n> I ran IBD on mainnet and signet with caching for blocks enabled and it did not result in any historical block being rejected on either of these networks. I'll do testnet3 and testnet4 next.\r\n\r\nDone that and it didn't cause any issue either. (Stopped at December 2024 for testnet3.)",
+          "created_at": "2025-07-23T17:16:43Z"
+        },
+        {
+          "user": "darosior",
+          "body": "I ran two identically compiled nodes on two identical VMs on the same host, one on top of fb7e9decf3f12ebae786e0cecf2f24a91c6e9d4c (this PR but modified to enable caching for block validation too) and one on top of 2cad7226c2d02ec67bbac7ec909030f8bae593f8 (the commit this PR is based on).\r\n\r\nOver 4 days of blocks (from height 906875 (`00000000000000000000264374e6d9b26be206793712e94266a62ddb0e9551e9`) to height 907450 (`00000000000000000001d85ba0ff861fd2499bd72fd436e2c37e11e0c28caf74`)), the verification time of all inputs in the block (as recorded by the `Verify XXXX txins: Y.YYms` log line) took on average 62.45ms on the node running this PR with caching enabled for blocks, and took on average 64.46ms on the other node. *(I had to first correct for stale block `00000000000000000001aad53cc3e15fcf36766a25b15ac8c6d84fe2c2055e82` which was validated by one node but not the other.)*\r\n\r\nIt's interesting to see that it's faster on average, as it's slightly slower for inexpensive blocks. As one would expect, it's more than made up for by being substantially faster for more expensive blocks. As an illustration of this, the median time is 8.93ms for the node running this PR with caching enabled for blocks and 8.45ms for the other one.",
+          "created_at": "2025-07-28T14:52:09Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "> I ran two identically compiled nodes on two identical VMs on the same host\r\n\r\nI did something similar, measuring two reindex runs until 900k blocks for master vs current PR (rebased) vs enabling all `use_sighash_cache` values.\r\n\r\n<details>\r\n<summary>patch of last commit</summary>\r\n\r\n```patch\r\ndiff --git a/src/psbt.cpp b/src/psbt.cpp\r\nindex 7167d13af3..6d57c80de3 100644\r\n--- a/src/psbt.cpp\r\n+++ b/src/psbt.cpp\r\n@@ -321,7 +321,7 @@ bool PSBTInputSignedAndVerified(const PartiallySignedTransaction psbt, unsigned\r\n     }\r\n \r\n     if (txdata) {\r\n-        return VerifyScript(input.final_script_sig, utxo.scriptPubKey, &input.final_script_witness, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker{&(*psbt.tx), input_index, utxo.nValue, *txdata, MissingDataBehavior::FAIL, /*use_sighash_cache=*/false});\r\n+        return VerifyScript(input.final_script_sig, utxo.scriptPubKey, &input.final_script_witness, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker{&(*psbt.tx), input_index, utxo.nValue, *txdata, MissingDataBehavior::FAIL, /*use_sighash_cache=*/true});\r\n     } else {\r\n         return VerifyScript(input.final_script_sig, utxo.scriptPubKey, &input.final_script_witness, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker{&(*psbt.tx), input_index, utxo.nValue, MissingDataBehavior::FAIL});\r\n     }\r\ndiff --git a/src/script/sign.cpp b/src/script/sign.cpp\r\nindex 0310a5bf02..5c9b689e0d 100644\r\n--- a/src/script/sign.cpp\r\n+++ b/src/script/sign.cpp\r\n@@ -28,7 +28,7 @@ MutableTransactionSignatureCreator::MutableTransactionSignatureCreator(const CMu\r\n \r\n MutableTransactionSignatureCreator::MutableTransactionSignatureCreator(const CMutableTransaction& tx, unsigned int input_idx, const CAmount& amount, const PrecomputedTransactionData* txdata, int hash_type)\r\n     : m_txto{tx}, nIn{input_idx}, nHashType{hash_type}, amount{amount},\r\n-      checker{txdata ? MutableTransactionSignatureChecker{&m_txto, nIn, amount, *txdata, MissingDataBehavior::FAIL, /*use_sighash_cache=*/false} :\r\n+      checker{txdata ? MutableTransactionSignatureChecker{&m_txto, nIn, amount, *txdata, MissingDataBehavior::FAIL, /*use_sighash_cache=*/true} :\r\n                        MutableTransactionSignatureChecker{&m_txto, nIn, amount, MissingDataBehavior::FAIL}},\r\n       m_txdata(txdata)\r\n {\r\n@@ -813,7 +813,7 @@ bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore,\r\n         }\r\n \r\n         ScriptError serror = SCRIPT_ERR_OK;\r\n-        if (!sigdata.complete && !VerifyScript(txin.scriptSig, prevPubKey, &txin.scriptWitness, STANDARD_SCRIPT_VERIFY_FLAGS, TransactionSignatureChecker(&txConst, i, amount, txdata, MissingDataBehavior::FAIL, /*use_sighash_cache=*/false), &serror)) {\r\n+        if (!sigdata.complete && !VerifyScript(txin.scriptSig, prevPubKey, &txin.scriptWitness, STANDARD_SCRIPT_VERIFY_FLAGS, TransactionSignatureChecker(&txConst, i, amount, txdata, MissingDataBehavior::FAIL, /*use_sighash_cache=*/true), &serror)) {\r\n             if (serror == SCRIPT_ERR_INVALID_STACK_OPERATION) {\r\n                 // Unable to sign input and verification failed (possible attempt to partially sign).\r\n                 input_errors[i] = Untranslated(\"Unable to sign input, invalid stack size (possibly missing key)\");\r\ndiff --git a/src/signet.cpp b/src/signet.cpp\r\nindex d43daca51c..91031b2d09 100644\r\n--- a/src/signet.cpp\r\n+++ b/src/signet.cpp\r\n@@ -142,7 +142,7 @@ bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& cons\r\n \r\n     PrecomputedTransactionData txdata;\r\n     txdata.Init(signet_txs->m_to_sign, {signet_txs->m_to_spend.vout[0]});\r\n-    TransactionSignatureChecker sigcheck(&signet_txs->m_to_sign, /* nInIn= */ 0, /* amountIn= */ signet_txs->m_to_spend.vout[0].nValue, txdata, MissingDataBehavior::ASSERT_FAIL, /*use_sighash_cache=*/false);\r\n+    TransactionSignatureChecker sigcheck(&signet_txs->m_to_sign, /* nInIn= */ 0, /* amountIn= */ signet_txs->m_to_spend.vout[0].nValue, txdata, MissingDataBehavior::ASSERT_FAIL, /*use_sighash_cache=*/true);\r\n \r\n     if (!VerifyScript(scriptSig, signet_txs->m_to_spend.vout[0].scriptPubKey, &witness, BLOCK_SCRIPT_VERIFY_FLAGS, sigcheck)) {\r\n         LogDebug(BCLog::VALIDATION, \"CheckSignetBlockSolution: Errors in block (block solution invalid)\\n\");\r\ndiff --git a/src/validation.cpp b/src/validation.cpp\r\nindex 6b25ea3e3d..3143172d01 100644\r\n--- a/src/validation.cpp\r\n+++ b/src/validation.cpp\r\n@@ -2677,10 +2677,10 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state,\r\n             // they need to be added to control which runs them asynchronously. Otherwise, CheckInputScripts runs the checks before returning.\r\n             if (control) {\r\n                 std::vector<CScriptCheck> vChecks;\r\n-                tx_ok = CheckInputScripts(tx, tx_state, view, flags, fCacheResults, fCacheResults, /*use_sighash_cache=*/false, txsdata[i], m_chainman.m_validation_cache, &vChecks);\r\n+                tx_ok = CheckInputScripts(tx, tx_state, view, flags, fCacheResults, fCacheResults, /*use_sighash_cache=*/true, txsdata[i], m_chainman.m_validation_cache, &vChecks);\r\n                 if (tx_ok) control->Add(std::move(vChecks));\r\n             } else {\r\n-                tx_ok = CheckInputScripts(tx, tx_state, view, flags, fCacheResults, fCacheResults, /*use_sighash_cache=*/false, txsdata[i], m_chainman.m_validation_cache);\r\n+                tx_ok = CheckInputScripts(tx, tx_state, view, flags, fCacheResults, fCacheResults, /*use_sighash_cache=*/true, txsdata[i], m_chainman.m_validation_cache);\r\n             }\r\n             if (!tx_ok) {\r\n                 // Any transaction validation failure in ConnectBlock is a block consensus failure\r\ndiff --git a/src/wallet/feebumper.cpp b/src/wallet/feebumper.cpp\r\nindex 243a300cb0..e32ef5cb89 100644\r\n--- a/src/wallet/feebumper.cpp\r\n+++ b/src/wallet/feebumper.cpp\r\n@@ -222,7 +222,7 @@ Result CreateRateBumpTransaction(CWallet& wallet, const Txid& txid, const CCoinC\r\n             // In order to do this, we verify the script with a special SignatureChecker which\r\n             // will observe the signatures verified and record their sizes.\r\n             SignatureWeights weights;\r\n-            TransactionSignatureChecker tx_checker(wtx.tx.get(), i, coin.out.nValue, txdata, MissingDataBehavior::FAIL, /*use_sighash_cache=*/false);\r\n+            TransactionSignatureChecker tx_checker(wtx.tx.get(), i, coin.out.nValue, txdata, MissingDataBehavior::FAIL, /*use_sighash_cache=*/true);\r\n             SignatureWeightChecker size_checker(weights, tx_checker);\r\n             VerifyScript(txin.scriptSig, coin.out.scriptPubKey, &txin.scriptWitness, STANDARD_SCRIPT_VERIFY_FLAGS, size_checker);\r\n             // Add the difference between max and current to input_weight so that it represents the largest the input could be\r\n\r\n```\r\n\r\n</details>\r\n\r\nThe results are similar, the current PR doesn't cause any slowdown, while fully enabling caching (or at least doing the above) would speed it up by 1%.\r\n\r\n<details>\r\n<summary>IBD measurements</summary>\r\n\r\n```python\r\nCOMMITS=\"e6018665f8ef58a8fcebe6f48bb6c5378d1ff3c2 2ac472ba7ab5b6eb93e6497ebfde3c1a9cd62cd1 6ed17b6ca9a61bba614eb8bb9fd3cfd6fdc90cf7\"; \\\r\nSTOP=900000; DBCACHE=10000; \\\r\nCC=gcc; CXX=g++; \\\r\nBASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n(echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done; echo \"\") && \\\r\nhyperfine \\\r\n  --sort command \\\r\n  --runs 2 \\\r\n  --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n  --parameter-list COMMIT ${COMMITS// /,} \\\r\n  --prepare \"killall bitcoind 2>/dev/null; rm -f $DATA_DIR/debug.log; git checkout {COMMIT}; git clean -fxd; git reset --hard && \\\r\n    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja -C build bitcoind && \\\r\n    ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 10\" \\\r\n  --cleanup \"cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n  \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -assumevalid=0 -blocksonly -connect=0 -printtoconsole=0\"\r\n\r\ne6018665f8 tests: add sighash caching tests to feature_taproot\r\n2ac472ba7a script: (belt-and-suspenders) make sighash cache optional\r\n6ed17b6ca9 /*use_sighash_cache=*/true\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=900000 -dbcache=10000 -reindex-chainstate -assumevalid=0 -blocksonly -connect=0 -printtoconsole=0 (COMMIT = e6018665f8ef58a8fcebe6f48bb6c5378d1ff3c2)\r\n  Time (mean ± σ):     36170.929 s ± 14.801 s    [User: 366606.776 s, System: 1076.452 s]\r\n  Range (min … max):   36160.463 s … 36181.395 s    2 runs\r\n \r\nBenchmark 2: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=900000 -dbcache=10000 -reindex-chainstate -assumevalid=0 -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 2ac472ba7ab5b6eb93e6497ebfde3c1a9cd62cd1)\r\n  Time (mean ± σ):     36192.806 s ± 43.410 s    [User: 366747.522 s, System: 1084.112 s]\r\n  Range (min … max):   36162.111 s … 36223.501 s    2 runs\r\n \r\nBenchmark 3: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=900000 -dbcache=10000 -reindex-chainstate -assumevalid=0 -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 6ed17b6ca9a61bba614eb8bb9fd3cfd6fdc90cf7)\r\n ⠼ Current estimate: 35772.481 s \r\n  Time (mean ± σ):     35773.556 s ±  1.521 s    [User: 362730.406 s, System: 1067.860 s]\r\n  Range (min … max):   35772.481 s … 35774.632 s    2 runs\r\n \r\nRelative speed comparison\r\n        1.01 ±  0.00  COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=900000 -dbcache=10000 -reindex-chainstate -assumevalid=0 -blocksonly -connect=0 -printtoconsole=0 (COMMIT = e6018665f8ef58a8fcebe6f48bb6c5378d1ff3c2)\r\n        1.01 ±  0.00  COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=900000 -dbcache=10000 -reindex-chainstate -assumevalid=0 -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 2ac472ba7ab5b6eb93e6497ebfde3c1a9cd62cd1)\r\n        1.00          COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=900000 -dbcache=10000 -reindex-chainstate -assumevalid=0 -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 6ed17b6ca9a61bba614eb8bb9fd3cfd6fdc90cf7)\r\n```\r\n\r\n</details>\r\n\r\nConcept ACK",
+          "created_at": "2025-07-31T17:30:11Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Rebased.",
+          "created_at": "2025-08-05T18:01:02Z"
+        },
+        {
+          "user": "theuni",
+          "body": "> The final commit changes the behavior to only using the cache for non-consensus script validation. I'm open to feedback about whether adding this commit is worth it.\r\n\r\nI'm not sure I understand the rationale for this. Consensus validation will still be affected by the new midstate caches by virtue of hitting a cached entry in the script execution cache which used them previously, no?",
+          "created_at": "2025-08-05T18:22:06Z"
+        },
+        {
+          "user": "sipa",
+          "body": "> Consensus validation will still be affected by the new midstate caches by virtue of hitting a cached entry in the script execution cache which used them previously, no?\r\n\r\nNo, the cache only lives for the duration of one script execution. It does not survive beyond script execution, let alone across multiple validations of the same transaction. With the last commit, the cache object just won't be present in consensus-critical validations.\r\n\r\nI'm ambivalent about the last commit, though. It's a worthwhile goal to avoid touching consensus code where possible, but in this case it still means *touching* the code in a mildly invasive manner, just one that (hopefully clearly) does not result in modified behavior. If the last commit doesn't reach the \"easy to verify the result means unmodified behavior\" bar, it may be better to get rid of it, and have the cache always be active (but even then, it won't result in cache being reused across multiple script/transaction validations).",
+          "created_at": "2025-08-05T18:36:18Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> > Consensus validation will still be affected by the new midstate caches by virtue of hitting a cached entry in the script execution cache which used them previously, no?\r\n> \r\n> No, the cache only lives for the duration of one script execution.\r\n\r\nWorth noting (as i had to convince myself during review) that it also does not affect affect consensus validation by means of the signature cache. The signature cache is looked up by sighash (among other things), so if the sighash differs because there was a bug in the sighash caching then it will not use the corresponding entry inside block validation.",
+          "created_at": "2025-08-05T18:40:32Z"
+        },
+        {
+          "user": "theuni",
+          "body": "> No, the cache only lives for the duration of one script execution. It does not survive beyond script execution, let alone across multiple validations of the same transaction. With the last commit, the cache object just won't be present in consensus-critical validations.\r\n\r\nHeh, there are so many levels of caching here.. my question still stands though...\r\n\r\n> Worth noting (as i had to convince myself during review) that it also does not affect affect consensus validation by means of the signature cache. The signature cache is looked up by sighash (among other things), so if the sighash differs because there was a bug in the sighash caching then it will not use the corresponding entry inside block validation.\r\n\r\nAgreed that this protects the signature cache, as the sighash is calculated without the midstate caches for consensus validation.\r\n\r\nBut I'm asking specifically about the script execution cache. `CheckInputsFromMempoolAndCache` calls `CheckInputScripts` with `cacheFullScriptStore=true` and `use_sighash_cache=true`. `ConnectBlock` then calls it with `use_sighash_cache=false`, but it'll be found in the `execution cache`, so the consensus checks are effectively using the new sigcache midstate caches. Or am I missing something?\r\n\r\n> I'm ambivalent about the last commit, though. It's a worthwhile goal to avoid touching consensus code where possible, but in this case it still means touching the code in a mildly invasive manner, just one that (hopefully clearly) does not result in modified behavior. If the last commit doesn't reach the \"easy to verify the result means unmodified behavior\" bar, it may be better to get rid of it, and have the cache always be active (but even then, it won't result in cache being reused across multiple script/transaction validations).\r\n\r\nYeah, imo this would be easier to reason about (and concerns like mine above moot) with unified code paths.",
+          "created_at": "2025-08-05T19:09:25Z"
+        },
+        {
+          "user": "darosior",
+          "body": "> But I'm asking specifically about the script execution cache.\r\n\r\nOh right! I think you are correct and `use_sighash_cache` should not be set for `CheckInputsFromMempoolAndCache`.\r\n\r\n> Yeah, imo this would be easier to reason about (and concerns like mine above moot) with unified code paths.\r\n\r\nMy preference is still to not touch consensus code when unnecessary, and it seems appropriately setting `use_sighash_cache` in `CheckInputsFromMempoolAndCache` would achieve that. But if both Pieter and you prefer it this way, that's fine by me. I've significantly tested this code and i am confident it is correct. If we do (intentionally..) enable it for consensus, i think it would be nice to get the unit test and fuzz coverage i shared above.",
+          "created_at": "2025-08-05T19:59:34Z"
+        },
+        {
+          "user": "achow101",
+          "body": "I would prefer having the cache always active as I find that much easier to reason about.",
+          "created_at": "2025-08-05T21:24:02Z"
+        },
+        {
+          "user": "sipa",
+          "body": "@theuni \r\n\r\n> so the consensus checks are effectively using the new sigcache midstate caches. Or am I missing something?\r\n\r\nGood point. I think that further undermines the idea of disabling it for consensus-critical checks, as even though it's possible to set the flags in such a way that any script-execution-cache-storing paths also disable sighash midstate caches, that makes it even less obvious to readers.\r\n\r\n@achow101 \r\n\r\n> I would prefer having the cache always active as I find that much easier to reason about.\r\n\r\nDone.\r\n\r\n@darosior \r\n\r\n> If we do (intentionally..) enable it for consensus, i think it would be nice to get the unit test and fuzz coverage i shared above.\r\n\r\nDone.",
+          "created_at": "2025-08-06T13:45:34Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 83950275eddacac56c58a7a3648ed435a5593328",
+          "created_at": "2025-08-09T00:10:54Z"
+        }
+      ]
+    },
+    {
+      "number": 32472,
+      "title": "doc: Fix typo",
+      "body": "A translator on Transifex noticed:\r\n> This is the only label which has two dots: ..\r\n> Usually we see the elipsis (…)\r\n\r\nThis PR addresses this issue.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-05-12T16:12:10Z",
+      "updated_at": "2025-05-12T18:54:03Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32472",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32472.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [janb84](https://github.com/bitcoin/bitcoin/pull/32472#pullrequestreview-2833964876) |\n| Concept ACK | [pinheadmz](https://github.com/bitcoin/bitcoin/pull/32472#pullrequestreview-2834167326) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-12T16:12:14Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> A translator on Transifex noticed:\r\n> \r\n> > This is the only label which has two dots: ..\r\n> > Usually we see the elipsis (…)\r\n\r\nReported by @jesterhodl.",
+          "created_at": "2025-05-12T16:12:51Z"
+        },
+        {
+          "user": "jesterhodl",
+          "body": "Thanks :-)",
+          "created_at": "2025-05-12T18:54:02Z"
+        }
+      ]
+    },
+    {
+      "number": 32471,
+      "title": "wallet/rpc: fix listdescriptors RPC fails to return descriptors with private key information when wallet contains descriptors missing any key",
+      "body": "_TLDR:\r\nCurrently, `listdescriptors [private=true]` will fail for a non-watch-only wallet if any descriptor has a missing private key(e.g `tr()`, `multi()`, etc.). This PR changes that while making sure `listdescriptors [private=true]` still fails if there no private keys. Closes #32078_ \r\n\r\nIn non-watch-only wallets, it's possible to import descriptors as long as at least one private key is included. It's important that users can still view these descriptors when they need to create a backup—even if some private keys are missing ([#32078 (comment)](https://github.com/bitcoin/bitcoin/issues/32078#issuecomment-2781428475)). This change makes it possible to do so.\r\n\r\nThis change also helps prevent `listdescriptors true` from failing completely, because one descriptor is missing some private keys.\r\n\r\n### Notes\r\n- The new behaviour is applied to all descriptors including miniscript descriptors\r\n- `listdescriptors true` still fails for watch-only wallets to preserve existing behaviour https://github.com/bitcoin/bitcoin/pull/24361#discussion_r920801352\r\n- Wallet migration logic previously used `Descriptor::ToPrivateString()` to determine which descriptor was watchonly. This means that modifying the `ToPrivateString()` behaviour caused descriptors that were previously recognized as \"watchonly\" to be \"non-watchonly\". **In order to keep the scope of this PR limited to the RPC behaviour, this PR uses a different method to determine `watchonly` descriptors for the purpose of wallet migration.** A follow-up PR can be opened to update migration logic to exclude descriptors with some private keys from the `watchonly` migration wallet. \r\n\r\n### Relevant PRs\r\nhttps://github.com/bitcoin/bitcoin/pull/24361\r\nhttps://github.com/bitcoin/bitcoin/pull/32186\r\n\r\n### Testing\r\nFunctional tests were added to test the new behaviour\r\n\r\nEDIT\r\n**`listdescriptors [private=true]` will still fail when there are no private keys because non-watchonly wallets must have private keys and calling `listdescriptors [private=true]` for watchonly wallet returns an error**",
+      "state": "open",
+      "user": "Eunovo",
+      "created_at": "2025-05-12T13:26:20Z",
+      "updated_at": "2026-01-09T08:35:56Z",
+      "comments": 25,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32471",
+      "labels": []
+    }
+  ],
+  "issues": [
+    {
+      "number": 32470,
+      "title": ".",
+      "body": "",
+      "state": "closed",
+      "user": "Lompecacas",
+      "created_at": "2025-05-12T05:46:06Z",
+      "updated_at": "2025-05-12T09:09:52Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32470",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 3,
+    "issues": 1
+  }
+}

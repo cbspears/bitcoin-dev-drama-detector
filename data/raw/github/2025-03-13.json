@@ -1,0 +1,670 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:24:33.090023+00:00",
+  "date": "2025-03-13",
+  "pull_requests": [
+    {
+      "number": 32063,
+      "title": "test: fix intermittent failure in p2p_orphan_handling.py",
+      "body": "If the mocktime is bumped before the node has successfully disconnected the peer, the requests for both parents could be spread over two GETDATAS: The first time `GetRequestsToSend` is invoked it would only request one tx from peer2, because the other one would only be available after peer1  was disconnected and its outstanding txrequest cleared.\r\nSo two GETDATAs would be sent, which would make the test fail.\r\n\r\nFixes #31700\r\n",
+      "state": "closed",
+      "user": "mzumsande",
+      "created_at": "2025-03-13T22:07:21Z",
+      "updated_at": "2025-03-18T02:01:40Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32063",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32063.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32063#issuecomment-2727341862), [instagibbs](https://github.com/bitcoin/bitcoin/pull/32063#issuecomment-2727344887) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-13T22:07:25Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 02942056fd861581503a8a35a06dcf22d4ba1473",
+          "created_at": "2025-03-16T11:25:09Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "ACK https://github.com/bitcoin/bitcoin/pull/32063/commits/02942056fd861581503a8a35a06dcf22d4ba1473\r\n\r\n",
+          "created_at": "2025-03-16T11:29:36Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Backported in #32062",
+          "created_at": "2025-03-17T02:12:03Z"
+        },
+        {
+          "user": "tnndbtc",
+          "body": "Hi @mzumsande , Followed your hint that the node needs to successfully disconnect the peer before bumping mocktime, I added one line of \"debugging\" code to reproduce the issue 100%: in `src/net.cpp:CConnman::DisconnectNodes()`, add a one second sleep before calling `DeleteNode(pnode);`\r\n```\r\n    {\r\n        // Delete disconnected nodes\r\n        std::list<CNode*> nodes_disconnected_copy = m_nodes_disconnected;\r\n        for (CNode* pnode : nodes_disconnected_copy)\r\n        {\r\n            // Destroy the object only after other threads have stopped using it.\r\n            if (pnode->GetRefCount() <= 0) {\r\n                m_nodes_disconnected.remove(pnode);\r\n                std::this_thread::sleep_for(std::chrono::seconds(1)); // SLEEP for 1 second to 100% reproduce the issue\r\n                DeleteNode(pnode);\r\n            }\r\n        }\r\n    }\r\n```\r\n\r\nSo, even I added your fix of waiting until num_test_p2p_connections reduces to 1, the issue is still 100% reproducible on Mac with Apple M1 chipset with OS Sequoia 15.1.1:\r\n```\r\n        peer1.peer_disconnect()\r\n        self.wait_until(lambda: node.num_test_p2p_connections() == 1)\r\n        node.bumpmocktime(TXREQUEST_TIME_SKIP)\r\n```\r\n\r\nThen, I have moved the sleep 1 second AFTER `DeleteNode(pnode);`  the issue is not reproducible.\r\n\r\nI agree with the idea that we should wait until the `CConnman::DisconnectNodes `is fully completed.  However, it seems like this PR needs more work to fully fix the timing issue.\r\n\r\nTo test with --timeout-factor=40.0:\r\n`build/test/functional/test_runner.py test/functional/p2p_orphan_handling.py --tmpdir /tmp --nocleanup --timeout-factor=40.0 --quiet --failfast --v2transport`\r\n\r\n1/1 - p2p_orphan_handling.py failed, Duration: 406 s\r\n\r\nstdout:\r\n2025-03-17T21:44:15.055000Z TestFramework (INFO): PRNG seed is: 836743966629972745\r\n2025-03-17T21:44:15.055000Z TestFramework (INFO): Initializing test directory /tmp/test_runner_₿_🏃_20250317_174414/p2p_orphan_handling_0\r\n2025-03-17T21:44:18.271000Z TestFramework (INFO): Test that, if a parent goes missing during orphan reso, it is requested\r\n2025-03-17T21:50:59.940000Z TestFramework.utils (ERROR): wait_until() failed. Predicate: ''''\r\n        def test_function():\r\n            if check_connected:\r\n                assert self.is_connected\r\n            return test_function_in()\r\n'''\r\n2025-03-17T21:51:01.048000Z TestFramework (ERROR): Assertion failed\r\nTraceback (most recent call last):\r\n  File \"/Users/masked/data/code/bitcoin/test/functional/test_framework/test_framework.py\", line 135, in main\r\n    self.run_test()\r\n    ~~~~~~~~~~~~~^^\r\n  File \"/Users/masked/data/code/bitcoin/build/test/functional/p2p_orphan_handling.py\", line 826, in run_test\r\n    self.test_parents_change()\r\n    ~~~~~~~~~~~~~~~~~~~~~~~~^^\r\n  File \"/Users/masked/data/code/bitcoin/build/test/functional/p2p_orphan_handling.py\", line 55, in wrapper\r\n    func(self)\r\n    ~~~~^^^^^^\r\n  File \"/Users/masked/data/code/bitcoin/build/test/functional/p2p_orphan_handling.py\", line 797, in test_parents_change\r\n    peer2.wait_for_parent_requests([int(parent_peekaboo_AB[\"txid\"], 16), int(parent_missing[\"txid\"], 16)])\r\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"/Users/masked/data/code/bitcoin/build/test/functional/p2p_orphan_handling.py\", line 99, in wait_for_parent_requests\r\n    self.wait_until(test_function, timeout=10)\r\n    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"/Users/masked/data/code/bitcoin/test/functional/test_framework/p2p.py\", line 594, in wait_until\r\n    wait_until_helper_internal(test_function, timeout=timeout, lock=p2p_lock, timeout_factor=self.timeout_factor, check_interval=check_interval)\r\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"/Users/masked/data/code/bitcoin/test/functional/test_framework/util.py\", line 317, in wait_until_helper_internal\r\n    raise AssertionError(\"Predicate {} not true after {} seconds\".format(predicate_source, timeout))\r\nAssertionError: Predicate ''''\r\n        def test_function():\r\n            if check_connected:\r\n                assert self.is_connected\r\n            return test_function_in()\r\n''' not true after 400.0 seconds\r\n2025-03-17T21:51:01.106000Z TestFramework (INFO): Not stopping nodes as test failed. The dangling processes will be cleaned up later.\r\n2025-03-17T21:51:01.106000Z TestFramework (WARNING): Not cleaning up dir /tmp/test_runner_₿_🏃_20250317_174414/p2p_orphan_handling_0\r\n2025-03-17T21:51:01.106000Z TestFramework (ERROR): Test failed. Test logging available at /tmp/test_runner_₿_🏃_20250317_174414/p2p_orphan_handling_0/test_framework.log\r\n2025-03-17T21:51:01.106000Z TestFramework (ERROR): \r\n2025-03-17T21:51:01.106000Z TestFramework (ERROR): Hint: Call /Users/masked/data/code/bitcoin/test/functional/combine_logs.py '/tmp/test_runner_₿_🏃_20250317_174414/p2p_orphan_handling_0' to consolidate all logs\r\n2025-03-17T21:51:01.106000Z TestFramework (ERROR): \r\n2025-03-17T21:51:01.106000Z TestFramework (ERROR): If this failure happened unexpectedly or intermittently, please file a bug and provide a link or upload of the combined log.\r\n2025-03-17T21:51:01.106000Z TestFramework (ERROR): https://github.com/bitcoin/bitcoin/issues\r\n2025-03-17T21:51:01.106000Z TestFramework (ERROR): \r\n\r\n\r\nstderr:\r\n[node 0] Cleaning up leftover process\r\n\r\n\r\n\r\nTEST                   | STATUS    | DURATION\r\n\r\np2p_orphan_handling.py | ✖ Failed  | 406 s\r\n\r\nALL                    | ✖ Failed  | 406 s (accumulated) \r\nRuntime: 406 s\r\n\r\nCC: @glozow \r\n",
+          "created_at": "2025-03-17T19:48:11Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "Interesting - wouldn't that mean that `disconnect_p2ps` (which is used in a lot of places) has the same issue?",
+          "created_at": "2025-03-17T20:52:45Z"
+        },
+        {
+          "user": "tnndbtc",
+          "body": "@mzumsande I have another finding, if I move the calling of `self.wait_until(lambda: len(node.getorphantxs(verbosity=2)[0][\"from\"]) == 1)` before  `node.bumpmocktime(TXREQUEST_TIME_SKIP)`, then this issue is not reproducible even I set a longer sleep before calling `DeleteNode(pnode);`.  \r\n\r\n```\r\n        # Disconnect peer1. peer2 should become the new candidate for orphan resolution.\r\n        peer1.peer_disconnect()\r\n        self.wait_until(lambda: len(node.getorphantxs(verbosity=2)[0][\"from\"]) == 1) # MOVE this check before bumpmocktime will greatly reduce the chance that DeleteNode(pnode); was called AFTER bumpmocktime.\r\n        node.bumpmocktime(TXREQUEST_TIME_SKIP)\r\n\r\n        # self.wait_until(lambda: len(node.getorphantxs(verbosity=2)[0][\"from\"]) == 1)\r\n        # Both parents should be requested, now that they are both missing.\r\n        peer2.wait_for_parent_requests([int(parent_peekaboo_AB[\"txid\"], 16), int(parent_missing[\"txid\"], 16)])\r\n        peer2.send_and_ping(msg_tx(parent_missing[\"tx\"]))\r\n        peer2.send_and_ping(msg_tx(parent_peekaboo_AB[\"tx\"]))\r\n\r\n```\r\n\r\nThis code runs fine consistently.\r\n\r\nReason behind it is: `DeleteNode(pnode);` will actually disconnect the peer for the orphan transaction by calling `TxOrphanage::EraseForPeer`.  When `node.getorphantxs(verbosity=2)[0][\"from\"]` shows 1 connection, the node at least is half way through `DeleteNode(pnode);`, if not completed.  Call stack is:\r\n```\r\n    frame #0: 0x000000010360fb04 bitcoind`TxOrphanage::EraseForPeer(this=0x00006000014fe4a8, peer=0) at txorphanage.cpp:121:5\r\n    frame #1: 0x00000001031f9fa8 bitcoind`node::TxDownloadManagerImpl::DisconnectedPeer(this=0x00006000014fe490, nodeid=0) at txdownloadman_impl.cpp:165:17\r\n    frame #2: 0x00000001031f9f34 bitcoind`node::TxDownloadManager::DisconnectedPeer(this=0x0000000133055168, nodeid=0) at txdownloadman_impl.cpp:40:13\r\n    frame #3: 0x0000000102ebb638 bitcoind`(anonymous namespace)::PeerManagerImpl::FinalizeNode(this=0x0000000133055000, node=0x000000013260b6c0) at net_processing.cpp:1601:25\r\n    frame #4: 0x0000000102dec0bc bitcoind`CConnman::DeleteNode(this=0x0000000133009200, pnode=0x000000013260b6c0) at net.cpp:3494:16\r\n    frame #5: 0x0000000102deb060 bitcoind`CConnman::DisconnectNodes(this=0x0000000133009200) at net.cpp:1969:17\r\n```\r\nWould you consider this as a potential solution?\r\n\r\nCC: @hodlinator @maflcko @glozow ",
+          "created_at": "2025-03-17T22:33:16Z"
+        },
+        {
+          "user": "tnndbtc",
+          "body": "@mzumsande Regarding to your concerns on `disconnect_p2ps`, I took a look at the implementation of it in `test/functional/test_framework/test_node.py`:\r\n\r\n```\r\n    def disconnect_p2ps(self):\r\n        \"\"\"Close all p2p connections to the node.\r\n        Use only after each p2p has sent a version message to ensure the wait works.\"\"\"\r\n        for p in self.p2ps:\r\n            p.peer_disconnect()\r\n        del self.p2ps[:]\r\n\r\n        self.wait_until(lambda: self.num_test_p2p_connections() == 0)\r\n```\r\n\r\nAfter wait until `self.num_test_p2p_connections()` equals to 0, the `CConnman::m_nodes` becomes empty.  However, it doesn't guarantee all underlying nodes have released its resources, or completed `DeleteNode(pnode);`\r\n\r\nI don't know whether this is acceptable.   But, I tried to move the erase of `pnode` from `m_nodes` AFTER `DeleteNode(pnode);` , it passes this test: `test/functional/p2p_orphan_handling.py,` but ran into other test failures.\r\nfeature_index_prune.py                                   | ✖ Failed  | 107 s\r\nfeature_pruning.py                                       | ✖ Failed  | 407 s\r\nfeature_signet.py                                        | ✖ Failed  | 3 s\r\np2p_ibd_stalling.py --v1transport                        | ✖ Failed  | 86 s\r\np2p_invalid_messages.py                                  | ✖ Failed  | 2 s\r\nrpc_net.py --v1transport                                 | ✖ Failed  | 2 s\r\nrpc_net.py --v2transport                                 | ✖ Failed  | 4 s\r\n\r\n```\r\n    {           \r\n        LOCK(m_nodes_mutex);\r\n        ...\r\n        ...\r\n        ...\r\n        // Disconnect unused nodes\r\n        std::vector<CNode*> nodes_copy = m_nodes;\r\n        for (CNode* pnode : nodes_copy)\r\n        {\r\n            if (pnode->fDisconnect)\r\n            {\r\n                // remove from m_nodes\r\n                // m_nodes.erase(remove(m_nodes.begin(), m_nodes.end(), pnode), m_nodes.end());\r\n        ...\r\n        ...\r\n        ...\r\n    } \r\n    {\r\n        // Delete disconnected nodes\r\n        std::list<CNode*> nodes_disconnected_copy = m_nodes_disconnected;\r\n        for (CNode* pnode : nodes_disconnected_copy)\r\n        {\r\n            // Destroy the object only after other threads have stopped using it.\r\n            if (pnode->GetRefCount() <= 0) {\r\n                // m_nodes_disconnected.remove(pnode);\r\n                // std::this_thread::sleep_for(std::chrono::seconds(5));\r\n                DeleteNode(pnode);\r\n            }    \r\n        }    \r\n    } \r\n    {    \r\n        // MOVE the erase of m_nodes AFTER DeleteNode(pnode);\r\n        LOCK(m_nodes_mutex);\r\n\r\n        // Delete disconnected nodes\r\n        std::list<CNode*> nodes_disconnected_copy = m_nodes_disconnected;\r\n        for (CNode* pnode : nodes_disconnected_copy)\r\n        {    \r\n            // Destroy the object only after other threads have stopped using it.\r\n            m_nodes.erase(remove(m_nodes.begin(), m_nodes.end(), pnode), m_nodes.end());\r\n            m_nodes_disconnected.remove(pnode);\r\n        }    \r\n    } \r\n```\r\n\r\nSo, I currently don't see a clean way to check that the p2p connections are fully dropped.",
+          "created_at": "2025-03-18T02:01:39Z"
+        }
+      ]
+    },
+    {
+      "number": 32062,
+      "title": "[29.x] backports and rc2",
+      "body": "backports:\r\n- #32049\r\n- #32063\r\n- #32064 \r\n- #32070 \r\n- #31917\r\n- https://github.com/bitcoin-core/gui/pull/858",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2025-03-13T21:10:43Z",
+      "updated_at": "2025-03-18T13:28:28Z",
+      "comments": 7,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32062",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32062.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [Sjors](https://github.com/bitcoin/bitcoin/pull/32062#issuecomment-2729135997), [hebasto](https://github.com/bitcoin/bitcoin/pull/32062#pullrequestreview-2690117498), [ismaelsadeeq](https://github.com/bitcoin/bitcoin/pull/32062#pullrequestreview-2690931188) |\n| Stale ACK | [davidgumberg](https://github.com/bitcoin/bitcoin/pull/32062#issuecomment-2722748021) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-13T21:10:46Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "lgtm ACK https://github.com/bitcoin/bitcoin/pull/32062/commits/188ec87589476355a4280f8a561d954b9fbbb7af",
+          "created_at": "2025-03-13T21:37:30Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Can also pull in https://github.com/bitcoin-core/gui/pull/858 (if not this rc than next).",
+          "created_at": "2025-03-17T05:44:06Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK 02d030292a93fdf77bf59c8007fea3cebb2bf3fa\r\n\r\nI cherry-picked the pull requests, ran `gen-bitcoin-conf.sh` (built with ` -DWITH_ZMQ=ON`) and compared to this PR (minus the version bump commits).\r\n\r\nI do get a slightly difference in `share/examples/bitcoin.conf`, maybe due to a build option?\r\n\r\n```\r\n-# estimatefee, http, i2p, ipc, leveldb, libevent, mempool,\r\n+# estimatefee, http, i2p, ipc, leveldb, libevent, lock, mempool,\r\n```\r\n\r\nUpdate: it's because I had to delete `build`, rather than just remove `-DCMAKE_BUILD_TYPE=Debug`",
+          "created_at": "2025-03-17T08:14:27Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Can also pull in [bitcoin-core/gui#858](https://github.com/bitcoin-core/gui/pull/858) (if not this rc than next).\r\n\r\n+1",
+          "created_at": "2025-03-17T09:10:50Z"
+        },
+        {
+          "user": "glozow",
+          "body": "> Can also pull in [bitcoin-core/gui#858](https://github.com/bitcoin-core/gui/pull/858) (if not this rc than next).\r\n\r\nadded",
+          "created_at": "2025-03-17T10:18:03Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "ACK 74df31cb0bdef9cce31ae62ed71a1e386cba0274\r\n\r\nDon't forget to add https://github.com/bitcoin-core/gui/pull/858 to the PR description.",
+          "created_at": "2025-03-17T11:25:20Z"
+        }
+      ]
+    },
+    {
+      "number": 32061,
+      "title": "Replace libevent with our own HTTP and socket-handling implementation",
+      "body": "This is a major component of [removing libevent as a dependency of the project](https://github.com/bitcoin/bitcoin/issues/31194), by replacing the HTTP server used for RPC and REST with one implemented entirely within the Bitcoin Core codebase. The new `HTTPServer` class runs its own I/O thread, handling socket connections with code based on #30988, but tailored specifically for HTTP.\r\n\r\nSome functional tests were added in #32408 to cover libevent behaviors that remain consistent with this branch. \r\n\r\nCommit strategy:\r\n- Implement a few helper functions for strings, timestamps, etc needed by HTTP protocol\r\n- Isolate the existing libevent-based HTTP server in a namespace `http_libevent`\r\n- Implement HTTP in a new namespace `http_bitcoin` (classes like `HTTPRequest`, `HTTPClient`, etc...)\r\n- Switch bitcoind from the libevent server to the new server\r\n- Clean up (delete `http_libevent`)\r\n\r\nI am currently seeing about a 10% speed up in the functional tests on my own arm/macos machine.\r\n\r\n## Integration testing:\r\n\r\nI am testing the new HTTP server by forking projects that integrate with bitcoin via HTTP and running their integration tests with bitcoind built from this branch (on Github actions). I will continue adding integrations over time, and re-running these CI tests as this branch gets rebased:\r\n\r\n- [NodeJS `rpc-bitcoin`](https://github.com/pinheadmz/rpc-bitcoin/pull/1)\r\n- [electrs](https://github.com/pinheadmz/electrs/pull/1)\r\n- [lnd](https://github.com/pinheadmz/lnd/pull/1)\r\n- [eclair](https://github.com/pinheadmz/eclair/pull/1)\r\n- [corepc](https://github.com/pinheadmz/corepc/pull/1)\r\n- [bitcoinjs-lib](https://github.com/pinheadmz/bitcoinjs-lib/pull/1)",
+      "state": "open",
+      "user": "pinheadmz",
+      "created_at": "2025-03-13T19:32:14Z",
+      "updated_at": "2026-01-14T19:58:48Z",
+      "comments": 23,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32061",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ]
+    },
+    {
+      "number": 32060,
+      "title": "test: Add support for mainnet addresses in address_to_scriptpubkey",
+      "body": "This commit adds support for mainnet addresses (P2PKH and P2SH) in the address_to_scriptpubkey function in the test framework. Previously, the function only supported testnet addresses and segwit addresses.\r\n\r\nThe changes include:\r\n- Adding support for mainnet P2PKH addresses (version 0)\r\n- Adding support for mainnet P2SH addresses (version 5)\r\n- Adding tests to verify the new functionality",
+      "state": "closed",
+      "user": "VolodymyrBg",
+      "created_at": "2025-03-13T17:11:06Z",
+      "updated_at": "2025-04-11T06:05:06Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32060",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32060.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [luke-jr](https://github.com/bitcoin/bitcoin/pull/32060#issuecomment-2791381407), [achow101](https://github.com/bitcoin/bitcoin/pull/32060#issuecomment-2794969884) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31974](https://github.com/bitcoin/bitcoin/pull/31974) (Drop testnet3 by Sjors)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-13T17:11:14Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Please squash your commits according to https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#squashing-commits",
+          "created_at": "2025-03-14T14:33:59Z"
+        },
+        {
+          "user": "VolodymyrBg",
+          "body": "@maflcko  Done",
+          "created_at": "2025-03-14T17:33:27Z"
+        },
+        {
+          "user": "VolodymyrBg",
+          "body": "@davidgumberg I applied myself. Thank you",
+          "created_at": "2025-03-14T17:35:39Z"
+        },
+        {
+          "user": "VolodymyrBg",
+          "body": "@maflcko @davidgumberg is something wrong?",
+          "created_at": "2025-03-17T16:33:07Z"
+        },
+        {
+          "user": "VolodymyrBg",
+          "body": "@maflcko \r\n@davidgumberg \r\ncould you check it please when you have a free moment?",
+          "created_at": "2025-03-24T15:37:42Z"
+        },
+        {
+          "user": "VolodymyrBg",
+          "body": "@l0rinc What could you say about this PR? is this worth or I should close it, too?",
+          "created_at": "2025-04-07T17:43:12Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "@VolodymyrBg, unlike in many other open source projects that are eager to receive any contribution whatsoever, the PoW (i.e., the amount of preparation and effort required for your contribution to minimize the workload for reviewers) needed in Bitcoin Core is a lot higher. Most people won't have the patience to explain how to do git interactive rebases, how to tell a story in logical, reviewable commits, or how to update your PR after receiving feedback. Contributors are expected to research these processes themselves and demonstrate technical competence before their changes will be seriously considered.\r\nIt's painful, but often the lack of feedback is feedback. We all have to learn this the hard way.",
+          "created_at": "2025-04-07T18:10:03Z"
+        },
+        {
+          "user": "VolodymyrBg",
+          "body": "> @VolodymyrBg, unlike in many other open source projects that are eager to receive any contribution whatsoever, the PoW (i.e., the amount of preparation and effort required for your contribution to minimize the workload for reviewers) needed in Bitcoin Core is a lot higher. Most people won't have the patience to explain how to do git interactive rebases, how to tell a story in logical, reviewable commits, or how to update your PR after receiving feedback. Contributors are expected to research these processes themselves and demonstrate technical competence before their changes will be seriously considered. It's painful, but often the lack of feedback is feedback. We all have to learn this the hard way.\r\n\r\nI completely agree with you, sorry for taking your time.",
+          "created_at": "2025-04-07T18:19:49Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "NACK without a rationale.",
+          "created_at": "2025-04-10T02:18:04Z"
+        },
+        {
+          "user": "achow101",
+          "body": "Concept NACK\r\n\r\nWhy? This functionality is not used or needed in any tests. If it is needed in a test in a (future) PR, then it can be added at that time.",
+          "created_at": "2025-04-10T19:37:10Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Closing for now, due to controversy and feedback. It can be picked up again in the future, when there is a proper motivation and larger picture where this fits in.",
+          "created_at": "2025-04-11T06:05:05Z"
+        }
+      ]
+    },
+    {
+      "number": 32059,
+      "title": "test: Update coverage.cpp to drop linux restriction",
+      "body": "In PR [#31901](https://github.com/bitcoin/bitcoin/pull/31901), Coverage.cpp was introduced as a separate utility file, based on existing code. However, the macro defined in Coverage.cpp was limited to Clang and Linux, which caused issues for users on macOS when using the newly introduced deterministic test tooling.\r\n\r\nThis change adds fallback functions which are used when building without code coverage on non linux env.\r\nThis adds support for macOS to ResetCoverageCounters. ResetCoverageCounters is used by the unit tests in `g_rng_temp_path_init` to support the deterministic unit test tooling. It is also used in fuzz tests to completely suppress coverage from anything init-related.\r\n\r\nSee [Readme](https://github.com/bitcoin/bitcoin/blob/master/contrib/devtools/README.md) on how to test this for deterministic unit & fuzz test.  \r\n\r\nSuggestion for test files: \r\n\r\n- for  unit test: `util_string_tests`\r\n- for fuzz test: `addition_overflow `\r\n\r\nThese files should give deterministic results",
+      "state": "closed",
+      "user": "janb84",
+      "created_at": "2025-03-13T17:05:59Z",
+      "updated_at": "2025-04-18T08:12:58Z",
+      "comments": 14,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32059",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32059.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32059#issuecomment-2727364835), [hodlinator](https://github.com/bitcoin/bitcoin/pull/32059#pullrequestreview-2691382483) |\n| Stale ACK | [Prabhat1308](https://github.com/bitcoin/bitcoin/pull/32059#issuecomment-2723306164) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-13T17:06:03Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "From the original PR it's not obvious how to use this, is there a tl&dr for what to test?",
+          "created_at": "2025-03-13T17:08:29Z"
+        },
+        {
+          "user": "janb84",
+          "body": "> From the original PR it's not obvious how to use this, is there a tl&dr for what to test?\r\n\r\nUse this config:\r\n```shell\r\ncmake -S . -B build -DCMAKE_C_COMPILER='clang' -DCMAKE_CXX_COMPILER='clang++' -DCMAKE_CXX_FLAGS='-fprofile-instr-generate -fcoverage-mapping'\r\n```\r\nbuild as normal :\r\n```shell\r\n cmake --build build \r\n ```\r\n Run tooling for util_string_tests:\r\n ```shell\r\n RUST_BACKTRACE=1 cargo run --manifest-path ./contrib/devtools/deterministic-unittest-coverage/Cargo.toml -- $PWD/build util_string_tests\r\n ````\r\n \r\n Should return :\r\n ```shell\r\n *** No errors detected\r\nThe coverage was deterministic across two runs.\r\n```",
+          "created_at": "2025-03-13T17:18:23Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/38726376360</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-13T18:28:07Z"
+        },
+        {
+          "user": "Prabhat1308",
+          "body": "tACK [`611151e`](https://github.com/bitcoin/bitcoin/pull/32059/commits/611151eae75ed756437442a5d0356f525c73dd00)\r\n\r\n",
+          "created_at": "2025-03-14T03:21:02Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> In PR [#31901](https://github.com/bitcoin/bitcoin/pull/31901), Coverage.cpp was introduced\r\n\r\nFor reference the cpp file was created in fa99c3b544b631cfe34d52fb5e71636aedb1b423, but the code was only moved. You can check this by observing it greyed out via `git show fa99c3b544b631cfe34d52fb5e71636aedb1b423 --color-moved=dimmed-zebra`.",
+          "created_at": "2025-03-14T06:57:44Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/38761520899</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-14T08:01:55Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "No strong opinion, but it could make sense to reword the pull description. Otherwise, it is less clear what all the effects of this will be. Something like:\r\n\r\n> This adds support for macOS to `ResetCoverageCounters`. `ResetCoverageCounters` is used by the unit tests in `g_rng_temp_path_init` to support the deterministic unit test tooling. It is also used in fuzz tests to completely suppress coverage from anything init-related.\r\n\r\n> Refer to ... Readme on how to test this for deterministic unit tests ...\r\n\r\nBut anything is fine, Concept ACK.",
+          "created_at": "2025-03-14T08:10:47Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> See [Readme](https://github.com/bitcoin/bitcoin/blob/master/contrib/devtools/README.md) on how to test this for deterministic unit test\r\n\r\nI guess this can be used to test both (unit and fuzz tests)? If yes, it could make sense to recommend a unit test and fuzz test, each. For example `util_string_tests` and `addition_overflow` (haven't tested either)? Before, the coverage should be non-deterministic, and after this change, it should be deterministic.\r\n\r\n",
+          "created_at": "2025-03-14T09:00:34Z"
+        },
+        {
+          "user": "janb84",
+          "body": "> > See [Readme](https://github.com/bitcoin/bitcoin/blob/master/contrib/devtools/README.md) on how to test this for deterministic unit test\r\n> \r\n> I guess this can be used to test both (unit and fuzz tests)? If yes, it could make sense to recommend a unit test and fuzz test, each. For example `util_string_tests` and `addition_overflow` (haven't tested either)? Before, the coverage should be non-deterministic, and after this change, it should be deterministic.\r\n\r\nHave incorporated your suggestion and checked that the files are indeed deterministic (they are). Again thanks for the review ",
+          "created_at": "2025-03-14T09:20:42Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Looking at the diff, this seems to be dropping the linux restriction, so \"adding support for macOS\" doesn't seem entirely accurate. It could be better to say \"drop linux restriction\" or \"add support for non-linux\". For example, OpenBSD may work as well now.",
+          "created_at": "2025-03-14T11:50:25Z"
+        },
+        {
+          "user": "janb84",
+          "body": "In my write-up of the explanation to hodlinator I discovered one edge case that needed fixing, sorry for the new commit.\r\n\r\nReason: \r\nWeak fallbacks (__attribute__((weak))) were added instead of strong ones to ensure the profiling runtime’s implementations are used when profiling is enabled, **_avoiding linker conflicts or silent overrides_**. This guarantees correct counter resets while keeping empty fallbacks when profiling is off, improving portability.\r\n",
+          "created_at": "2025-03-14T17:25:53Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review-only ACK ecdbe72916c1cabbf810e892d25fe6eed30b1306",
+          "created_at": "2025-03-15T09:02:09Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "review-only ACK 54e6eacc1fccd602897d9e3025c62f83194ffd5b",
+          "created_at": "2025-03-16T12:16:35Z"
+        }
+      ]
+    },
+    {
+      "number": 32058,
+      "title": "test: get rid of redundant TODO tag",
+      "body": "The `FEE` parameter in `test/functional/feature_dbcrash.py::generate_small_transaction()` is not a fee rate, but an absolute fee. Hence, it doesn't make sense to replace it with node relay based fee calculation. Get rid of the TODO comment suggesting otherwise.",
+      "state": "closed",
+      "user": "Chand-ra",
+      "created_at": "2025-03-13T13:28:11Z",
+      "updated_at": "2025-12-08T07:34:19Z",
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32058",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32058.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32058#issuecomment-2757746751) |\n| Concept ACK | [yancyribbens](https://github.com/bitcoin/bitcoin/pull/32058#issuecomment-2725238772), [kevkevinpal](https://github.com/bitcoin/bitcoin/pull/32058#issuecomment-2743163279) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-13T13:28:15Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Concept ACK.  The changes appear to address the TODO correctly.",
+          "created_at": "2025-03-14T16:53:09Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "Concept ACK [6aff347](https://github.com/bitcoin/bitcoin/pull/32058/commits/6aff3477349e51180cf4f62784d07a4d4ce00603)\r\n\r\nThis looks to address the TODO correctly",
+          "created_at": "2025-03-21T11:57:52Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Please squash your commits according to https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#squashing-commits",
+          "created_at": "2025-03-25T14:12:23Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK d065208f0f06309d776114d777bb16b8c38af3f1",
+          "created_at": "2025-03-27T11:44:37Z"
+        }
+      ]
+    },
+    {
+      "number": 32057,
+      "title": "test: avoid disk space warning for non-regtest",
+      "body": "`feature_config_args.py` incorrectly assumed that its testnet4 node would not log a disk space warning.\r\n\r\nBut when #31978 increased `m_assumed_blockchain_size` on testnet4 from 1 to 11 GiB, it triggered this bug on my RAM disk, see https://github.com/bitcoin/bitcoin/tree/master/test#speed-up-test-runs-with-a-ram-disk\r\n\r\nThis PR fixes the issue by using `-prune` which prevents the warning.",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-03-13T12:35:47Z",
+      "updated_at": "2025-03-25T14:37:26Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32057",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32057.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [fjahr](https://github.com/bitcoin/bitcoin/pull/32057#issuecomment-2726736148), [rkrux](https://github.com/bitcoin/bitcoin/pull/32057#pullrequestreview-2690371123), [maflcko](https://github.com/bitcoin/bitcoin/pull/32057#issuecomment-2734583144) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#31974](https://github.com/bitcoin/bitcoin/pull/31974) (Drop testnet3 by Sjors)\n* [#29365](https://github.com/bitcoin/bitcoin/pull/29365) (Extend signetchallenge to set target block spacing by starius)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-13T12:35:51Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "cc @fjahr ",
+          "created_at": "2025-03-13T12:35:57Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "utACK c09e2a72ff3b851d4c47d1e715b8bdcc54027364\r\n\r\nChange looks good to me.",
+          "created_at": "2025-03-14T20:36:57Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Implemented @maflcko's suggestion of using prune to prevent the disk warning rather than deleting it from the log.\r\n\r\nI also found the same issue in `feature_signet` when using the suggested 4 GB instead my usual bigger RAM disk.\r\n\r\nYou may still occasionally get this failure if you use a too small RAM disk and lots of tests in parallel, but the test suite will warn you:\r\n\r\n```\r\nThere may be insufficient free space in /Volumes/RAMDisk/tmp/test_runner_₿_🏃_20250315_161228 to run the Bitcoin functional test suite.\r\n```",
+          "created_at": "2025-03-15T15:10:44Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "ACK 20fe41e9e83d510fd467f5a999d55a614b16ef89\r\n\r\nCool, that's a simpler solution.",
+          "created_at": "2025-03-15T15:17:25Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@rkrux updated PR description",
+          "created_at": "2025-03-17T12:55:27Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 20fe41e9e83d510fd467f5a999d55a614b16ef89",
+          "created_at": "2025-03-18T20:08:47Z"
+        },
+        {
+          "user": "glozow",
+          "body": "Backported in #32136",
+          "created_at": "2025-03-25T14:37:22Z"
+        }
+      ]
+    },
+    {
+      "number": 32056,
+      "title": "doc: Adjust path in comment",
+      "body": "It was overlooked in bitcoin/bitcoin#31161.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-03-13T11:48:15Z",
+      "updated_at": "2025-03-13T12:19:34Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32056",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32056.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [dergoegge](https://github.com/bitcoin/bitcoin/pull/32056#pullrequestreview-2681604534), [l0rinc](https://github.com/bitcoin/bitcoin/pull/32056#issuecomment-2721060655) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-13T11:48:22Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "cc @dergoegge ",
+          "created_at": "2025-03-13T11:48:29Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "utACK de1ada079bf52b9d751bbeb1e7bb3011beb62429\r\n\r\nSearched the code couldn't find any other obvious leftovers",
+          "created_at": "2025-03-13T12:17:48Z"
+        }
+      ]
+    },
+    {
+      "number": 32055,
+      "title": "contrib: Fix deterministic-unittest-coverage tool path",
+      "body": "Fix for the tooling introduced/modified in #31901 but the tool path is broken due to silent merge conflict introduced by #31161.\r\n\r\nThe `deterministic-unittest-coverage` and `deterministic-fuzz-coverage` tools uses the `fuzz` and `test_bitcoind` binaries, for which the location was modified in #31161. This patch updates the location to align with that change.",
+      "state": "closed",
+      "user": "janb84",
+      "created_at": "2025-03-13T11:14:12Z",
+      "updated_at": "2025-04-18T08:13:01Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32055",
+      "labels": [
+        "Scripts and tools"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32055.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32055#issuecomment-2720906097), [hebasto](https://github.com/bitcoin/bitcoin/pull/32055#pullrequestreview-2681554633) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n",
+          "created_at": "2025-03-13T11:14:18Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 893ca5458503b432b055f0cf8a9a5aa2cfe7f6e4\r\n\r\nHaven't tested this, but it looks plausible.",
+          "created_at": "2025-03-13T11:20:54Z"
+        }
+      ]
+    },
+    {
+      "number": 32054,
+      "title": "cmake, guix: Skip building tests in subtrees for releases",
+      "body": "The `BUILD_TESTS` variable has a broad scope, controlling:\r\n- Building `test_bitcoin`\r\n- Building `test_bitcoin-qt`\r\n- Building tests in subtrees, such as `secp256k1` and `univalue`\r\n- Creating CTest's tests\r\n\r\nHowever, for release builds, only the first is necessary.\r\n\r\nTo address this, this PR introduces the new `BUILD_TEST_BINARY` variable, which allows building only the `test_bitcoin` binary without enabling other tests.\r\n\r\n---\r\n\r\nAs an alternative, an explicit list of build targets can be specified in the `contrib/guix/libexec/build.sh`.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2025-03-13T09:21:18Z",
+      "updated_at": "2025-08-28T20:04:15Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32054",
+      "labels": [
+        "Build system",
+        "Needs rebase"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32054.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [fanquake](https://github.com/bitcoin/bitcoin/pull/32054#issuecomment-2720590640) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#32250](https://github.com/bitcoin/bitcoin/pull/32250) (ci: Slim down lint image by maflcko)\n* [#32247](https://github.com/bitcoin/bitcoin/pull/32247) (BIP-348 (OP_CHECKSIGFROMSTACK) (regtest only) by jamesob)\n* [#32191](https://github.com/bitcoin/bitcoin/pull/32191) (Make TxGraph fuzz tests more deterministic by sipa)\n* [#31802](https://github.com/bitcoin/bitcoin/pull/31802) (Add bitcoin-{node,gui} to release binaries for IPC by Sjors)\n* [#30975](https://github.com/bitcoin/bitcoin/pull/30975) (ci: build multiprocess on most jobs by Sjors)\n* [#25573](https://github.com/bitcoin/bitcoin/pull/25573) ([POC] guix: produce a fully `-static-pie` bitcoind by fanquake)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n",
+          "created_at": "2025-03-13T09:21:24Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Concept NACK on introducing build options to control building single binaries.",
+          "created_at": "2025-03-13T09:36:32Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Concept NACK on introducing build options to control building single binaries.\r\n\r\nEvery other `BUILD_*` variable does exactly the same.",
+          "created_at": "2025-03-13T09:40:49Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "Alternatively, an explicit list of targets could be specified here:https://github.com/bitcoin/bitcoin/blob/c20a5ce106be716a503bcf615a1900ba8c635430/contrib/guix/libexec/build.sh#L247-L248",
+          "created_at": "2025-03-13T09:45:26Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Sure, but I think that isn't a great pattern, and this makes it worse. Having a `BUILD_TESTS` & `BUILD_TEST_BINARY` is awkward, and I think the motivation is poor; if you only want to build certain binaries in a Guix build, then use `--target`. Why does it need a new build option?",
+          "created_at": "2025-03-13T09:45:42Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2025-04-11T13:23:38Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--13523179cfe9479db18ec6c5d236f789-->\n⌛ There hasn't been much activity lately and the patch still needs rebase. What is the status here?\n\n* Is it still relevant? ➡️ Please solve the conflicts to make it ready for review and to ensure the CI passes.\n* Is it no longer relevant? ➡️ Please close.\n* Did the author lose interest or time to work on this? ➡️ Please close it and mark it 'Up for grabs' with the label, so that it can be picked up in the future.\n",
+          "created_at": "2025-08-17T02:02:51Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--13523179cfe9479db18ec6c5d236f789-->\n⌛ There hasn't been much activity lately and the patch still needs rebase. What is the status here?\n\n* Is it still relevant? ➡️ Please solve the conflicts to make it ready for review and to ensure the CI passes.\n* Is it no longer relevant? ➡️ Please close.\n* Did the author lose interest or time to work on this? ➡️ Please close it and mark it 'Up for grabs' with the label, so that it can be picked up in the future.\n",
+          "created_at": "2025-08-17T04:08:43Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "@hebasto Could close?",
+          "created_at": "2025-08-28T11:57:06Z"
+        }
+      ]
+    },
+    {
+      "number": 32051,
+      "title": "p2p: protect addnode peers during IBD",
+      "body": "When an addnode peer is disconnected by our IBD headers/blocks download timeout or stalling logic, `ThreadOpenAddedConnections` attempts to immediately reconnect it (unless \"onetry\" was passed to the addnode RPC) up to the limit of 8 addnode connections that is separate from regular peer connection limits.\r\n\r\nDuring IBD in a low-bandwidth environment, I see these disconnections+reconnections very frequently with high-quality addnode peers; see https://www.erisian.com.au/bitcoin-core-dev/log-2025-01-22.html#l-85. The logging for these disconnections was: \"Peer is stalling block download, disconnecting <peer>.\" The ping times of the affected peers were often 20-100 seconds.\r\n\r\nAfter IBD, I continue to see the following addnode peer disconnections, albeit much less frequently: \"Timeout downloading block <hex>, disconnecting <peer>.\"\r\n\r\nThis is probably network, resource and time intensive to an extent, particularly in the case of I2P peers that involves destroying and rebuilding 2 tunnels per peer connection, and worth avoiding where it is simple to do so.\r\n\r\nAutomatic (non-manually added) peers are also disconnected, but they are a different category and case (non-trusted non-protected peers, no immediate reconnection) that would require monitoring over time to adjust the timeouts accordingly; mzumsande was looking into this (see https://www.erisian.com.au/bitcoin-core-dev/log-2025-01-22.html#l-105).\r\n\r\nThe goal of this pull is therefore to avoid unnecessary disconnections/immediate reconnections of addnode peers.\r\n",
+      "state": "closed",
+      "user": "jonatack",
+      "created_at": "2025-03-13T03:27:53Z",
+      "updated_at": "2025-10-22T15:57:50Z",
+      "comments": 21,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32051",
+      "labels": [
+        "P2P",
+        "Review club"
+      ]
+    },
+    {
+      "number": 32050,
+      "title": "test: avoid treating hash results as integers",
+      "body": "In the functional test framework we currently have a strong tendency to treat and store identifiers that result from hash functions (e.g. (w)txids, block hashes) as integers, which seems an unnatural and confusing choice. Hashes are just pseudo-random sequences of bytes, and there is usually no need to apply integer operations on them; the only exceptions I could think of is PoW-verification of block hashes with the less-than (`<`) operator, or interpreting the byte-string as scalar in the EC-context for e.g. key derivation.\r\n\r\nI'd hence argue that most uses of `ser_uint256`/`uint256_from_str` and txid conversions via `int(txid/blockhash, 16)` are potential code smells and should be reduced to a minimum long-term if possible. This PR is a first step into this direction, intentionally kept small with (what I think) uncontroversial changes for demonstration purposes, to check out if other contributors are interested in this. A next step could be to change the classes of primitives (CTransaction, CBlock etc.) and network messages (msg_) to store hash results as actual bytes (maybe in a class wrapping the bytes that offers conversion from/to human-readable strings [1], for easier interaction with RPC calls and debug outputs) rather than ints. But that would of course need larger, potentially more controversial changes, and its questionable if its really worth the effort.\r\n\r\n[1] unfortunately, txids and block hashes are shown to user in reverse byte order, so e.g. a txid_bytes->txid_str conversion is not just a simple `txid_bytes.hex()`, but a `txid_bytes[::-1].hex()`",
+      "state": "closed",
+      "user": "theStack",
+      "created_at": "2025-03-13T00:37:03Z",
+      "updated_at": "2025-03-27T15:10:00Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32050",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32050.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/32050#pullrequestreview-2681458911), [rkrux](https://github.com/bitcoin/bitcoin/pull/32050#pullrequestreview-2681875100), [ryanofsky](https://github.com/bitcoin/bitcoin/pull/32050#pullrequestreview-2721408208) |\n| Concept ACK | [laanwj](https://github.com/bitcoin/bitcoin/pull/32050#issuecomment-2720673981), [l0rinc](https://github.com/bitcoin/bitcoin/pull/32050#issuecomment-2720869178), [yancyribbens](https://github.com/bitcoin/bitcoin/pull/32050#issuecomment-2721071281), [BrandonOdiwuor](https://github.com/bitcoin/bitcoin/pull/32050#pullrequestreview-2703676924) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nNo conflicts as of last run.\n",
+          "created_at": "2025-03-13T00:37:06Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Debug: https://github.com/bitcoin/bitcoin/runs/38676500414</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n",
+          "created_at": "2025-03-13T00:43:55Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "Concept ACK, this has been a source of frustration and misunderstanding in bitcoin's code since the beginning. Hashes are byte blobs, not numbers, and unless there's a specific good reason to interpret them as a number (can't think of more cases than those you already mention) they shouldn't be.",
+          "created_at": "2025-03-13T10:04:41Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Concept ACK",
+          "created_at": "2025-03-13T11:08:59Z"
+        },
+        {
+          "user": "yancyribbens",
+          "body": "Concept ACK.  It looks like the result of the sample changes is less casting which is a good sign.",
+          "created_at": "2025-03-13T12:21:11Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "Changes in this PR seem reasonable to me although I don't agree with premise that it is an improvement to treat hashes as blobs, but then arbitrarily decide to display those blobs as reverse-byte hex strings, when there is probably not other software that displays blobs as reverse-byte hex strings.\r\n\r\nStatus quo where hashes are simply interpreted as little endian numbers, and those numbers are represented as hex strings in the standard way python and other software represents numbers represented as strings makes more sense conceptually and technically, IMO.\r\n\r\nI also think the part of the PR description that says it \"almost never makes sense to apply integer operations\" to hashes and then immediately lists examples where it makes sense to apply integer operations to hashes is a little hard to take seriously. Would be better to say something like converting hashes to numbers is usually not necessary, so it is better to avoid doing it when not needed.\r\n\r\nAt the end of the day, I don't think it matters too much which approach is taken, and this code change does seem to remove some blob > number > blob round trips, which is nice.\r\n\r\nMy only concern would be that this PR is labeled \"part 1\" so I'd be worried about how many more parts there will be and whether code will be in left in a confusing intermediate state while it's being converted from one approach to the other.",
+          "created_at": "2025-03-13T16:04:56Z"
+        },
+        {
+          "user": "rkrux",
+          "body": "Re: https://github.com/bitcoin/bitcoin/pull/32050#issuecomment-2721796758\r\n\r\nThese are quite subtle points that are raised, but important IMO.\r\n\r\nEven if for some reason later it's decided to not do the cpp changes as suggested in the description, the functional test changes as done in this PR are good enough in their own right, and hence, I agree that \"part 1\" can be dropped from the title unless the author intends to do more type-conversion related functional test changes, which one can argue can be added in this PR itself because there appears to be a conceptual agreement for these changes in the tests now. Some portion of the language can also be altered in the description like suggested in the comment if the author agrees.",
+          "created_at": "2025-03-13T17:26:05Z"
+        },
+        {
+          "user": "theStack",
+          "body": "@ryanofsky @rkrux: Thanks for the feedback! Removed the \"(part 1)\" from the PR title as suggested and adapted the strong \"almost never makes sense\" wording in the description. I agree that displaying hash results as byte-reversed hex is an arbitrary decision, but one that stems from the Satoshi-era past and all Bitcoin protocol software that deals with user interface follows it (see also https://bitcoin.stackexchange.com/questions/116730/why-does-bitcoin-core-print-sha256-hashes-uint256-bytes-in-reverse-order).\r\n\r\n> Status quo where hashes are simply interpreted as little endian numbers, and those numbers are represented as hex strings in the standard way python and other software represents numbers represented as strings makes more sense conceptually and technically, IMO.\r\n\r\nI wouldn't agree to that statement, especially the \"simply\" part. For starters, many programming languages don't even offer support for larger numbers in the standard library, and it seems unnecessary to artificially involve an additional data type in the hash -> string conversion chain if that type is not even used for what it's intended to. Note that the changes proposed in this PR have been done for the main codebase already more than ten years ago: https://github.com/bitcoin/bitcoin/pull/5490 (even though arguably, the name `uint256` might still suggest otherwise). For the few cases where treating a hash as an integer does indeed make sense, an explicit type `arith_uint256` has been introduced.\r\n\r\n> My only concern would be that this PR is labeled \"part 1\" so I'd be worried about how many more parts there will be and whether code will be in left in a confusing intermediate state while it's being converted from one approach to the other.\r\n\r\nFair point, I agree that we shouldn't end up in an intermediate state. But these worries can be expressed in upcoming PRs that might create such a state (if there is any); whether there will be additional PRs or not is obviously not so much dependend on the title of a PR, but on whether other contributors signal interest in follow-ups (one has been expressed e.g. in https://github.com/bitcoin/bitcoin/pull/32050#discussion_r1993286997).\r\n\r\n",
+          "created_at": "2025-03-13T18:40:05Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "re: https://github.com/bitcoin/bitcoin/pull/32050#issuecomment-2722365413\r\n\r\n> I agree that displaying hash results as byte-reversed hex is an arbitrary decision, but one that stems from the Satoshi-era past and all Bitcoin protocol software that deals with user interface follows it (see also https://bitcoin.stackexchange.com/questions/116730/why-does-bitcoin-core-print-sha256-hashes-uint256-bytes-in-reverse-order).\r\n\r\nI think my point was that it wasn't an arbitrary decision but an intentional one, even if it didn't lead a positive outcome.\r\n\r\nBitcoin proof of work compares hashes with native `uint32_t` comparisons rather than `memcmp` when memcmp would be more straightforward. Maybe this was done because it was thought these comparisons would be faster on little endian machines. Or maybe this was done to try to be consistent with other logic already using little endian. But there was clearly some explicit choice to interpret hashes as little endian numbers, and to display them the way they are interpreted: as little endian numbers, not as blobs. The code goes out of its way to do this, it can't really be characterized as an arbitrary choice.\r\n",
+          "created_at": "2025-03-27T15:09:59Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 32053,
+      "title": "Add test coverage for getblocktemplate fees",
+      "body": "Suggested in https://github.com/bitcoin/bitcoin/pull/31897#discussion_r1992245751\n\nThere's probably other aspects of `getblocktemplate` and the underlying template construction methods that coverage.\n\nRelated:\n- #31981 adds coverage for the `proposal` mode",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-03-13T08:13:43Z",
+      "updated_at": "2025-03-25T12:42:46Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32053",
+      "labels": [
+        "Tests",
+        "Mining"
+      ],
+      "comment_list": [
+        {
+          "user": "Sjors",
+          "body": "I ended up writing one for #31897. Can be salvaged if that PR doesn't make it.",
+          "created_at": "2025-03-13T10:09:38Z"
+        }
+      ]
+    },
+    {
+      "number": 32052,
+      "title": "v29.0 Testing",
+      "body": "Umbrella issue for 29.0 testing. Please help testing on a wide variety of supported platforms, as well as interaction with different software.\n\nLet us know which version you tested on which operating system.\n\nIf you find an issue, please search Github for known issues first and then open a new Github issue.\n\nThis meta issue should not be used to report bugs, as a single thread makes it impossible to track more than one topic.\n\nSee [29.0 Release Notes Draft](https://github.com/bitcoin-core/bitcoin-devwiki/wiki/29.0-Release-Notes-Draft) for a list of changes.\n\nSee here for the testing guide: https://github.com/bitcoin-core/bitcoin-devwiki/wiki/29.0-Release-Candidate-Testing-Guide.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-03-13T05:57:11Z",
+      "updated_at": "2025-04-14T16:11:08Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32052",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "achow101",
+          "body": "#31844 Broke MacOS codesigning and notarization as it adds the manpage to the app, which `signapple` currently cannot cover in its signature. Since we did not have the manpage there before, and I don't think MacOS can even use that manpage, I think it would be reasonable to drop that from the app. I think we can skip codesigning for 29.0rc1.",
+          "created_at": "2025-03-14T00:32:37Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "This was fixed in #32064. So I guess we can't do the guix-sign step until the next release candidate?",
+          "created_at": "2025-03-14T16:18:07Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "I've completed testing the v29.0.0rc2 release candidate on Windows 11 Pro 24H2, using the default Edge browser for downloading.\n\nAll signatures look good. The browser flagged [`bitcoin-29.0rc2-win64-setup-unsigned.exe`](https://bitcoincore.org/bin/bitcoin-core-29.0/test.rc2/bitcoin-29.0rc2-win64-setup-unsigned.exe), which is expected:\n\n![Image](https://github.com/user-attachments/assets/71760f8b-9107-48cb-8ab0-207cfa64f682)\n\nThe binaries `bitcoind.exe`, `bitcoin-cli.exe`, `bitcoin-qt.exe` and `test-bitcoin.exe` function as expected.\n\nI was unable to test the `-natpmp` option, unfortunately.",
+          "created_at": "2025-03-24T16:08:43Z"
+        },
+        {
+          "user": "laanwj",
+          "body": "✅  i tested that the new NATPMP implementation works with protonvpn's automatic port forwarding (v29.0rc1 tag built from git):\n```\n# ip netns exec bitcoin-test bin/bitcoind  -regtest -natpmp=1 -debug=net\n2025-03-25T10:08:03Z Bitcoin Core version v29.0rc1 (release build)\n⋮\n2025-03-25T10:09:20Z mapport thread start\n2025-03-25T10:09:20Z [net] portmap: gateway [IPv4]: 10.2.0.1\n2025-03-25T10:09:20Z [net] pcp: Requesting port mapping for addr 0.0.0.0 port 18444 from gateway 10.2.0.1\n2025-03-25T10:09:20Z Bound to 127.0.0.1:18445\n2025-03-25T10:09:20Z [net] pcp: Internal address after connect: 10.2.0.2\n⋮\n2025-03-25T10:09:20Z [net] pcp: Received response of 8 bytes: 008000010058139c\n2025-03-25T10:09:20Z [net] portmap: Got unsupported PCP version response, falling back to NAT-PMP\n2025-03-25T10:09:20Z [net] natpmp: Requesting port mapping port 18444 from gateway 10.2.0.1\n2025-03-25T10:09:20Z [net] natpmp: Received response of 12 bytes: 008000000058139c4f7f83dd\n2025-03-25T10:09:20Z [net] natpmp: Received response of 16 bytes: 008200000058139c480ca7720000003c\n2025-03-25T10:09:20Z [net:info] portmap: Added mapping natpmp:79.127.131.221:42866 -> 10.2.0.2:18444 (for 60s)\n2025-03-25T10:09:20Z AddLocal(79.127.131.221:42866,3)\n2025-03-25T10:10:34Z [net] portmap: Could not determine IPv6 default gateway\n⋮\n2025-03-25T10:09:57Z [net] portmap: gateway [IPv4]: 10.2.0.1\n2025-03-25T10:09:57Z [net] pcp: Requesting port mapping for addr 0.0.0.0 port 18444 from gateway 10.2.0.1\n2025-03-25T10:09:57Z [net] pcp: Internal address after connect: 10.2.0.2\n```\nIt works successfully, and it re-requests the lease in time, even though the expiry time they give is non-characteristically short (60s). It also adds the correct external address/port for advertising even though it doesn't match the internal one.\n",
+          "created_at": "2025-03-25T10:16:22Z"
+        },
+        {
+          "user": "darosior",
+          "body": "I've tested to run a downstream project's ([Liana](https://github.com/wizardsardine/liana)'s) functional test suite against v29.0rc2. It did not surface any bug nor RPC interface regression. I also ran it with a `bitcoind` under Valgrind.\n\nI've also been running a (non-listening) v29.0rc2 mainnet node under Valgrind for a few days, sanity checking various operations but nothing really involved.\n\nI've also tried to get end users to test the new port mapping implementation on whatever router they use at home. Work in progress but a few of them have been sharing results in https://github.com/bitcoin/bitcoin/issues/31663.",
+          "created_at": "2025-03-26T20:22:33Z"
+        },
+        {
+          "user": "Lagrang3",
+          "body": "I've upgraded my mainnet node to v29.0rc2 with no issues running the following services:\n- electrs\n- datum\n- and core-lightning",
+          "created_at": "2025-03-28T15:09:54Z"
+        },
+        {
+          "user": "0xNegnin",
+          "body": "I also have upgraded to v29.0rc2 without any issue using the following stack:\n\n- bitcoind\n- electrs\n- nginx (as reverse proxy for electrs)\n- debian12\n\nUpdate: Same results with v29.0rc3",
+          "created_at": "2025-03-30T12:46:16Z"
+        },
+        {
+          "user": "jsarenik",
+          "body": "I also have upgraded to v29.0rc2 both on mainnet and signet (where one [faucet](https://alt.signetfaucet.com/) runs). Everything works well.\n\nUPDATE: Self-compiled v29.0rc3 with musl-libc 1.2.5 and all above works well. Also `test_bitcoin` run with 653 test cases and no errors found.",
+          "created_at": "2025-04-01T13:45:36Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "`v29.0` has been tagged: https://github.com/bitcoin/bitcoin/releases/tag/v29.0.",
+          "created_at": "2025-04-14T16:11:07Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pull_requests": 12,
+    "issues": 2
+  }
+}

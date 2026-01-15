@@ -1,0 +1,256 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:24:24.437686+00:00",
+  "date": "2025-10-20",
+  "pull_requests": [
+    {
+      "number": 33663,
+      "title": "net: Filter addrman during address selection via AddrPolicy to avoid underfill",
+      "body": "This PR introduces `AddrMan::AddrPolicy`, a predicate that allows callers to\r\nexclude addresses during selection. The policy returns true to skip a given\r\nentry and is evaluated while holding `AddrMan::cs`.\r\n\r\nThe mechanism is used in `CConnman::GetAddressesUnsafe()` to filter out\r\nbanned and discouraged peers during address selection instead of removing\r\nthem afterward. This prevents P2P responses (`GETADDR`) and RPCs (`getnodeaddresses)` from\r\nreturning fewer results than requested when large portions of the address space are filtered.\r\n\r\nAdditional improvements:\r\n- Logs the number of filtered entries for diagnostics\r\n- Avoids redundant filtering passes in higher-level callers\r\n- Keeps locking behavior unchanged (the policy runs under `AddrMan::cs`)\r\n\r\n**Testing**\r\n- Repro: ban or discourage a large set of addresses, then call\r\n  `getnodeaddresses 1`,  previously underfilled.\r\n- After this change, the RPC returns up to the requested count as expected.\r\n\r\nNo behavior change for unaffected callers.\r\n",
+      "state": "open",
+      "user": "waketraindev",
+      "created_at": "2025-10-20T18:03:51Z",
+      "updated_at": "2026-01-14T12:58:46Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33663",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33663.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [frankomosh](https://github.com/bitcoin/bitcoin/pull/33663#pullrequestreview-3464332521) |\n| Stale ACK | [mzumsande](https://github.com/bitcoin/bitcoin/pull/33663#pullrequestreview-3605973252) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#34162](https://github.com/bitcoin/bitcoin/pull/34162) (net: Avoid undershooting in GetAddressesUnsafe by fjahr)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\n\n\nPossible places where named args for integral literals may be used (e.g. `func(x, /*named_arg=*/0)` in C++, and `func(x, named_arg=0)` in Python):\n\n- addrman->GetAddr(/*max_addresses=*/0, /*max_pct=*/0, /*network=*/std::nullopt, /*filtered=*/false) in src/test/addrman_tests.cpp\n- addrman->GetAddr(/*max_addresses=*/0, /*max_pct=*/0, /*network=*/std::nullopt, /*filtered=*/false, /*policy=*/policyNoSkip) in src/test/addrman_tests.cpp\n- addrman->GetAddr(/*max_addresses=*/0, /*max_pct=*/0, /*network=*/std::nullopt, /*filtered=*/false, /*policy=*/policySkipAll) in src/test/addrman_tests.cpp\n- addrman->GetAddr(/*max_addresses=*/0, /*max_pct=*/0, /*network=*/std::nullopt, /*filtered=*/false, /*policy=*/policyPortPolicy) in src/test/addrman_tests.cpp\n\n\n\n<sup>2025-12-28</sup>\n",
+          "created_at": "2025-10-20T18:03:56Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "* updated PR description and commit message to highlight P2p getaddr responses\n* corrected formatting ",
+          "created_at": "2025-10-22T13:02:01Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "Added AddrPolicy coverage in addrman_tests",
+          "created_at": "2025-10-28T06:55:33Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "Added test verifying only expected addresses are returned and filtered ones excluded.",
+          "created_at": "2025-10-28T14:39:34Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "> While leaving some nit-ish comments I have realized that if we want to add such a generalized concept for filtering, we should implement the current filtering with it as well. E.g. `network` and `filtered` params go away and we only have `AddrPolicy` as param to `GetAddr`. Then use `AddrPolicy` to implement what `network` and `filtered` were doing. That's a bigger refactor but having this current mix with this redundancy is kind of ugly and I don't really think it's worth it alone.\n\nThanks for the suggestion! network and filtered serve distinct, standard purposes (network filters by network, filtered disables quality filtering), while AddrPolicy is specifically for custom filters that skip entries without reducing the returned count. Using AddrPolicy also avoids coupling AddrMan to other modules (like BanMan) for filtering.",
+          "created_at": "2025-12-27T04:55:38Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> network and filtered serve distinct, standard purposes (network filters by network, filtered disables quality filtering), while AddrPolicy is specifically for custom filters\r\n\r\nWhat distinguishes a \"standard\" from a \"custom\" filter? Is that documented somewhere? And if we need to add another filter that is \"standard\" we would add another param to the function rather than using `AddrPolicy`?\r\n\r\n> that skip entries without reducing the returned count\r\n\r\nHuh? If they don't reduce the count how are they filtering anything? This is not what the code is doing, the code is filtering and reducing the returned count with it as well of course. Also demonstrated by the tests. Am I misunderstanding what you mean with count?\r\n\r\n> Using AddrPolicy also avoids coupling AddrMan to other modules (like BanMan) for filtering.\r\n\r\nI don't see how that is an argument against using it for network and quality filters.",
+          "created_at": "2025-12-27T14:03:42Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "> > network and filtered serve distinct, standard purposes (network filters by network, filtered disables quality filtering), while AddrPolicy is specifically for custom filters\r\n> \r\n> What distinguishes a \"standard\" from a \"custom\" filter? Is that documented somewhere? And if we need to add another filter that is \"standard\" we would add another param to the function rather than using `AddrPolicy`?\r\n\r\nBy \"standard\" I mean filters that are intrinsic to `AddrMan` and operate on `AddrInfo` (for example network classification and quality filtering via `ai.IsTerrible(now)`), and whose logic does not depend on external subsystems. By \"custom\" I mean filters that depend on external state or policy decisions outside of `AddrMan` (for example `BanMan`), which is what `AddrPolicy` is intended to support.\r\nIf a future filter is intrinsic to `AddrMan` and depends on `AddrInfo`, adding it as a separate parameter would be consistent with the existing design. If it depends on external state, `AddrPolicy` is the appropriate mechanism.\r\n\r\n> > that skip entries without reducing the returned count\r\n> \r\n> Huh? If they don't reduce the count how are they filtering anything? This is not what the code is doing, the code is filtering and reducing the returned count with it as well of course. Also demonstrated by the tests. Am I misunderstanding what you mean with count?\r\n\r\nCandidates are filtered and skipped during selection. The change here is *when* filtering happens. Previously, addresses were selected up to the target count and then banned or discouraged addresses were removed afterward, which caused the final `CConnman::GetAddressesUnsafe` result to be underfilled. With the current approach, filtering happens during selection, and the loop continues until the requested number of unfiltered addresses is reached or the address space is exhausted. So filtering still occurs, but it no longer causes `CConnman::GetAddressesUnsafe` to be underfilled relative to the request.\r\n\r\n> > Using AddrPolicy also avoids coupling AddrMan to other modules (like BanMan) for filtering.\r\n> \r\n> I don't see how that is an argument against using it for network and quality filters.\r\n\r\nThe point is not that `AddrPolicy` cannot express network or quality filters, but that doing so would conflate concerns and duplicate logic. Network and quality filtering are `AddrMan` responsibilities and require access to `AddrInfo`. Expressing them via `AddrPolicy` would either broaden the policy contract or require reimplementing intrinsic `AddrMan` logic in call sites, without addressing a concrete issue in this PR. This change keeps the PR scoped to fixing underfilling and avoids introducing additional coupling or refactors.\r\n\r\n---\r\n\r\nTo keep this PR focused: its purpose is to fix the underfilling issue by moving ban and discourage filtering into the selection phase. The current design achieves that with minimal surface area change and without refactoring existing `AddrMan` responsibilities or introducing new abstractions. Broader refactors (for example unifying all filters behind `AddrPolicy` or introducing builders/factories) can be explored separately if there is concrete motivation, but are out of scope for this change. Unless there are functional issues with the current approach, I intend to keep the implementation as is.\r\n",
+          "created_at": "2025-12-27T18:25:26Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "added fuzz coverage, fixed identation, removed hints, ordered includes, cleared nits",
+          "created_at": "2025-12-28T13:21:50Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "It appears you aren't interested in addressing the rest of my comments @waketraindev so I have implemented my suggested approach in #34162 instead. I prefer this approach due to its simplicity, as stated above. It fixes the overshooting problem in 2 lines and adds a functional test case for the behavior change. I will leave it to the other reviewers to decide which approach they prefer.",
+          "created_at": "2025-12-28T17:02:53Z"
+        },
+        {
+          "user": "Bicaru20",
+          "body": "I think @fjahr has a good point. If the main goal is simply to always return 1000 addresses in `GetAddr`, introducing a predicate feels like adding unnecessary complexity. I believe his solution is cleaner. \r\n\r\n> While leaving some nit-ish comments I have realized that if we want to add such a generalized concept for filtering, we should implement the current filtering with it as well. E.g. `network` and `filtered` params go away and we only have `AddrPolicy` as param to `GetAddr`. Then use `AddrPolicy` to implement what `network` and `filtered` were doing. That's a bigger refactor but having this current mix with this redundancy is kind of ugly and I don't really think it's worth it alone.\r\n\r\nI agree. If a generalized filtering concept is added, it should replace the current filtering mechanism. This would make it easier to add new filters in the future. However, for the problem trying to be solved, I think it’s complicating things too much.",
+          "created_at": "2025-12-28T23:17:11Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "> I think @fjahr has a good point. If the main goal is simply to always return 1000 addresses in GetAddr, introducing a predicate feels like adding unnecessary complexity. I believe his solution is cleaner.\r\n\r\nRegarding the \"over-engineering\" concerns, the lambda(the predicate) here is inline, concise, and used only once.\r\nIt encapsulates a simple banned/discouraged filter applied during selection to ensure max_addresses are correctly returned.\r\nThis approach is both functionally necessary and efficient, and does not introduce unnecessary complexity, so I do not consider it over-engineering.\r\n\r\nOn the other hand, introducing a Builder to craft the policy, include other \"generalized\" filters, and export AddrInfo would be over-engineering in this context.\r\n\r\nThe #34162 approach is highly inefficient for a database of 70k+ records, with on-demand calls through RPC with a max_addresses limit, and whitelisted nodes. It is insufficient for my use cases. \r\n\r\nThough both performance and simplicity are in the eyes of the beholder ig.\r\n\r\nThanks for your feedback!",
+          "created_at": "2025-12-29T19:02:31Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "> The https://github.com/bitcoin/bitcoin/pull/34162 approach is highly inefficient for a database of 70k+ records, with on-demand calls through RPC with a max_addresses limit, and whitelisted nodes. It is insufficient for my use cases.\r\n\r\nIf you could be more explicit with what your use-case is then maybe you could convince more people that your approach is really necessary, even when you refuse to use it more broadly. It comes down to if core wants to support your use case bad enough to take on the extra code to maintain, I guess. You have a lot of addresses, ok! But I don't understand how whitelists play into this. Can you elaborate on that?  And why would you do frequent calls to `getnodeaddresses` with a max_addresses limit, couldn't you just increase the limit?\r\n\r\nI did some rough high-level benchmarking using the functional test from my PR ([code](https://github.com/fjahr/bitcoin/commit/8f2b63286386b8dbd83981a4c33a4634530323d8)). Due to the bucket collisions I couldn't get beyond 64k addresses, but I guess this is close enough and I didn't try to get to an even higher number. I am using an arbitrary 1k banned addresses and 1k max limit.\r\n\r\nThis PR (#33663) has the best performance, not surprising:\r\n\r\n```\r\n2025-12-30T14:34:41.400316Z TestFramework (INFO): Test that getnodeaddresses returns max count even with banned addresses\r\n2025-12-30T14:34:41.770049Z TestFramework (INFO): Adding addresses to addrman...\r\n2025-12-30T14:36:31.483147Z TestFramework (INFO): Successfully added 62636 addresses\r\n2025-12-30T14:36:31.483466Z TestFramework (INFO): Banning 1000 addresses...\r\n2025-12-30T14:36:32.511395Z TestFramework (INFO): Requesting 1000 addresses...\r\n2025-12-30T14:36:32.523990Z TestFramework (INFO): getnodeaddresses returned 1000 addresses in 0.013s\r\n```\r\n\r\nMy alternative approach (#34162) is much slower, also not surprising, but at 0.5s it doesn't seem like this would break any workflows I can imagine:\r\n\r\n```\r\n2025-12-30T14:18:12.848562Z TestFramework (INFO): Test that getnodeaddresses returns max count even with banned addresses\r\n2025-12-30T14:18:13.218102Z TestFramework (INFO): Adding addresses to addrman...\r\n2025-12-30T14:19:58.335032Z TestFramework (INFO): Successfully added 63471 addresses\r\n2025-12-30T14:19:58.335895Z TestFramework (INFO): Banning 1000 addresses...\r\n2025-12-30T14:19:59.381759Z TestFramework (INFO): Requesting 1000 addresses...\r\n2025-12-30T14:19:59.940406Z TestFramework (INFO): getnodeaddresses returned 1000 addresses in 0.559s\r\n```\r\n\r\nAs I had said previously, my suggest PR could be tweaked to get a middle ground between performance and simplicity, like for example fetch not all but only 2x max limit addresses to get to comparable performance and this should really work in 99% percent of the cases I can imagine. But sure, it's not as clean as #34162 but performance is comparable to this PR ( [demo code](https://github.com/fjahr/bitcoin/commit/556dcada56aca9136184098e61a07526ab408009)):\r\n\r\n```\r\n2025-12-30T14:52:23.292663Z TestFramework (INFO): Test that getnodeaddresses returns max count even with banned addresses\r\n2025-12-30T14:52:23.663001Z TestFramework (INFO): Adding addresses to addrman...\r\n2025-12-30T14:54:09.192166Z TestFramework (INFO): Successfully added 63395 addresses\r\n2025-12-30T14:54:09.193381Z TestFramework (INFO): Banning 1000 addresses...\r\n2025-12-30T14:54:10.218400Z TestFramework (INFO): Requesting 1000 addresses...\r\n2025-12-30T14:54:10.238231Z TestFramework (INFO): getnodeaddresses returned 1000 addresses in 0.020s\r\n2025-12-30T14:54:11.333769Z TestFramework (INFO): Stopping nodes\r\n```\r\n\r\nI also learned from playing around with the numbers that the total number of addresses only has minor impact on the performance. The big performance impact is coming from the number of banned addresses. So maybe that's where the discussion on performance (aside from the goals) should focus. I am not sure I have a good grasp on what % of addresses are realistically banned or discouraged. @0xB10C maybe you can weigh in?",
+          "created_at": "2026-01-05T15:24:19Z"
+        }
+      ]
+    },
+    {
+      "number": 33662,
+      "title": "doc: add AGENTS.md",
+      "body": "Suggest disclosure via commit message:\r\n\r\n```\r\nAssisted-by: GitHub Copilot\r\nAssisted-by: OpenAI GPT-5-Codex\r\n```\r\n\r\nThis can be useful information for reviewers, especially when the PR is from a new contributor.\r\n\r\nIn my experience using Visual Studio Code in agent mode (e.g. on https://github.com/sjors/sv2-tp) it usually picks up and follows this instruction.\r\n\r\nOf course anyone who wishes to hide the fact they're using an LLM can simply modify the commit message.\r\n\r\nSee https://agents.md",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-10-20T15:00:06Z",
+      "updated_at": "2025-10-24T10:00:20Z",
+      "comments": 20,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33662",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33662.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/33662#issuecomment-3425448023), [kevkevinpal](https://github.com/bitcoin/bitcoin/pull/33662#issuecomment-3434113195) |\n| Concept NACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/33662#issuecomment-3423544412), [dergoegge](https://github.com/bitcoin/bitcoin/pull/33662#issuecomment-3442047914) |\n| Concept ACK | [m3dwards](https://github.com/bitcoin/bitcoin/pull/33662#issuecomment-3422505220) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-20T15:00:12Z"
+        },
+        {
+          "user": "m3dwards",
+          "body": "Concept ACK\r\n\r\nnit: The instruction could tell the LLM to add itself rather than the current literal instruction of adding the two hardcoded values. Perhaps they are clever enough to figure out what's being asked.",
+          "created_at": "2025-10-20T15:09:40Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "I'm not sure I understand - why would we do anything like this? The LLM is just a tool, it would be weird to say: \"suggestions by: clang-tidy\" or \"IDE used: CLion\" or \"Assisted-by: The C++ Programming Language: Special Edition\". \r\n\r\nMaybe the problem is committing something here that's \"substantially generated with automated assistance\" - in the same sense as we would discourage copy-pasting something here from StackOverflow without tailoring it to our needs.\r\n\r\nSo that's a concept NACK from me.",
+          "created_at": "2025-10-20T20:05:19Z"
+        },
+        {
+          "user": "kanzure",
+          "body": "Using a canary is a clever idea. I agree with @l0rinc's reasoning that this is not a good idea, but if there was a decision to insert an attempt at a LLM canary then I would suggest double checking the models and see if offering them a few dollars to donate to a philanthropic cause is more likely to evoke the LLM behavior you are trying to get. This strategy was previously effective, no idea if it's still effective.",
+          "created_at": "2025-10-20T20:54:19Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> 'm not sure I understand - why would we do anything like this? The LLM is just a tool, it would be weird to say: \"suggestions by: clang-tidy\"\r\n\r\nI think the goal is just to tag obvious obvious hallucinated \"one-shot\" vibe commits. Anyone using an llm as a tool, just as a way to implement what they understand and could implement fully themselves, can trivially remove the tag from the commit message. Though, it should be harmless to leave it in. Generally, we do mention when a change is motivated by clang-tidy, or refer to the cppreference website, or the C++ standard, so this additional information should not be harmful.",
+          "created_at": "2025-10-21T07:13:24Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "lgtm ACK 08cf213ec7e671dd4162d4ae4d0d20810547a444\r\n\r\nSeems harmless to add and could be useful information when it is present.",
+          "created_at": "2025-10-21T08:41:08Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "Why not simply create a label to flag them if their behavior is causing offense? What’s the purpose of disclosure, particularly if it’s an inadvertent one the user didn’t intend or consent to?\n\nFrom my perspective, this suggestion seems to assume that LLMs would detect the agent’s file and automatically include commits or canaries derived from it, which risks unintentional disclosure.\n\nRealistically, though, no one’s going to sift through a wall of LLM-generated “vibe” commits to check disclosure tags.\n\nWould this introduce a reputational risk for the user? If so, would that be considered a positive or negative outcome? And in such a case, should the user be banned or otherwise disqualified?\n\nAssisted-by: GitHub Copilot\nAssisted-by: OpenAI GPT-5-Codex",
+          "created_at": "2025-10-21T09:39:56Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> which risks unintentional disclosure.\r\n> \r\n> Realistically, though, no one’s going to sift through a wall of LLM-generated “vibe” commits to check disclosure tags.\r\n\r\nI'd say this is one of the use-cases to cover. If someone does not want to disclose their vibe-coding, but they fail to read their own submission of code (and the corresponding commit messages), the error is on their part. The requirement for pull request authors to understand their own changes is documented in essence in the pre-existing contributing guideline https://github.com/bitcoin/bitcoin?tab=contributing-ov-file#readme. Though, the contribution guidelines already exist today and are not changed by this pull request.\r\n\r\n\r\n\r\n> And in such a case, should the user be banned or otherwise disqualified?\r\n\r\nMy understanding is that LLM contributions, where the developer fully understands them, and could have fully authored them exactly the same way are not disqualified. However, when the author can not demonstrate understanding and the licensing questions are unclear (https://github.com/bitcoin/bitcoin?tab=contributing-ov-file#copyright), it is possible that a pull request is closed. Though, this is already happening today and this pull request does not change the policy around that.",
+          "created_at": "2025-10-21T12:42:36Z"
+        },
+        {
+          "user": "kanzure",
+          "body": "One of the norms ought to be minimizing the waste of time of the project's\ncontributors. Whether such a waste is achieved by LLM (or not) does not\nmatter. Using autogenerated code is not itself negligent or malicious, just\nlike using any other tools could theoretically be productive.\n",
+          "created_at": "2025-10-21T12:57:01Z"
+        },
+        {
+          "user": "kanzure",
+          "body": "One other concern I have is that this is essentially a change that is meant\nto be subversive to a developer's tools or development environment. In\npart, it is justified as a defense against the waste of other project\ncontributor's time. I see the logic there. Indeed this is not far from a\nrecommending and providing a default linter config, or a default commit\nmessage format recommendation. However there should be some thought put\ninto the subject of where the limit is with regards to other\npossibly-hostile prompt injection (or other non-LLM measures) we ought to\nbe willing to accept encoded into the source tree.\n",
+          "created_at": "2025-10-21T13:06:25Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> However there should be some thought put into the subject of where the limit is with regards to other possibly-hostile prompt injection\r\n\r\nI'd say using agents to amend the prompt is well-understood and well-docuemented. I think the change here is harmless and mildly useful. Though, if it doesn't work in the future, it can be removed again and it is probably not worth to bend over backwards to achieve undocumented prompt injection. ",
+          "created_at": "2025-10-21T13:12:12Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "~0 doesn't seem like something we need to do. Would conflict with anyone using a .gitignored `agents.md` locally?",
+          "created_at": "2025-10-21T14:39:40Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Two arguments against this change that I find worth pondering a bit about: \r\n\r\n@fanquake wrote:\r\n\r\n> Would conflict with anyone using a .gitignored `agents.md` locally?\r\n\r\nI haven't checked if there's an existing solution for that.\r\n\r\nUpdate: there's some discussion about that:\r\n\r\n- https://github.com/openai/agents.md/issues/72\r\n\r\n@kanzure wrote:\r\n\r\n> One other concern I have is that this is essentially a change that is meant\r\nto be subversive to a developer's tools or development environment.\r\n\r\nI could take that argument even further: let's say an anonymous developer uses the LLM to slightly tweak their wording and coding style as a defence against stylometric analysis. They accidentally forget to remove the attribution. An adversary could then look at the commit timestamp and subpoena the LLM company for logs, possibly identifying them.\r\n\r\n@kanzure I don't agree with this:\r\n\r\n> One of the norms ought to be minimizing the waste of time of the project's\r\ncontributors. Whether such a waste is achieved by LLM (or not) does not\r\nmatter.\r\n\r\nIt does matter, because a reviewer may not realise at first glance what they're dealing with and waste their time on serious review. Then only after some time goes by do they realise it's nonsensical code. When you see that a new contributor used an LLM, you can have your guard up.\r\n\r\nIt's true that after getting burned a few times as a reviewer, you'll adapt and learn to recognise such code. But a little help in the form of attribution is useful.\r\n\r\n@maflcko wrote:\r\n\r\n> My understanding is that LLM contributions, where the developer fully understands them, and could have fully authored them exactly the same way are not disqualified. \r\n\r\nI agree. Even when being initially guarded as a reviewer, the code may turn out to be perfectly fine.",
+          "created_at": "2025-10-22T08:09:21Z"
+        },
+        {
+          "user": "glozow",
+          "body": "If this is/becomes an established convention, I think it's fine to have an agents.md. I'm interested to see what other ways this can help - my cursory reading suggests this can aid agents in understanding dos and donts of the repo, codebase organization, documentation hints, etc. But I'm not really interested in encouraging more contributions that are authored this way.\r\n\r\nMy current reaction is that this will \"catch\" very few people who don't want to disclose. In my experience, you'd really need to be asleep at the wheel to miss something like this, but maybe I'm not vibing properly. I'd propose we auto-close stuff with this tag, otherwise I think it's unlikely this will save us that much time, so concept -0.",
+          "created_at": "2025-10-22T09:48:40Z"
+        },
+        {
+          "user": "waketraindev",
+          "body": "> ...When you see that a new contributor used an LLM, you can have your guard up.\r\n\r\nWouldn't it make sense to add those tags to all commits, regardless of whether assistance was used, to help encourage more thorough and attentive reviews? It seems important that reviewers stay thoughtful and cautious with all changes, no matter the level of assistance, the authors's reputation, or their role in the project",
+          "created_at": "2025-10-22T10:26:50Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "ACK [08cf213](https://github.com/bitcoin/bitcoin/pull/33662/commits/08cf213ec7e671dd4162d4ae4d0d20810547a444)\r\n\r\nDoesn't hurt to add and it could useful when we do see the Co-author as an llm",
+          "created_at": "2025-10-22T20:31:24Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> subpoena\r\n\r\nWould be trivial to address by just using a more general tag like `assisted-by-llm`. I don't think we care about the exact model and parameters, and on which cloud provider (or locally) it was run?\r\n\r\n",
+          "created_at": "2025-10-23T09:59:35Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "Concept NACK\r\n\r\nWhile I agree that drive by LLM PRs are very annoying and this might make them easier to spot, Drahtbot is already fairly good at catching them through heuristics.\r\n\r\nThis would also be annoying for anyone using LLMs who has there own agents file.",
+          "created_at": "2025-10-24T09:17:01Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Closing for now due to controversy. This should be a trivial and harmless change, but apparently it is not, so there is little value in lengthening the discussion further.\r\n\r\nPlease leave a comment if you want this to be re-opened.",
+          "created_at": "2025-10-24T09:47:32Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "> Drahtbot is already fairly good at catching them through heuristics.\r\n\r\nI only recently learned that we already auto-close many of these, so the ones that reviewers see are just a few leftovers.\r\n\r\nThanks for everyones feedback.",
+          "created_at": "2025-10-24T10:00:11Z"
+        }
+      ]
+    },
+    {
+      "number": 33661,
+      "title": "test: Add test on skip heights in CBlockIndex",
+      "body": "The skip height values, used by `CBlockIndex::BuildSkip()` and `GetSkipHeight` are not tested and not well documented. (noticed while reviewing #33515, recently merged).\r\n\r\nThe motivation is to document the skip value computation through a test.\r\n\r\nThe first commit adds a test for the properties of the distribution of skip values, namely that they have non-uniform distribution: most values are small but there are some large ones as well.\r\n\r\nThe second commit adds low-level tests to the `GetSkipHeight()` internal method. The tests are low level, thus of limited value, and the commit also touches the non-test code minimally (to make the method accessible). Therefore this commit has lower priority.\r\n",
+      "state": "open",
+      "user": "optout21",
+      "created_at": "2025-10-20T12:08:37Z",
+      "updated_at": "2025-12-16T11:14:31Z",
+      "comments": 26,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33661",
+      "labels": [
+        "Tests"
+      ]
+    },
+    {
+      "number": 33659,
+      "title": "Improve fatal error message for block read failures in BaseIndex::ProcessBlock",
+      "body": "When a block read operation fails in BaseIndex::ProcessBlock, the current error message only reports:\r\nFailed to read block %s from disk\r\n\r\nThis message doesn't provide enough context to help developers or node operators diagnose the problem.\r\n\r\nWhat changed?\r\nThe fatal error message now includes:\r\nThe block hash (already existed)\r\nThe block height\r\nA clearer description of the issue\r\nA hint to check whether the block exists in the database\r\n\r\nBefore:\r\n```\r\nFatalErrorf(\"Failed to read block %s from disk\",\r\n             pindex->GetBlockHash().ToString());\r\n```\r\n\r\nAfter\r\n```\r\nFatalErrorf(\"Block reading error: Could not read block with hash %s from disk at height %d. Please check if the block exists in the database and is accessible.\",\r\n             pindex->GetBlockHash().ToString(), pindex->nHeight);\r\n```\r\n\r\nBenefit:\r\nMore informative error messages help node operators debug issues faster.",
+      "state": "closed",
+      "user": "ghost",
+      "created_at": "2025-10-20T08:48:30Z",
+      "updated_at": "2025-10-20T12:27:07Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33659",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33659.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [stickies-v](https://github.com/bitcoin/bitcoin/pull/33659#issuecomment-3421841236) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-10-20T08:48:35Z"
+        },
+        {
+          "user": "stickies-v",
+          "body": "NACK, feels like busywork, don't see how this improves things.",
+          "created_at": "2025-10-20T12:22:18Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33664,
+      "title": ".",
+      "body": "",
+      "state": "closed",
+      "user": "linobadass1234-cmyk",
+      "created_at": "2025-10-20T23:45:23Z",
+      "updated_at": "2025-10-21T06:45:22Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33664",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 4,
+    "issues": 1
+  }
+}

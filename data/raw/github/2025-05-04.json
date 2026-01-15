@@ -1,0 +1,105 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T19:38:16.711966+00:00",
+  "date": "2025-05-04",
+  "pull_requests": [
+    {
+      "number": 32418,
+      "title": "[WIP] rpc: add `clearmempool` command for regtest mode",
+      "body": "## Description\r\n\r\nThis commit adds a new RPC command called `clearmempool`. It is designed to remove all tranasctions from the mempool (including those from invalidated blocks), and return their TXIDs.\r\n\r\nThe purpose of this command is to clear the mempool, then use the returned TXIDs to perform additional cleanup.\r\n\r\nWhen used in combination with `invalidateblock`, it allows me to roll-back the chain to a particular height, clear the mempool, then properly clean up wallets with `abandontransaction`.\r\n\r\nNote that this command does not prevent the transactions from being re-inserted back into the mempool, either through mempool.dat or user wallets. You have to perform additional cleanup to make sure your changes persist.\r\n\r\nI restricted this command to regtest mode as I only need it for running tests, but it could work in any mode.\r\n\r\n## Rationale\r\n\r\nMy rationale for adding this command is that I need the ability to cleanly rollback the chain and wallets during testing, and I kept running into the following roadblock:\r\n\r\n* `invalidateblock` will rollback the chain height, but all the transactions are dumped into the mempool, creating spending conflicts with the wallets.\r\n\r\n* You can prevent this dump from happening, most notably with `-walletbroadcast=0`, however that just hides the problem.\r\n\r\n* The real issue is that wallets are still tracking these transactions, and you need to pull their TXIDs from the mempool to properly purge them with `abandontransaction`.\r\n\r\n* But if the transactions are in the mempool, then `abandontransaction` will fail, which puts you in a catch-22 situation.\r\n\r\n`clearmempool` allows you to clear the mempool *and* capture a list of these transactions, so that you can perform the proper cleanup with `abandontransaction`.",
+      "state": "closed",
+      "user": "cmdruid",
+      "created_at": "2025-05-04T23:58:29Z",
+      "updated_at": "2025-06-30T17:22:13Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32418",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32418.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-04T23:58:33Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/41620114643</sub>\n<sub>LLM reason (✨ experimental): The CI failure is primarily caused by linting errors, specifically trailing whitespace in \"rpc_clearmempool.py\" and multiple spelling errors flagged by codespell.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-05-05T00:58:28Z"
+        },
+        {
+          "user": "andrewtoth",
+          "body": "> I need the ability to cleanly rollback the chain and wallets during testing\n\nWhat about invalidating the block, recording all mempool txs via `getrawmempool`, stopping the node, deleting `mempool.dat` and restarting?",
+          "created_at": "2025-05-05T01:21:26Z"
+        },
+        {
+          "user": "ajtowns",
+          "body": "Previously proposed in #13836\r\n\r\nWouldn't it be better to add an option to abandontransaction that tells it to first delete the transaction from the mempool? That could even be useful for mainnet, perhaps?",
+          "created_at": "2025-05-05T08:20:29Z"
+        },
+        {
+          "user": "cmdruid",
+          "body": "> What about invalidating the block, recording all mempool txs via `getrawmempool`, stopping the node, deleting `mempool.dat` and restarting?\r\n\r\nThe wallets will reinsert the transactions unless you prevent them from doing so, but then you don't know what transactions to remove from the wallet. Restarting the node mid-test is also slow and annoying.\r\n\r\n> Previously proposed in https://github.com/bitcoin/bitcoin/pull/13836\r\n\r\nI missed this earlier 😬, thank you for linking it.\r\n\r\nThe 2018 codebase looks so ancient by comparison 😆.\r\n\r\n> Wouldn't it be better to add an option to abandontransaction that tells it to first delete the transaction from the mempool? That could even be useful for mainnet, perhaps?\r\n\r\nMy use-case just involves a single wallet so I believe this would also work, and it does sound like a useful feature for `abandontransaction` to have.\r\n\r\nI went for a basic implementation that didn't change anything else in core to keep it simple, plus I needed it right away.\r\n\r\nWhich implementation do you think is more likely to be accepted? I could go either way, and wouldn't mind submitting another PR to change `abandontransaction` instead.",
+          "created_at": "2025-05-05T19:43:12Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > What about invalidating the block, recording all mempool txs via `getrawmempool`, stopping the node, deleting `mempool.dat` and restarting?\r\n> \r\n> The wallets will reinsert the transactions unless you prevent them from doing so, but then you don't know what transactions to remove from the wallet. Restarting the node mid-test is also slow and annoying.\r\n\r\nI think the idea was to \"record\"/remember the mempool txids to be abandoned later.\r\n\r\nA third alternative could be to just backup the wallet and restore it later, to discard the unwanted transactions. However, that also requires a restart.\r\n\r\nA fourth alternative could be to base the transactions on a coinbase that will become immature when invalidating the earlier block. This avoids the `clearmempool`, but you may still need to abandon (or double spend) the transactions in the wallet, further in the test (or restore a wallet backup without them).",
+          "created_at": "2025-05-06T06:07:42Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Are you still working on this or can it be closed?",
+          "created_at": "2025-06-02T13:15:45Z"
+        },
+        {
+          "user": "cmdruid",
+          "body": "I apologize for the wait.\r\n\r\nSo far I have been using this command to great effect on my personal fork. It does exactly what I need it to do, and seems to be the best way to go about implementing this kind of command.\r\n\r\nI did not make any changes to `abandontransaction` though. It doesn't apply to my use-case, and it also doesn't cover transactions in the mempool that are unrelated to my wallet (I want this command to purge *all* transactions).\r\n\r\nI would like to submit it as-is, but I need to figure out why the github tests are failing. Is there a guide on how to get past the almighty checklist? >_<",
+          "created_at": "2025-06-05T05:51:30Z"
+        },
+        {
+          "user": "cmdruid",
+          "body": "Unfortunately I don't have the time to push this through. I will close this for now.",
+          "created_at": "2025-06-30T17:22:13Z"
+        }
+      ]
+    },
+    {
+      "number": 32417,
+      "title": "doc: Explain that .gitignore is not for IDE-specific excludes",
+      "body": "This comes up frequently, so document it.\r\n\r\nExamples:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/27275\r\n* https://github.com/bitcoin/bitcoin/pull/21894\r\n* https://github.com/bitcoin/bitcoin/pull/32392\r\n* https://github.com/bitcoin/bitcoin/pull/17868\r\n\r\n...",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-05-04T16:53:09Z",
+      "updated_at": "2025-05-05T07:16:57Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32417",
+      "labels": [
+        "Docs"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/32417.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [hebasto](https://github.com/bitcoin/bitcoin/pull/32417#pullrequestreview-2813527707), [l0rinc](https://github.com/bitcoin/bitcoin/pull/32417#issuecomment-2849351198), [janb84](https://github.com/bitcoin/bitcoin/pull/32417#pullrequestreview-2813549591) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-05-04T16:53:12Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK fa9c8bc05e3bb72e2c3c726b643997cea4874158",
+          "created_at": "2025-05-04T17:04:12Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "ACK fada115cbeaa8c0ca3d19178499079b66ee5f499\r\n\r\nPR title and commit message still state IDE, but it's not important.",
+          "created_at": "2025-05-04T18:24:43Z"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "pull_requests": 2,
+    "issues": 0
+  }
+}

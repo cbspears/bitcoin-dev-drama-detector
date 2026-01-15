@@ -1,0 +1,682 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T20:10:56.250748+00:00",
+  "date": "2025-09-03",
+  "pull_requests": [
+    {
+      "number": 33300,
+      "title": "fuzz: compact block harness",
+      "body": "Posting up to get feedback, there are some design flaws with the approach in this PR. Coverage is [here](https://crypt-iq.github.io/fuzz_coverage_reports/cmpctblock-aflpp-inputs-09182025/) (look in `src/blockencodings.cpp`, relevant compact block bits in `src/net_processing.cpp`).\r\n\r\nThis harness can make (in)valid blocks, reconstruct blocks with in-mempool txns, mark peers as HB, and has high stability in AFL++ (~98-99%).\r\n\r\nThe main downside is that there are filesystem operations. In the `.init` function `initialize_cmpctblock`, a chain of 200 blocks is created. Each fuzzing iteration then copies this statically-named, \"cached\" data directory to a temporary directory that gets deleted at the end of the iteration. If each fuzzing iteration instead mines its own chain, the execs/s slows down to a crawl (~0.5/s or less, which would also make CI runs really slow).",
+      "state": "open",
+      "user": "Crypt-iQ",
+      "created_at": "2025-09-03T22:33:44Z",
+      "updated_at": "2026-01-12T21:54:31Z",
+      "comments": 11,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33300",
+      "labels": [
+        "Tests",
+        "Needs rebase",
+        "Fuzzing"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33300.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept ACK | [l0rinc](https://github.com/bitcoin/bitcoin/pull/33300#pullrequestreview-3447750850), [frankomosh](https://github.com/bitcoin/bitcoin/pull/33300#pullrequestreview-3586886869) |\n\nIf your review is incorrectly listed, please copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into the comment that the bot should ignore.\n<!--174a7506f384e20aa4161008e828411d-->\n### Conflicts\nReviewers, this pull request conflicts with the following ones:\n\n* [#33740](https://github.com/bitcoin/bitcoin/pull/33740) (RFC: bench: Add multi thread benchmarking by fjahr)\n* [#29415](https://github.com/bitcoin/bitcoin/pull/29415) (Broadcast own transactions only via short-lived Tor or I2P connections by vasild)\n\nIf you consider this pull request important, please also help to review the conflicting pull requests. Ideally, start with the one that should be merged first.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-03T22:33:49Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> There does not seem to be a way without signal handlers to delete the static, cached datadir when fuzzing is complete. Another issue is that multi-core fuzzing via AFL++ does not work because each worker will try to wipe the cached datadir (created via `-testdatadir` which wipes if the directory exists) which will cause other workers to crash if they are trying to copy it. I could not figure out a way for each worker to have their own cached datadir.\r\n\r\nIs my understanding correct that AFL will run init (create the static dir), then fork into several fuzz processes, which run for N iterations and then shut down and delete the static dir? (On the next re-fork, it will fail to find the static dir)?\r\n\r\nIf yes, a solution could be to lazy-init the static dir after init, after the fork. Also, you may have to use the pid (or os-rand) to name the static folder to avoid collisions.\r\n\r\nAs for deleting the dirs, maybe it is possible to spin up several testing setups at the same time:\r\n\r\n* One dummy testing setup to create a root dir, which is cleaned up\r\n* One testing setup living inside that root dir for the static folder (in a subfolder)\r\n* One testing setup living inside the root dir with a copy of the static folder\r\n\r\n(Not sure if this is possible, though)",
+          "created_at": "2025-09-04T06:45:28Z"
+        },
+        {
+          "user": "dergoegge",
+          "body": "> Is my understanding correct that AFL will run init (create the static dir), then fork into several fuzz processes, which run for N iterations and then shut down and delete the static dir? (On the next re-fork, it will fail to find the static dir)?\r\n\r\nWe removed the `__AFL_INIT` call, so it will actually fork prior to `init`, so I think all that's needed is to randomize the static dir name as you suggested as well.",
+          "created_at": "2025-09-04T08:59:35Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "> Is my understanding correct that AFL will run init (create the static dir), then fork into several fuzz processes, which run for N iterations and then shut down and delete the static dir? (On the next re-fork, it will fail to find the static dir)?\r\n\r\nMy description was a bit vague. Since the harness uses `-testdatadir` in init to create the static datadir, it does not get deleted in the TestingSetup destructor (by design of `-testdatadir`). Any time init is called, it will wipe the static datadir if it already exists. This can happen after N iterations (100,000 currently) or with a newly spawned worker after forking since the fork point is prior to init like @dergoegge mentioned. If the datadir is deleted while a fuzz iteration tries to copy the non-existent directory, it will crash.\r\n\r\n> a solution could be to lazy-init the static dir after init, after the fork\r\n\r\nI considered this, but I think this introduces some (slight) non-determinism as the directory may/may not exist?\r\n\r\n> Also, you may have to use the pid (or os-rand) to name the static folder to avoid collisions.\r\n\r\nYup, I agree. I think this randomization can only be done if the static datadir can be deleted at the end of fuzzing, otherwise there will be lots of these lying around?\r\n\r\n> As for deleting the dirs, maybe it is possible to spin up several testing setups at the same time:\r\n\r\nWhy is the dummy testing setup needed in this example? Could it instead just be two testing setups (one for the static datadir, one for the copied datadir)? I considered something similar to this as well where there is a `static TestingSetup` that gets destructed at the end of fuzzing (and wipes the static datadir) and one for each fuzz iteration (that gets destructed at the end of the iteration), but I was worried that the `static TestingSetup` would introduce more non-determinism? For example, what if this `static TestingSetup` has scheduling going on or is using the static datadir while we try to copy from it?",
+          "created_at": "2025-09-04T13:58:27Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "I was able to get AFL++ multi-core fuzzing to work by adding a static `FuzzedDirectoryWrapper` instance that deletes the passed path in its destructor as well as using a random element to each statically named datadir. Each instance is in the high 98-99% stability and does not crash after hitting 100,000 iterations (yay). I was not able to use multiple `TestingSetup`s at the same time without causing several panics due to assertions about globals. I will fix the lint, tidy jobs and also see if the deterministic-fuzz-coverage issues still pop up.",
+          "created_at": "2025-09-05T21:41:11Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "There is non-determinism [here](https://github.com/bitcoin/bitcoin/blob/c0894a0a2be032cd9a5d5945643689230ab10255/src/node/blockstorage.cpp#L490-L493) because `m_dirty_blockindex` is `std::set<CBlockIndex*>` and sorts based on the pointer. This can be fixed by adding a function object that compares the block hashes. However, I did not know if this should be added just for fuzz code and I have not run benchmarks.\r\n\r\nAfter patching the above non-determinism locally, there is also non-determinism in the scheduler ~~because this fuzz test uses the scheduler. I am guessing this is due to the `RegisterValidationInterface` call in the fuzz test notifying when transactions are being added or removed, and blocks being mined.~~",
+          "created_at": "2025-09-09T16:39:30Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "The latest push adds two commits:\r\n- a5619ea631bd8b93b4ef02a20abb8c1c0705d8e4 \"test: add setup_validation_interface_no_scheduler to TestOpts\"\r\n  - Disables the scheduler completely if set. This is needed because this harness creates a `TestingSetup` inside `FUZZ_TARGET` and scheduling a [promise](https://github.com/bitcoin/bitcoin/blob/74fa028da1ea38c5348f988464074899684cebcf/src/test/util/setup_common.cpp#L249) can be non-deterministic as the scheduler's `serviceQueue` may start with a non-empty `taskQueue`. This is not an issue in the other fuzz tests because their `TestingSetup` is created in .init and `ResetCoverageCounters` is called after.\r\n- e2f921458913bcbbe74115cdb2174b0ab31784f2 \"node: sort m_dirty_blockindex by block hash\"\r\n  - I am ok with this commit being removed and want to know what others think. This sorts by block hash rather than memory address and does introduce a slow-down in production code for no production benefit (I think because memory addresses are ~generally going to be increasing while inserting into `m_dirty_blockindex`, whereas sorting by block hash won't). I added it to show the change needed to make this harness fully non-deterministic. It is also possible to add an #ifdef so that it doesn't negatively affect production code, but I also don't want to set a precedent and litter the codebase with fuzz-specific macros. The sorting is needed as otherwise leveldb's MemTable will be non-deterministic across runs. I tried some alternatives, but this is the best I could come up with that made the `determinstic-fuzz-coverage` script happy.",
+          "created_at": "2025-09-18T16:18:17Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "e2f921458913bcbbe74115cdb2174b0ab31784f2 -> ed813c48f826d083becf93c741b483774c850c86:\r\n- Fixes an issue pointed out by @marcofleon with the PoW checks failing\r\n- Adds more descriptive commit messages ",
+          "created_at": "2025-10-02T16:43:25Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Latest push ed813c48f826d083becf93c741b483774c850c86 -> f2ce362:\r\n- implements `GetStrongRandBytes` per [comment](https://github.com/bitcoin/bitcoin/pull/33300#discussion_r2410849029)\r\n- modifies `create_tx` to choose a mempool UTXO only sometimes instead of most of the time\r\n- modifies `create_block` to generate more than 2 non-coinbase transactions per feedback from review club",
+          "created_at": "2025-10-30T18:08:05Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "Latest push f2ce3626a6a40b8688d711da1924db156dc2f02c -> 039c3aa breaks up the harness into more reviewable chunks. I forgot to add @stringintech as co-author on a commit during rebase, will address the next time I push up.\r\n\r\n",
+          "created_at": "2025-11-21T22:13:24Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--cf906140f33d8803c4a75a2196329ecb-->\n🐙 This pull request conflicts with the target branch and [needs rebase](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#rebasing-changes).\n",
+          "created_at": "2026-01-12T21:54:31Z"
+        }
+      ]
+    },
+    {
+      "number": 33299,
+      "title": "wallet: reduce unconditional logging during load",
+      "body": "Currently the unconditional log during init with a default wallet happens three times:\r\n```\r\n2025-09-03T19:57:16Z init message: Verifying wallet(s)…\r\n2025-09-03T19:57:16Z Using SQLite Version 3.45.1\r\n2025-09-03T19:57:16Z Using wallet XXX/.bitcoin/regtest\r\n2025-09-03T19:57:16Z Using SQLite Version 3.45.1\r\n2025-09-03T19:57:16Z Using wallet XXX/.bitcoin/regtest\r\n(...)\r\n2025-09-03T19:57:16Z Using SQLite Version 3.45.1\r\n2025-09-03T19:57:16Z Using wallet XXX/.bitcoin/regtest\r\n2025-09-03T19:57:16Z init message: Loading wallet…\r\n```\r\nFor non-default wallets it's logged two times.\r\n\r\nThat seems a bit too much, so just log the SQLite version just one, and remove the log for the full path of the wallet, since it's already clear from other logs which wallet is being loaded.",
+      "state": "closed",
+      "user": "mzumsande",
+      "created_at": "2025-09-03T20:09:54Z",
+      "updated_at": "2025-10-01T00:25:35Z",
+      "comments": 14,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33299",
+      "labels": [
+        "Wallet"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33299.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [furszy](https://github.com/bitcoin/bitcoin/pull/33299#pullrequestreview-3281260225), [stickies-v](https://github.com/bitcoin/bitcoin/pull/33299#pullrequestreview-3284021822), [achow101](https://github.com/bitcoin/bitcoin/pull/33299#issuecomment-3353204914) |\n| Concept ACK | [pablomartin4btc](https://github.com/bitcoin/bitcoin/pull/33299#pullrequestreview-3192852043), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33299#issuecomment-3315461001) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-03T20:09:59Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> Concept ACK, but I think unconditional logging in the ctor is not the right approach, suggested alternative:\r\n\r\nI like the move of the Sqlite log - it seems suficient to log the sqlite version just once instead for each wallet load. But the suggested spot fails the linter (\"Error: init.cpp.o depends on sqlite.cpp.o symbol\") so I kept in `sqlite.cpp`.\r\n\r\nIn the latest push I just removed the second log:\r\n\r\nI doubt that logging the full path in the success case adds much, while creating anonymization efforts in case of sharing logs publicly.  The wallet name is already being logged multiple times:\r\n\r\n```\r\n2025-09-09T19:35:20Z init message: Loading wallet…\r\n2025-09-09T19:35:20Z [w1] Last client version = 299900\r\n2025-09-09T19:35:20Z [w1] Descriptors: 8, Descriptor Keys: 1 plaintext, 0 encrypted, 1 total.\r\n2025-09-09T19:35:20Z [w1] Setting spkMan to active: id = b5d7ca2c5950616dc0ce4c21f1f1590da9858efe2a8ab00e2b10fa2786c3fe9f, type = legacy, internal = false\r\n(...)\r\n```\r\n\r\n\r\n> (but I only see the default wallet twice as any named wallets)\r\n\r\nI meant the case where `-wallet` is not specified and a default wallet exists, see https://github.com/bitcoin/bitcoin/blob/c0894a0a2be032cd9a5d5945643689230ab10255/src/wallet/load.cpp#L66C13-L66C31\r\n\r\n> Another suggestion, I know it's not part of the scope of this PR (...)\r\n\r\nI think I'd prefer to not do that here, maybe this can be done in one sweep for the entire wallet or so.\r\n\r\n",
+          "created_at": "2025-09-09T19:50:31Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 862faf3fa7a42238017f8d673b0c656531c688dc",
+          "created_at": "2025-09-17T19:54:31Z"
+        },
+        {
+          "user": "l0rinc",
+          "body": "Concept ACK",
+          "created_at": "2025-09-21T03:05:54Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> This version doesn't work properly and produces the same issue it's trying to fix \r\n\r\nGood catch, must have missed this during testing! Changed to your suggestion with a `static`.",
+          "created_at": "2025-09-22T17:23:20Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "> This version doesn't work properly and produces the same issue it's trying to fix as every call to MakeWalletDatabase() within conditionals in VerifyWallets() (src/wallet/load.cpp), ends up also calling the SQLiteDatabase::Cleanup() in the destructor which does --g_sqlite_count.\r\n\r\nLogging aside, I wonder if it's useful and intended to do all the existing setup including `sqlite3_initialize()`, followed by `sqlite3_shutdown()` multiple times during init for each wallet checked during `VerifyWallets()`? Seems like the intention of `g_sqlite_count` is to do it only once?!",
+          "created_at": "2025-09-22T17:49:09Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> > This version doesn't work properly and produces the same issue it's trying to fix as every call to MakeWalletDatabase() within conditionals in VerifyWallets() (src/wallet/load.cpp), ends up also calling the SQLiteDatabase::Cleanup() in the destructor which does --g_sqlite_count.\r\n> \r\n> Logging aside, I wonder if it's useful and intended to do all the existing setup including `sqlite3_initialize()`, followed by `sqlite3_shutdown()` multiple times during init for each wallet checked during `VerifyWallets()`? Seems like the intention of `g_sqlite_count` is to do it only once?!\r\n\r\nNot entirely.  In the absence of a DB manager, they were placed in the constructor so we can reallocate resources as needed, and we make sure everything is cleaned up when the last db object is destroyed. See the sqlite db destructor.\r\nThis implementation did not account for the initial verification step; it only considered multiple wallets being loaded simultaneously and remaining active for the entire app lifecycle.",
+          "created_at": "2025-09-22T18:26:56Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "> Logging aside, I wonder if it's useful and intended to do all the existing setup including `sqlite3_initialize()`, followed by `sqlite3_shutdown()` multiple times during init for each wallet checked during `VerifyWallets()`? Seems like the intention of `g_sqlite_count` is to do it only once?!\r\n\r\nSo, we have one sqlite (/ walletdb/ count) obj instance per wallet (/ wallet file), so during init we check first if there's a default wallet and then also check the wallets in the settings config (what verify does in verify wallets)... we could refactor verify (step 5 in init.cpp) and the load (step 9) together so if the db/ file is opened we keep it... but if there are any that can't be opened that would destroy the instance and decrease the counting. I'd need to investigate if the init steps in between depends on anything that need to be separated (verify first but not keep the wallets opened - step 5 - and load them later - step 9).\r\n\r\nAlso going back to the approach from @stickies-v I can see now that the dbversion method should be polymorphic with all formats (eg BerkeleyRO), even we only open descriptors at the moment during migration we open the old legacy for read-only purposes. ",
+          "created_at": "2025-09-22T18:31:48Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "After having talking with @furszy about this,  I'll push a slightly different approach soon - will put it in draft until then.",
+          "created_at": "2025-09-22T23:28:23Z"
+        },
+        {
+          "user": "mzumsande",
+          "body": "Changed to approach by @furszy which removes the logging from the sqlite ctor similar as suggested by stickies-v, and should also pass the linter.\r\n\r\nI'm only trying to remove the repeated logging here, no idea if the `VerifyWallets()` / `g_sqlite_count` interactions that the discussion here revealed are worth fixing - something for another PR or Issue perhaps.",
+          "created_at": "2025-09-29T18:15:19Z"
+        },
+        {
+          "user": "furszy",
+          "body": ">  If we have a diff DB format in the future we'd need to change this LogDBInfo() (once someone finds it).\r\n\r\nThat’s the idea. Have a single place where we log all possible DB engines and configurations. The DB engine and its configuration are not specific to any wallet; they are part of the general setup.\r\n\r\n> I'd prefer first the previous approach or as an alternative move the logic to MakeDatabase() in src/wallet/walletdb.cpp\r\n\r\nThat would print the same message multiple times. The goal is to print it only once during init so we know the available DB engine version.",
+          "created_at": "2025-09-30T13:59:39Z"
+        },
+        {
+          "user": "pablomartin4btc",
+          "body": "> That’s the idea. Have a single place where we log all possible DB engines and configurations.\r\n\r\nAt the moment, we use Berkeley DB when we want to migrate a Legacy wallet, the above statement maybe should consider this case.\r\n\r\n> That would print the same message multiple times. The goal is to print it only once during init so we know the available DB engine version.\r\n\r\nNop, previous one was 5e130a1e999b8a15d709cb698814c26a85eb5447, but I'm ok to centralize the DB engines logging in one place, still not sure if would be `VerifyWallets` or `WalletInit::Construct`.\r\n",
+          "created_at": "2025-09-30T14:31:35Z"
+        },
+        {
+          "user": "furszy",
+          "body": "> At the moment, we use Berkeley DB when we want to migrate a Legacy wallet, the above statement maybe should consider this case.\r\n\r\nYou can't initialize a BDB wallet during startup. The BDB engine is not part of the binary anymore. We just have a BDB reader that parses the db file on-demand during migration.\r\n\r\n> Nop, previous one was https://github.com/bitcoin/bitcoin/commit/5e130a1e999b8a15d709cb698814c26a85eb5447, but I'm ok to centralize the DB engines logging in one place, still not sure if would be VerifyWallets or WalletInit::Construct.\r\n\r\nThe goal is to not introduce a global static boolean.",
+          "created_at": "2025-09-30T14:34:50Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK fc861332b351c9390400054ff74193ce26eb0713",
+          "created_at": "2025-09-30T17:42:14Z"
+        }
+      ]
+    },
+    {
+      "number": 33297,
+      "title": "cmake: Inherit WERROR setting for secp256k1 build",
+      "body": "This change prevents unexpected CLI output when compiling with -DWERROR=ON (treat warnings as errors). This setting is now properly propagated to the secp256k1 subproject build. Previously, secp256k1 would be built without the -Werror flag even when the main project was configured to treat warnings as errors, creating inconsistent build behavior.\r\nhttps://github.com/bitcoin/bitcoin/issues/33284",
+      "state": "open",
+      "user": "jmoik",
+      "created_at": "2025-09-03T18:34:06Z",
+      "updated_at": "2025-10-28T02:28:45Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33297",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33297.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| Concept NACK | [purpleKarrot](https://github.com/bitcoin/bitcoin/pull/33297#issuecomment-3252744634) |\n| Concept ACK | [luke-jr](https://github.com/bitcoin/bitcoin/pull/33297#issuecomment-3305020767), [kevkevinpal](https://github.com/bitcoin/bitcoin/pull/33297#issuecomment-3341957155) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-03T18:34:11Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "I am going to NACK every PR that adds even more `-Werror`. 30f642952cb5bf39479bdbe467b3950f0d09324a was a mistake and should be reverted. The correct approach to this is [`CMAKE_COMPILE_WARNING_AS_ERROR`](https://cmake.org/cmake/help/latest/variable/CMAKE_COMPILE_WARNING_AS_ERROR.html).\r\n\r\nYes, that requires CMake 3.24 and we allow 3.22 as the minimum. It does not matter. Just accept that the setting will have no effect on Ubuntu 22.04. :man_shrugging:\r\n\r\ncc @hebasto ",
+          "created_at": "2025-09-04T09:25:13Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> [30f6429](https://github.com/bitcoin/bitcoin/commit/30f642952cb5bf39479bdbe467b3950f0d09324a) was a mistake...\r\n\r\nHere is some historical context.\r\n\r\nWhen migrating the build system from Autotools to CMake, there was a unanimous expectation that, at least initially, we should aim for 100% build option compatibility. That commit introduced CMake’s counterpart to Autotools’ `--enable-werror`:https://github.com/bitcoin/bitcoin/blob/6e62b705328f4a52875a1dd3bfb63fbba8586a01/configure.ac#L284-L289",
+          "created_at": "2025-09-04T11:27:10Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Yes, that requires CMake 3.24 and we allow 3.22 as the minimum. It does not matter. Just accept that the setting will have no effect on Ubuntu 22.04. 🤷‍♂️\r\n\r\nThat seems acceptable to me, as none of the CI jobs use CMake older that 3.24. And when someone sets `CMAKE_COMPILE_WARNING_AS_ERROR` with an older CMake, it issues a warning:\r\n```\r\nCMake Warning:\r\n  Manually-specified variables were not used by the project:\r\n\r\n    CMAKE_COMPILE_WARNING_AS_ERROR\r\n\r\n\r\n```\r\n",
+          "created_at": "2025-09-04T11:34:22Z"
+        },
+        {
+          "user": "purpleKarrot",
+          "body": "> Here is some historical context.\r\n\r\nDon't take it personal. You did a great job migrating from autotools to CMake. I have zero doubts about that.",
+          "created_at": "2025-09-04T14:05:44Z"
+        },
+        {
+          "user": "luke-jr",
+          "body": "Concept ACK. As long as -DWERROR is supported, it should work correctly.\r\n\r\nDiscussion about dropping it in favour of other solutions should be considered separately (and existing branches should get fixed even if it's dropped in newer versions)",
+          "created_at": "2025-09-18T01:01:50Z"
+        },
+        {
+          "user": "kevkevinpal",
+          "body": "Concept ACK [18d3d67](https://github.com/bitcoin/bitcoin/pull/33297/commits/18d3d670168b1c79041a54fe3c0e682ae3ef2994)\r\n\r\nI agree with luke-jr that even if we decided to drop this in favor of another solution that should be considered separately",
+          "created_at": "2025-09-27T18:12:08Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--9cd9c72976c961c55c7acef8f6ba82cd-->\n### Guix builds (on x86_64) [untrusted test-only build, possibly unsafe, not for production use]\n\n| File | commit 9bd9ec00b2380367d81399f4825352f66dde8a14<br>(master) | commit e8706d44c3f1ff9ed006584db307b8751106c2ad<br>(pull/33297/merge) |\n|--|--|--|\n| *-aarch64-linux-gnu-debug.tar.gz | [`39491c8f786e7433...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-aarch64-linux-gnu-debug.tar.gz) | [`9e396b4c35b0234f...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-aarch64-linux-gnu-debug.tar.gz) |\n| *-aarch64-linux-gnu.tar.gz | [`6b4cd3a61274e09c...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-aarch64-linux-gnu.tar.gz) | [`1a4327c9c547be46...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-aarch64-linux-gnu.tar.gz) |\n| *-arm-linux-gnueabihf-debug.tar.gz | [`c19f9ccbaba54b1b...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-arm-linux-gnueabihf-debug.tar.gz) | [`d1d043354738c3d8...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-arm-linux-gnueabihf-debug.tar.gz) |\n| *-arm-linux-gnueabihf.tar.gz | [`5a46113170a1ab44...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-arm-linux-gnueabihf.tar.gz) | [`96d43647e5a62a44...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-arm-linux-gnueabihf.tar.gz) |\n| *-arm64-apple-darwin-codesigning.tar.gz | [`fc2c929486eaaff2...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-arm64-apple-darwin-codesigning.tar.gz) | [`cd0388c3b2169f46...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-arm64-apple-darwin-codesigning.tar.gz) |\n| *-arm64-apple-darwin-unsigned.tar.gz | [`8c0e6ea6f59703ca...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-arm64-apple-darwin-unsigned.tar.gz) | [`becefb9f2f19154b...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-arm64-apple-darwin-unsigned.tar.gz) |\n| *-arm64-apple-darwin-unsigned.zip | [`d8965f444b9d0148...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-arm64-apple-darwin-unsigned.zip) | [`b2361e0bcab3fcbf...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-arm64-apple-darwin-unsigned.zip) |\n| *-powerpc64-linux-gnu-debug.tar.gz | [`bac029b01741ca08...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-powerpc64-linux-gnu-debug.tar.gz) | [`d58d8baf029849ee...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-powerpc64-linux-gnu-debug.tar.gz) |\n| *-powerpc64-linux-gnu.tar.gz | [`b3015cebaef5fac7...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-powerpc64-linux-gnu.tar.gz) | [`529b33202d301c20...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-powerpc64-linux-gnu.tar.gz) |\n| *-riscv64-linux-gnu-debug.tar.gz | [`66ae4d3e10476456...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-riscv64-linux-gnu-debug.tar.gz) | [`15441fb05518309c...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-riscv64-linux-gnu-debug.tar.gz) |\n| *-riscv64-linux-gnu.tar.gz | [`3289dcbbd32665b2...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-riscv64-linux-gnu.tar.gz) | [`1c1cfc846e01df55...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-riscv64-linux-gnu.tar.gz) |\n| *-x86_64-apple-darwin-codesigning.tar.gz | [`732175723416f91e...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-x86_64-apple-darwin-codesigning.tar.gz) | [`957c5fe95f861e55...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-x86_64-apple-darwin-codesigning.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.tar.gz | [`1e08a4cab4e74a8a...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-x86_64-apple-darwin-unsigned.tar.gz) | [`73cc4641a13a1fae...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-x86_64-apple-darwin-unsigned.tar.gz) |\n| *-x86_64-apple-darwin-unsigned.zip | [`ef2e63e642b7651a...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-x86_64-apple-darwin-unsigned.zip) | [`9fb201d6151e98f6...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-x86_64-apple-darwin-unsigned.zip) |\n| *-x86_64-linux-gnu-debug.tar.gz | [`7c6529022baa8fd7...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-x86_64-linux-gnu-debug.tar.gz) | [`10fb7a49ec735b4e...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-x86_64-linux-gnu-debug.tar.gz) |\n| *-x86_64-linux-gnu.tar.gz | [`c9ced5093b39a67e...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238-x86_64-linux-gnu.tar.gz) | [`0a003e8f16e9b56e...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1-x86_64-linux-gnu.tar.gz) |\n| *.tar.gz | [`b2cc2a6e20f7262e...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/bitcoin-9bd9ec00b238.tar.gz) | [`7a801b124b5d610c...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/bitcoin-e8706d44c3f1.tar.gz) |\n| SHA256SUMS.part | [`35bda47a741887da...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/SHA256SUMS.part) | [`b01e07c3ea1d6ed7...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/SHA256SUMS.part) |\n| guix_build.log | [`54b83c941ea6d76c...`](https://drahtbot.space/guix/monotree/9bd9ec00b2380367d81399f4825352f66dde8a14/guix_build.log) | [`ed2e3bee4090992d...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/guix_build.log) |\n| guix_build.log.diff |  | [`9b1a77e7db7b2dcb...`](https://drahtbot.space/guix/monotree/e8706d44c3f1ff9ed006584db307b8751106c2ad/guix_build.log.diff) |\n\n",
+          "created_at": "2025-10-28T02:28:44Z"
+        }
+      ]
+    },
+    {
+      "number": 33296,
+      "title": "net: check for empty header before calling FillBlock",
+      "body": "This avoids an Assume crash if multiple blocktxn messages are received. The first call to `FillBlock` would make the header empty via `SetNull` and the call right before the second `FillBlock` would crash [here](https://github.com/bitcoin/bitcoin/blob/689a32197638e92995dd8eb071425715f5fdc3a4/src/net_processing.cpp#L3333) since `LookupBlockIndex` won't find anything. Fix that by checking for an empty header before the Assume.",
+      "state": "closed",
+      "user": "Crypt-iQ",
+      "created_at": "2025-09-03T17:54:26Z",
+      "updated_at": "2025-09-12T14:46:12Z",
+      "comments": 8,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33296",
+      "labels": [
+        "P2P"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33296.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [instagibbs](https://github.com/bitcoin/bitcoin/pull/33296#issuecomment-3268061859), [mzumsande](https://github.com/bitcoin/bitcoin/pull/33296#pullrequestreview-3198359933), [fjahr](https://github.com/bitcoin/bitcoin/pull/33296#issuecomment-3268365319), [achow101](https://github.com/bitcoin/bitcoin/pull/33296#issuecomment-3268394161) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-03T17:54:33Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "concept ACK, as per offline conversations. It would be really nice to make the state machine better, for now we can at least avoid the `Assume` in debug builds when a peer does this.\r\n\r\nWe could also disconnect the peer for this behavior, I think, but not a priority",
+          "created_at": "2025-09-04T16:11:27Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "@fjahr definitely not ideal, this PR is basically only removing the Assume crash while better state machine can be worked on",
+          "created_at": "2025-09-08T21:14:57Z"
+        },
+        {
+          "user": "instagibbs",
+          "body": "reACK https://github.com/bitcoin/bitcoin/pull/33296/commits/8b6264768030db1840041abeeaeefd6c227a2644",
+          "created_at": "2025-09-08T21:20:52Z"
+        },
+        {
+          "user": "Crypt-iQ",
+          "body": "> Maybe a simple bool flag failed_reconstruction on PartiallyDownloadedBlock would work? Feel free to ignore.\r\n\r\nThis would work, but I think we should wait until there is an in-repo fuzz harness with good coverage before trying to refactor the net_processing state or the `PartiallyDownloadedBlock` state. I think a bool `attempted_reconstruction` could replace the calls to `SetNull()` / `IsNull()`. An ideal solution would be to get rid of the unusable `PartiallyDownloadedBlock` while making sure a malicious peer that is first_in_flight can't stall block download by resetting the `m_downloading_since` timer described [here](https://github.com/bitcoin/bitcoin/pull/33296#discussion_r2321960953) (there is some nuance here related to https://github.com/bitcoin/bitcoin/pull/22144 that I need to remember, the second and third peers can safely and freely reset their timer in this call to [RemoveBlockRequest](https://github.com/bitcoin/bitcoin/blob/cb825a07ac6ded1456b3915ef0c4095f484ac72f/src/net_processing.cpp#L3347)).",
+          "created_at": "2025-09-08T21:28:47Z"
+        },
+        {
+          "user": "fjahr",
+          "body": "tACK 8b6264768030db1840041abeeaeefd6c227a2644\r\n\r\nReproduced the issue on debug build master using the test and ensured the changes here make the test pass.",
+          "created_at": "2025-09-08T23:44:18Z"
+        },
+        {
+          "user": "achow101",
+          "body": "ACK 8b6264768030db1840041abeeaeefd6c227a2644",
+          "created_at": "2025-09-09T00:02:05Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "Backported to `29.x` in #33344.",
+          "created_at": "2025-09-12T14:46:12Z"
+        }
+      ]
+    },
+    {
+      "number": 33294,
+      "title": "[29.x] *san CI backports",
+      "body": "Backports:\r\n* #32999\r\n* #33099 (added `ninja-build`)\r\n* #33258",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-09-03T15:45:11Z",
+      "updated_at": "2025-09-08T16:17:16Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33294",
+      "labels": [
+        "Backport"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33294.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [marcofleon](https://github.com/bitcoin/bitcoin/pull/33294#pullrequestreview-3197068612) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->\n### LLM Linter (✨ experimental)\n\nPossible typos and grammar issues:\n\n- intrumentation -> instrumentation [spelling error in release notes list item making the word invalid]\n\n<sup>drahtbot_id_5_m</sup>\n",
+          "created_at": "2025-09-03T15:45:18Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "Are you planning on adding these to release notes in this PR?",
+          "created_at": "2025-09-04T19:32:01Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> Are you planning on adding these to release notes in this PR?\r\n\r\nAdded a commit for that.",
+          "created_at": "2025-09-05T11:14:26Z"
+        }
+      ]
+    },
+    {
+      "number": 33292,
+      "title": "added qa assets yml",
+      "body": "Accidental PR ",
+      "state": "closed",
+      "user": "m3dwards",
+      "created_at": "2025-09-03T14:06:10Z",
+      "updated_at": "2025-11-21T10:58:24Z",
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33292",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33292.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-03T14:06:16Z"
+        }
+      ]
+    },
+    {
+      "number": 33291,
+      "title": "ci: cd into BASE_BUILD_DIR for GetCMakeLogFiles",
+      "body": "When a bug is introduced in cmake, we render its logs, which was broken:\r\nhttps://github.com/bitcoin/bitcoin/pull/33290#issuecomment-3248645770",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-09-03T12:24:50Z",
+      "updated_at": "2025-09-04T15:09:33Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33291",
+      "labels": [
+        "Tests"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33291.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [maflcko](https://github.com/bitcoin/bitcoin/pull/33291#issuecomment-3249067521), [hebasto](https://github.com/bitcoin/bitcoin/pull/33291#pullrequestreview-3185794856) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-03T12:24:56Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "I haven't checked, but it seems plausible that I introduced this bug in commit fad191ff48b15832a90c19d560a7c0525c146be3, which fixed two other bugs.\r\n\r\nRegardless, it seems better to specify the dir explicitly, than to silently/implicitly depend on it.\r\n\r\nlgtm ACK 9b76eef2d2b42703e2a30952d4c3474b533e360a 💽\r\n\r\n<details><summary>Show signature</summary>\r\n\r\nSignature:\r\n\r\n```\r\nuntrusted comment: signature from minisign secret key on empty file; verify via: minisign -Vm \"${path_to_any_empty_file}\" -P RWTRmVTMeKV5noAMqVlsMugDDCyyTSbA3Re5AkUrhvLVln0tSaFWglOw -x \"${path_to_this_whole_four_line_signature_blob}\"\r\nRUTRmVTMeKV5npGrKx1nqXCw5zeVHdtdYURB/KlyA/LMFgpNCs+SkW9a8N95d+U4AP1RJMi+krxU1A3Yux4bpwZNLvVBKy0wLgM=\r\ntrusted comment: lgtm ACK 9b76eef2d2b42703e2a30952d4c3474b533e360a 💽\r\n9VPCcFb8LcL7ClVCll/K/RAxkQIs36XR8Gebz7YMpmNvwY8ArmIDMkYrqVTC8BoOSzoXM2ah+ca2njQbCSTqBw==\r\n```\r\n\r\n</details>\r\n",
+          "created_at": "2025-09-03T12:34:32Z"
+        }
+      ]
+    },
+    {
+      "number": 33290,
+      "title": "build: suggest -DENABLE_IPC=OFF when missing capnp",
+      "body": "Since #31802, when existing users upgrade to a recent version of master, or the upcoming v30 release, they'll be treated by an error that CapnProto is missing. Unless they read the release notes :-)\r\n\r\nThis error is generated by `src/ipc/libmultiprocess/CMakeLists.txt` which is a git subtree and so it doesn't have context of our project, and doesn't know about the `-DENABLE_IPC` option.\r\n\r\nThis pull request adds a simple pre-check in own CMake file to see if Cap'n Proto is missing. For ease of maintenance it doesn't check the version.\r\n\r\nThe new warning is shown in yellow, the (unchanged) error in red:\r\n\r\n<img width=\"566\" height=\"456\" alt=\"Scherm­afbeelding 2025-09-03 om 14 30 03\" src=\"https://github.com/user-attachments/assets/54542995-2181-4407-a620-fd4616eb28c9\" />\r\n\r\n",
+      "state": "closed",
+      "user": "Sjors",
+      "created_at": "2025-09-03T07:41:04Z",
+      "updated_at": "2025-09-05T06:43:18Z",
+      "comments": 17,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33290",
+      "labels": [
+        "Build system"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33290.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\n| Type | Reviewers |\n| ---- | --------- |\n| ACK | [janb84](https://github.com/bitcoin/bitcoin/pull/33290#pullrequestreview-3180629451) |\n| Concept ACK | [ismaelsadeeq](https://github.com/bitcoin/bitcoin/pull/33290#pullrequestreview-3181213833), [l0rinc](https://github.com/bitcoin/bitcoin/pull/33290#pullrequestreview-3186721892) |\n\nIf your review is incorrectly listed, please react with 👎 to this comment and the bot will ignore it on the next update.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-03T07:41:10Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Very strange CI errors:\r\n\r\n```\r\n03:45:32.525] -- Configuring incomplete, errors occurred!\r\n[03:45:32.543] ++ cmake -P /ci_container_base/ci/test/GetCMakeLogFiles.cmake\r\n[03:45:32.586] + cat CMakeFiles/CMakeConfigureLog.yaml\r\n[03:45:32.587] cat: CMakeFiles/CMakeConfigureLog.yaml: No such file or directory\r\n[03:45:32.621] Command '['./ci/test/02_run_container.sh']' returned non-zero exit status 1.\r\n```",
+          "created_at": "2025-09-03T07:52:51Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Very strange CI errors:\r\n> \r\n> ```\r\n> 03:45:32.525] -- Configuring incomplete, errors occurred!\r\n> [03:45:32.543] ++ cmake -P /ci_container_base/ci/test/GetCMakeLogFiles.cmake\r\n> [03:45:32.586] + cat CMakeFiles/CMakeConfigureLog.yaml\r\n> [03:45:32.587] cat: CMakeFiles/CMakeConfigureLog.yaml: No such file or directory\r\n> [03:45:32.621] Command '['./ci/test/02_run_container.sh']' returned non-zero exit status 1.\r\n> ```\r\n\r\nIt seems a behaviour change overlooked in https://github.com/bitcoin/bitcoin/pull/32880.",
+          "created_at": "2025-09-03T10:11:33Z"
+        },
+        {
+          "user": "hebasto",
+          "body": "> Very strange CI errors:\r\n> \r\n> ```\r\n> 03:45:32.525] -- Configuring incomplete, errors occurred!\r\n> [03:45:32.543] ++ cmake -P /ci_container_base/ci/test/GetCMakeLogFiles.cmake\r\n> [03:45:32.586] + cat CMakeFiles/CMakeConfigureLog.yaml\r\n> [03:45:32.587] cat: CMakeFiles/CMakeConfigureLog.yaml: No such file or directory\r\n> [03:45:32.621] Command '['./ci/test/02_run_container.sh']' returned non-zero exit status 1.\r\n> ```\r\n\r\nSuggesting this patch for a quick fix:\r\n```diff\r\n--- a/ci/test/03_test_script.sh\r\n+++ b/ci/test/03_test_script.sh\r\n@@ -123,6 +123,7 @@ if [[ \"${RUN_TIDY}\" == \"true\" ]]; then\r\n fi\r\n \r\n bash -c \"cmake -S $BASE_ROOT_DIR -B ${BASE_BUILD_DIR} $BITCOIN_CONFIG_ALL $BITCOIN_CONFIG\" || (\r\n+  cd \"${BASE_BUILD_DIR}\"\r\n   # shellcheck disable=SC2046\r\n   cat $(cmake -P \"${BASE_ROOT_DIR}/ci/test/GetCMakeLogFiles.cmake\")\r\n   false\r\n```\r\n\r\ncc @maflcko ",
+          "created_at": "2025-09-03T10:23:56Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Thanks @hebasto, I added a commit here to try that fix.",
+          "created_at": "2025-09-03T10:29:23Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Mind submitting ed95f4f095fecb0a6e5601199959db21e811dd71 as a separate pull?",
+          "created_at": "2025-09-03T10:53:29Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@maflcko I prefer if someone else does it, as I don't really know what this part of CI is doing.\r\n\r\nAlso, those builds still break.",
+          "created_at": "2025-09-03T11:28:44Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> Also, those builds still break.\r\n\r\nThat is expected. https://github.com/bitcoin/bitcoin/commit/ed95f4f095fecb0a6e5601199959db21e811dd71 must not interfere with unrelated issues. The reason why your build fails is because you are adding the targets twice. (You can see this by reading the log)",
+          "created_at": "2025-09-03T11:46:05Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@maflcko the log is very verbose, but in indeed useful, so I opened #33291.",
+          "created_at": "2025-09-03T12:25:19Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> @maflcko the log is very verbose, but in indeed useful, so I opened #33291.\r\n\r\nfor reference, this specific warning was also printed without the verbose log: https://cirrus-ci.com/task/4516741763563520?logs=ci#L894 :\r\n\r\n```\r\n...\r\n[03:43:58.798] CMake Error at /usr/lib/x86_64-linux-gnu/cmake/CapnProto/CapnProtoTargets.cmake:213 (add_executable):\r\n[03:43:58.798]   add_executable cannot create imported target \"CapnProto::capnpc_cpp\"\r\n[03:43:58.798]   because another target with the same name already exists.\r\n[03:43:58.798] Call Stack (most recent call first):\r\n[03:43:58.798]   /usr/lib/x86_64-linux-gnu/cmake/CapnProto/CapnProtoConfig.cmake:112 (include)\r\n[03:43:58.798]   src/ipc/libmultiprocess/CMakeLists.txt:16 (find_package)\r\n[03:43:58.798] \r\n[03:43:58.798] \r\n[03:43:58.798] CMake Error at /usr/lib/x86_64-linux-gnu/cmake/CapnProto/CapnProtoTargets.cmake:218 (add_executable):\r\n[03:43:58.798]   add_executable cannot create imported target \"CapnProto::capnpc_capnp\"\r\n[03:43:58.798]   because another target with the same name already exists.\r\n[03:43:58.798] Call Stack (most recent call first):\r\n[03:43:58.798]   /usr/lib/x86_64-linux-gnu/cmake/CapnProto/CapnProtoConfig.cmake:112 (include)\r\n[03:43:58.798]   src/ipc/libmultiprocess/CMakeLists.txt:16 (find_package)\r\n[03:43:58.798] \r\n[03:43:58.798] \r\n[03:43:58.801] -- Performing Test HAVE_PTHREAD_GETNAME_NP\r\n[03:43:59.084] -- Performing Test HAVE_PTHREAD_GETNAME_NP - Success\r\n[03:43:59.084] -- Performing Test HAVE_PTHREAD_THREADID_NP\r\n[03:43:59.221] -- Performing Test HAVE_PTHREAD_THREADID_NP - Failed\r\n[03:43:59.221] -- Performing Test HAVE_PTHREAD_GETTHREADID_NP\r\n[03:43:59.344] -- Performing Test HAVE_PTHREAD_GETTHREADID_NP - Failed\r\n[03:43:59.357] \r\n[03:43:59.357] Configuring secp256k1 subtree...\r\n[03:43:59.483] -- The C compiler identification is Clang 21.1.0\r\n[03:43:59.530] -- Detecting C compiler ABI info\r\n[03:43:59.791] -- Detecting C compiler ABI info - done\r\n[03:43:59.803] -- Check for working C compiler: /usr/bin/clang - skipped\r\n[03:43:59.804] -- Detecting C compile features\r\n[03:43:59.804] -- Detecting C compile features - done\r\n...\r\n",
+          "created_at": "2025-09-03T12:40:10Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Using `find_program` instead of `find_package` as suggested by an AI overlord, seems to do the trick.\r\n\r\nAnother issue was that the depends build also threw this warning, which I added a check for.",
+          "created_at": "2025-09-03T12:49:27Z"
+        },
+        {
+          "user": "ryanofsky",
+          "body": "This is a nice idea and approach seems ok if it works in practice. I think a  more general approach might to have the bitcoin build set a variable the libmultiprocess build can use to show better error messages like:\r\n\r\n```\r\nset(MP_SUBPROJECT_ERROR \"Configure cmake with with -DENABLE_IPC=OFF if you do not need IPC functionality.\")\r\n```\r\n\r\nIt could append this message if it can't find the cap'n proto package, or doesn't find a compatible version (for https://github.com/bitcoin-core/libmultiprocess/issues/199 and https://github.com/bitcoin/bitcoin/issues/33176).",
+          "created_at": "2025-09-03T14:20:32Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "@ryanofsky I like your approach better since it can be used under more circumstances, such as not having the right version. But we're close to branch-off so maybe this approach suffices for now.",
+          "created_at": "2025-09-03T14:46:39Z"
+        },
+        {
+          "user": "davidgumberg",
+          "body": "Conceptual question:\r\n\r\nWhy not print a warning *and* `set(ENABLE_IPC OFF)` when missing capnp? This was generally the approach taken in the old autotools build system. Is it better to force the user to confront the warning and change their configuration than to just try to build something reasonable based on what dependencies the user has?",
+          "created_at": "2025-09-04T22:44:21Z"
+        },
+        {
+          "user": "sipa",
+          "body": "@davidgumberg I believe that's a philosophical difference between cmakeland and autotoolsland, and I think in the case of optional build dependencies, it's better not to autodetect them, to avoid build system configuration leaking into the build (which then might not work on the system you actually want to run it on).",
+          "created_at": "2025-09-04T22:51:33Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "Closing in favour of https://github.com/bitcoin-core/libmultiprocess/pull/205.",
+          "created_at": "2025-09-05T06:41:09Z"
+        },
+        {
+          "user": "Sjors",
+          "body": "#33315 could be added to the v30 milestone so we don't forget.",
+          "created_at": "2025-09-05T06:43:18Z"
+        }
+      ]
+    },
+    {
+      "number": 33288,
+      "title": "rpc: deprecateboolverbose Boolean verbosity is deprecated",
+      "body": "  - Added a deprecation flag -deprecatedrpc=boolverbose\r\n  - Modified ParseVerbosity to check this flag and warn when boolean is used\r\n  - Boolean verbosity still works WITH the deprecation flag but shows warnings\r\n  - WITHOUT the flag, it throws the deprecation error",
+      "state": "closed",
+      "user": "fqlx",
+      "created_at": "2025-09-03T02:58:03Z",
+      "updated_at": "2025-09-03T08:59:01Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33288",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "DrahtBot",
+          "body": "<!--e57a25ab6845829454e8d69fc972939a-->\n\nThe following sections might be updated with supplementary metadata relevant to reviewers and maintainers.\n\n<!--006a51241073e994b41acfe9ec718e94-->\n### Code Coverage & Benchmarks\nFor details see: https://corecheck.dev/bitcoin/bitcoin/pulls/33288.\n<!--021abf342d371248e50ceaed478a90ca-->\n### Reviews\nSee [the guideline](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#code-review) for information on the review process.\nA summary of reviews will appear here.\n<!--5faf32d7da4f0f540f40219e4f7537a3-->",
+          "created_at": "2025-09-03T02:58:07Z"
+        },
+        {
+          "user": "DrahtBot",
+          "body": "<!--85328a0da195eb286784d51f73fa0af9-->\n🚧 At least one of the CI tasks failed.\n<sub>Task `lint`: https://github.com/bitcoin/bitcoin/runs/49461079135</sub>\n<sub>LLM reason (✨ experimental): Lint tests failed due to a file permission issue on test/functional/rpc_boolverbose_deprecated.py (needs 755), causing lint-files.py to fail.</sub>\n\n<details><summary>Hints</summary>\n\nTry to run the tests locally, according to the documentation. However, a CI failure may still\nhappen due to a number of reasons, for example:\n\n* Possibly due to a silent merge conflict (the changes in this pull request being\nincompatible with the current code in the target branch). If so, make sure to rebase on the latest\ncommit of the target branch.\n\n* A sanitizer issue, which can only be found by compiling with the sanitizer and running the\n  affected test.\n\n* An intermittent issue.\n\nLeave a comment here, if you need help tracking down a confusing failure.\n\n</details>\n\n",
+          "created_at": "2025-09-03T03:03:15Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "There's no need to open a new PR here, you can make these changes in #33214.",
+          "created_at": "2025-09-03T08:55:38Z"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "number": 33298,
+      "title": "Please restrict Data Carrier/OP Return to < 80 bytes please before releasing 3",
+      "body": "This is a significant security issue. I don't want to allow easily decodable images in my transactions because, by law, I would then be responsible for content moderation.  Please save Bitcoin for the little guys like me so we can continue to run a node and home miners legally without fear.  I hope nothing immoral or illicit that is easily decodable ever makes it into the actual chain, the miner responsible should be immediately arrested who mined that block.  I don't want to relay this crap either before it makes it into the chain, that is still very dangerous for node runners.\n\nYou have the power, please choose correctly.",
+      "state": "closed",
+      "user": "AceHack",
+      "created_at": "2025-09-03T20:01:03Z",
+      "updated_at": "2025-09-04T14:43:28Z",
+      "comments": 18,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33298",
+      "labels": [],
+      "comment_list": [
+        {
+          "user": "pinheadmz",
+          "body": "v29 and all supported previous versions of Bitcoin allow \"easily decodeable images\" in transaction data, inscriptions proved that. In fact, stuffing data into witness blobs is *cheaper* than stuffing it in to op_returns. I think this issue should be closed as a duplicate but you can still comment here (or, perhaps more appropriately, on bitcoin.stackexchange.com) if you have additional questions. Please keep in mind the Bitcoin Core issue tracker is reserved for specific implementation issues and feature requests and conversations should stay on topic. ",
+          "created_at": "2025-09-03T20:10:54Z"
+        },
+        {
+          "user": "AceHack",
+          "body": "I will use bitcoin.stackexchange.com, thank you for your kind response, but one triggers advanced AV and one does not; it's all in one contiguous block, inscriptions is an exploit, not desired behavior.",
+          "created_at": "2025-09-03T20:27:18Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "Witness blobs are also contiguous data. Out of curiosity what is the source of your information?",
+          "created_at": "2025-09-03T20:30:21Z"
+        },
+        {
+          "user": "AceHack",
+          "body": "It's my understanding you cannot simply copy the raw bytes from a Bitcoin block or mempool and open them as an image file without using Ordinals-specific software to reassemble them correctly, therefore won't trip AV.  This is not true for the larger op return, that WILL trip AV.  I'm trying to look at the code and gather the information myself, I've been a developer for 25+ years.  I apologize if I get anything wrong.  (Also I apologize as I'm being a little vague purposely because of the sensitive nature of this conversation)",
+          "created_at": "2025-09-03T20:37:35Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "There are other types of data stuffing that do require reassembly, like imagine creating a transaction with 100 outputs and each output's address was a piece of a large blob. \n\nBut inscriptions embed data in a witness blob in a single transaction input. \n\nExample:\nhttps://mempool.space/tx/64359c5b7e0ab1ad19ad7682bc9e95fd7c25ef85f115cb0fe6d37cce54611111?mode=details\n\nOver 1 kB just in the witness. Contiguous data. See if you can decode the data yourself! Supposedly it is this image:\n\nhttps://ordinals.com/inscription/64359c5b7e0ab1ad19ad7682bc9e95fd7c25ef85f115cb0fe6d37cce54611111i0",
+          "created_at": "2025-09-03T20:55:26Z"
+        },
+        {
+          "user": "sipa",
+          "body": "The block data is obfuscated on disk, to avoid AV software triggering on the files.\n\nPolicy changes aren't relevant for this; the transactions can make it into blocks without problems, regardless of what your software allows in its mempool.",
+          "created_at": "2025-09-03T20:59:06Z"
+        },
+        {
+          "user": "AceHack",
+          "body": "Yes but not in the mempool where windows core isolation scans and others advanced scanning software.  Memory is scanned too which is why I don't want to relay this stuff cause then I have to decode it into memory on my node, my bitcoin node software is not decoding any of that other stuff into something that would trip AV scanning.",
+          "created_at": "2025-09-03T21:00:37Z"
+        },
+        {
+          "user": "sipa",
+          "body": "If you don't care about having a useful mempool in your node you can disable it with the `-blocksonly` setting. But even that won't prevent your node from downloading, processing, and holding into memory the transaction when it makes it into a block.",
+          "created_at": "2025-09-03T21:03:47Z"
+        },
+        {
+          "user": "pinheadmz",
+          "body": "The real problem is, you already do relay that stuff. The v30 release won't affect that. You can choose to run without a mempool in -blocksonly mode. Otherwise, fine-tuning censorship into a system that is censorship-resistant by design is a major technical challenge and we could use your help!",
+          "created_at": "2025-09-03T21:04:09Z"
+        },
+        {
+          "user": "AceHack",
+          "body": "I disagree, I don't relay op return larger than 40(43) bytes today, so I absolutely don't relay \"that\" stuff.  Suppose someone has chosen to hack/exploit data into fake addresses, witness data, and write complicated logic to reassemble that data elsewhere, that is beyond the scope of what I can reasonably control as a node operator and I strongly disagree with. I can't be held responsible for that. I CAN be held responsible for relaying data that is obviously illicit without any reassembly required other than the Bitcoin node software itself.  I won't be part of that immoral act and I have 15 bitcoin as my life savings and I'm saying that.",
+          "created_at": "2025-09-03T21:13:23Z"
+        },
+        {
+          "user": "AceHack",
+          "body": "Also, this is not censorship, this is individual bottom-up node filtering, the opposite of censorship.  Not allowing node runners to filter obvious illicit data or \"ban\" them from the mempool is the definition of censorship.  The 3 update will actively censor the node runners' ability to filter data they deem illicit without being punished, and features restricted that make home mining impossible, further centralizing mining, which, I guess, is the goal of this update.",
+          "created_at": "2025-09-03T21:21:44Z"
+        },
+        {
+          "user": "sipa",
+          "body": "Nobody is prevented from anything, as nobody is required to run Bitcoin Core, v30 or otherwise. I realize this may sound snarky, but it is very sincere: Bitcoin's strength lies in the fact that the network is ultimately defined by what software people choose to run, of their own choice. I obviously disagree with you in this particular case, but I do hope that if ever Bitcoin Core actually ships changes that hurt the network, that you and other users choose to run something else.\n\nAs for motivation, see https://bitcoincore.org/en/2025/06/06/relay-statement/. The point is the opposite of centralization: if network nodes refuse to relay transactions with active demand on the network, all it takes is for someone to build infrastructure to relay it to miners directly. And when that happens, (1) it becomes harder for new small miners to enter the business and reap the same rewards, especially anonymously and (2) your node will still be downloading and processing the same transactions, because once they make it into a block, you have no choice to accept them - doing otherwise would amount to forking off into your own currency.",
+          "created_at": "2025-09-03T21:33:35Z"
+        },
+        {
+          "user": "AceHack",
+          "body": "Sorry, it seems from an outsider's point of view that you are incorrect in your assessment, and I will not be running Bitcoin Core software and will actively encourage everyone I know to look for alternatives.  This may inspire me to create my own. I have a deep background in cryptographic systems and older consensus mechanisms, such as Raft and Paxos, so this is within my area of expertise.  Larger miners already have several ways to hurt smaller miners within Bitcoin if they wish; it's a weakness of the system with large centralized mining pools that this new update will favor.  Bitcoin is for money; everything else on-chain is spam and exploits, or we risk breaking what Satoshi gifted humanity.  I do hope you are correct and this won't hurt Bitcoin, but from everything I can gather, it most certainly will.\n\nSomeone figured out how to do the \"hard\" way and hide illicit pictures in transactions, so instead of punishing that bad behavior, we are just gonna say, Hey, everyone, we are making it super easy for illicit pictures now, We thought it was too hard before.  This disgusts me, really, and I hope you can live with your morals and refrain from harming the network any further.",
+          "created_at": "2025-09-03T21:44:21Z"
+        },
+        {
+          "user": "AceHack",
+          "body": "From a small home miner's perspective, I have two options when using Bitcoin Core.\n1) Participate in mempool, which allows mining, relaying these anonymous P2P elicit images, risking prosecution.\n2) Disable mempool, not allowing me to mine without using someone else's node, breaking the zero-trust Satoshi's Bitcoin built.\n\nTherefore, Bitcoin Core as of v3 is no longer for home miners and decentralized mining; it now prefers centralization of miners and caters to their needs over those of home miners.  \n\nWhen this is released it will be a sad day for Bitcoin",
+          "created_at": "2025-09-03T22:04:12Z"
+        },
+        {
+          "user": "AceHack",
+          "body": "I have five children, four of whom are girls. It makes me angry to think some dumb ex-boyfriend without any effort at all can stick underage pictures of her easily in the OP_RETURN on the blockchain for anyone to see, and it's there forever, immortalized on the blockchain, and Bitcoin Core can decode it without additional software.  I would make it my life's mission to destroy Bitcoin if that ever happened, even though I currently have immense love for it.  I imagine any person who thinks of their family before profit would feel this same way.  Get ready for Pandora's box.",
+          "created_at": "2025-09-03T22:42:13Z"
+        },
+        {
+          "user": "wrapperband",
+          "body": "Please do not excessively increase op_return size. The coder will be as responsible for miss use as tornado cash developer - and they ended up in prison.",
+          "created_at": "2025-09-04T14:09:53Z"
+        },
+        {
+          "user": "darosior",
+          "body": "I'd like to point out this concern was already addressed at length [here](https://delvingbitcoin.org/t/addressing-community-concerns-and-objections-regarding-my-recent-proposal-to-relax-bitcoin-cores-standardness-limits-on-op-return-outputs/1697#p-5007-data-stored-in-an-op_return-output-doesnt-need-to-be-chunked-like-it-does-in-an-inscription-this-presents-a-risk-for-node-runners-as-it-allows-anyone-to-store-unobfuscated-data-on-their-disk-22), [here](https://gnusha.org/pi/bitcoindev/aBUlEOBqqrOIGHWC@petertodd.org/) and [here](https://gnusha.org/pi/bitcoindev/CALkkCJY5T5sd5Am0M6abhaMMicwVNvSfwYQP1jMjxfVsuT8Jaw@mail.gmail.com/). Storing illegal content has always been a risk of running Bitcoin, no matter the encoding of the data. The mentioned relay policy change does not materially affect this risk.",
+          "created_at": "2025-09-04T14:35:19Z"
+        },
+        {
+          "user": "glozow",
+          "body": "The concerns outlined in the issue have been addressed. The discussion is now about open source developers' responsibility for usage, which is off topic.\n\nA discussion page is available for feedback on moderation around this issue, https://github.com/bitcoin/bitcoin/issues/33240, https://github.com/bitcoin/bitcoin/pull/32381, https://github.com/bitcoin/bitcoin/pull/32359, https://github.com/bitcoin/bitcoin/pull/32406 etc.",
+          "created_at": "2025-09-04T14:43:15Z"
+        }
+      ]
+    },
+    {
+      "number": 33295,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "sixtuselemi73-dev",
+      "created_at": "2025-09-03T17:34:57Z",
+      "updated_at": "2025-09-03T17:40:25Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33295",
+      "labels": []
+    },
+    {
+      "number": 33293,
+      "title": "ci: GHA fallback centos task runs out of space",
+      "body": "https://github.com/bitcoin-core/gui/actions/runs/17433074590/job/49495964258?pr=884#step:8:3785\n\n```\n...\n+ eval 'TEST_RUNNER_EXTRA=()'\n++ TEST_RUNNER_EXTRA=()\n+ LD_LIBRARY_PATH=/home/runner/work/_temp/depends/x86_64-pc-linux-gnu/lib\n+ /home/runner/work/_temp/build/test/functional/test_runner.py --ci -j4 --tmpdirprefix /home/runner/work/_temp/ci/scratch/test_runner/ --ansi --combinedlogslen=99999999 --timeout-factor=40 --quiet --failfast\nWARNING! There may be insufficient free space in /home/runner/work/_temp/ci/scratch/test_runner//test_runner_₿_🏃_20250903_092842 to run the Bitcoin functional test suite. Running the test suite with fewer than 1426.0 MB of free space might cause tests to fail.\n...................................................................................................\n                                                                                                   \n1/272 - feature_block.py failed, Duration: 50 s\n...\n\n\n node0 stderr Error: A fatal internal error occurred, see debug.log for details: Disk space is too low!\nError: A fatal internal error occurred, see debug.log for details: Disk space is too low!\nError: A fatal internal error occurred, see debug.log for details: Disk space is too low! \n```\n\n",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-09-03T14:26:52Z",
+      "updated_at": "2025-11-20T16:01:16Z",
+      "comments": 9,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33293",
+      "labels": [
+        "CI failed"
+      ],
+      "comment_list": [
+        {
+          "user": "maflcko",
+          "body": "It may be possible to free up some space with something like https://github.com/google/oss-fuzz/blob/14cab84abbc736e24fede3f0267a8e220fb4974e/.github/workflows/project_tests.yml#L65-L74",
+          "created_at": "2025-09-03T14:27:46Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "```\nFree disk space:\n+ [[ ci_native_centos == \\c\\i\\_\\n\\a\\t\\i\\v\\e\\_\\a\\s\\a\\n ]]\n++ /home/runner/work/_temp/depends/config.guess\nFilesystem      Size  Used Avail Use% Mounted on\noverlay          72G   48G   25G  67% /\ntmpfs            64M     0   64M   0% /dev\nshm              64M     0   64M   0% /dev/shm\n/dev/root        72G   48G   25G  67% /etc/hosts\ntmpfs           7.9G     0  7.9G   0% /proc/acpi\ntmpfs           7.9G     0  7.9G   0% /proc/scsi\ntmpfs           7.9G     0  7.9G   0% /sys/firmware\n```\n\nThis job is using more than 25GB?\n\n> It may be possible to free up some space with something like [google/oss-fuzz@14cab84/.github/workflows/project_tests.yml#L65-L74](https://github.com/google/oss-fuzz/blob/14cab84abbc736e24fede3f0267a8e220fb4974e/.github/workflows/project_tests.yml#L65-L74)\n\nYes we can try to free up space. I'll take a look where the space is being used and see what we can free.",
+          "created_at": "2025-09-03T14:29:52Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "Seems we are probably already swapping before we start the functional tests:\n\nhttps://github.com/willcl-ark/bitcoin/actions/runs/17442003339/job/49527090325#step:8:3768\n\nI tested cleaning scratch dir and object files in this run which got it to pass. They seem the obvious choices to me to remove (probably right after building), any other ideas here?",
+          "created_at": "2025-09-03T19:53:18Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Yeah, I guess we could nuke the build dir object files, but it seems tedious and could make debugging later harder?\n\nI'd say the underlying issue is with GitHub Actions. Conceptually they looked at the npm hell and implemented it for CI. The GHA runners are optimized so that you can test your \"sort\" module out of the box without installing any dependencies. The runners ship with npm, android, chromium, powershell, graalvm, dotnet, all popular docker images ... (at least the last time I looked in https://github.com/google/oss-fuzz/commit/b7f04d782277638a67bc44865de445977eed4708).\n\nSo I think the correct fix is to remove stuff on the GHA vm, not inside our CI docker container.",
+          "created_at": "2025-09-04T06:24:20Z"
+        },
+        {
+          "user": "fanquake",
+          "body": "> Yes we can try to free up space. I'll take a look where the space is being used and see what we can free.\n\n#33304 should free up ~1.5GB of disk usage, an take some pressure off caching generally.",
+          "created_at": "2025-09-04T12:52:55Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "Still happening: https://github.com/bitcoin-core/gui/actions/runs/18064088639",
+          "created_at": "2025-09-29T06:07:26Z"
+        },
+        {
+          "user": "willcl-ark",
+          "body": "~This will be \"fixed\" by #33480 (as a side-effect).~ If we decide not to merge that, I can open a PR with something like https://github.com/willcl-ark/bitcoin/commit/f5885d05160fe0ac167976f2b36b6d5bec373e08 in to fix the space issue on CentOS.",
+          "created_at": "2025-09-29T10:03:38Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> This will be \"fixed\" by [#33480](https://github.com/bitcoin/bitcoin/pull/33480) (as a side-effect).\n\nAre you sure? The task build config should be unchanged in this pull request (only the runtime distro is changed) . So if the pull works around it, it doesn't seem like something that can be relied upon.\n\n\n\n> I can open a PR with something like [willcl-ark@f5885d0](https://github.com/willcl-ark/bitcoin/commit/f5885d05160fe0ac167976f2b36b6d5bec373e08) in to fix the space issue on CentOS.\n\nThat'd be fine. Maybe just apply it to all GHA runners in the matrix? I guess a vanilla GHA runner may take some time (https://github.com/bitcoin/bitcoin/pull/33365#issuecomment-3324154229)?",
+          "created_at": "2025-09-29T10:23:34Z"
+        },
+        {
+          "user": "maflcko",
+          "body": "> > This will be \"fixed\" by [#33480](https://github.com/bitcoin/bitcoin/pull/33480) (as a side-effect).\n> \n> Are you sure? The task build config should be unchanged in this pull request (only the runtime distro is changed) . So if the pull works around it, it doesn't seem like something that can be relied upon.\n\nGiven that reviewers in the pull prefer the workaround to be specific to the tasks that need it (https://github.com/bitcoin/bitcoin/pull/33514#pullrequestreview-3307376880), I think this can be closed again, because that also means those reviewers don't see a reason to apply it proactively?",
+          "created_at": "2025-11-18T16:12:24Z"
+        }
+      ]
+    },
+    {
+      "number": 33289,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2025-09-03T06:13:11Z",
+      "updated_at": "2025-09-03T06:14:46Z",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33289",
+      "labels": []
+    }
+  ],
+  "summary": {
+    "pull_requests": 9,
+    "issues": 4
+  }
+}
