@@ -60,36 +60,61 @@ class GitHubScraper:
         else:
             logger.warning("No GitHub token - rate limits will be stricter (60 req/hr)")
     
-    def _request(self, endpoint: str, params: dict = None) -> Union[dict, list]:
+    def _request(self, endpoint: str, params: dict = None, max_retries: int = 3) -> Union[dict, list]:
         """
-        Make a request to the GitHub API with rate limit handling.
-        
+        Make a request to the GitHub API with rate limit handling and retry logic.
+
         Args:
             endpoint: API endpoint (relative to BASE_URL)
             params: Query parameters
-        
+            max_retries: Maximum number of retries for transient errors
+
         Returns:
             JSON response data
         """
         url = f"{self.BASE_URL}{endpoint}"
-        
-        response = self.session.get(url, params=params)
-        
-        # Check rate limits
-        remaining = int(response.headers.get('X-RateLimit-Remaining', 0))
-        reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
-        
-        if remaining < 10:
-            logger.warning(f"GitHub rate limit low: {remaining} remaining")
-        
-        if response.status_code == 403 and 'rate limit' in response.text.lower():
-            wait_time = max(reset_time - time.time(), 60)
-            logger.error(f"Rate limited. Waiting {wait_time:.0f}s")
-            time.sleep(wait_time)
-            return self._request(endpoint, params)
-        
-        response.raise_for_status()
-        return response.json()
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.session.get(url, params=params)
+
+                # Check rate limits
+                remaining = int(response.headers.get('X-RateLimit-Remaining', 0))
+                reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
+
+                if remaining < 10:
+                    logger.warning(f"GitHub rate limit low: {remaining} remaining")
+
+                if response.status_code == 403 and 'rate limit' in response.text.lower():
+                    wait_time = max(reset_time - time.time(), 60)
+                    logger.error(f"Rate limited. Waiting {wait_time:.0f}s")
+                    time.sleep(wait_time)
+                    continue
+
+                # Retry on transient server errors (502, 503, 504)
+                if response.status_code in (502, 503, 504):
+                    if attempt < max_retries:
+                        wait_time = (2 ** attempt) * 5  # Exponential backoff: 5s, 10s, 20s
+                        logger.warning(f"Server error {response.status_code}. Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"Server error {response.status_code} after {max_retries} retries")
+                        response.raise_for_status()
+
+                response.raise_for_status()
+                return response.json()
+
+            except requests.exceptions.ConnectionError as e:
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 5
+                    logger.warning(f"Connection error. Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                else:
+                    raise
+
+        # Should not reach here, but just in case
+        raise requests.exceptions.HTTPError(f"Failed after {max_retries} retries")
     
     def _paginate(self, endpoint: str, params: dict = None, max_pages: int = 10) -> Generator[dict, None, None]:
         """
