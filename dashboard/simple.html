@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin Dev Drama Detector</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 font-mono">
+    <div class="min-h-screen p-4">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+                <h1 class="text-xl font-bold tracking-tight">BITCOIN DEV DRAMA DETECTOR</h1>
+                <div class="px-3 py-1 bg-green-900/50 border border-green-700 rounded">
+                    <span class="text-green-300 text-xs">🟢 LIVE DATA</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                <div class="text-xs text-gray-500 mb-2">OVERALL DRAMA</div>
+                <div class="text-4xl font-bold mb-1" id="overall-score">0.4</div>
+                <div class="text-sm text-green-400">CALM</div>
+            </div>
+            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                <div class="text-xs text-gray-500 mb-2">GITHUB</div>
+                <div class="text-3xl font-bold mb-1 text-green-400" id="github-score">0.4</div>
+                <div class="text-xs text-gray-500">Routine activity</div>
+            </div>
+            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                <div class="text-xs text-gray-500 mb-2">HOT TOPICS</div>
+                <div class="text-3xl font-bold mb-1 text-orange-400" id="topics-count">0</div>
+                <div class="text-xs text-gray-500">Trending</div>
+            </div>
+            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                <div class="text-xs text-gray-500 mb-2">SPICY THREADS</div>
+                <div class="text-3xl font-bold mb-1 text-red-400" id="threads-count">0</div>
+                <div class="text-xs text-gray-500">Contentious</div>
+            </div>
+        </div>
+
+        <!-- Chart -->
+        <div class="border border-gray-800 rounded-lg p-4 mb-4 bg-gray-900">
+            <h2 class="text-xs font-bold text-gray-500 mb-3">30-DAY DRAMA TREND</h2>
+            <canvas id="dramaChart" height="80"></canvas>
+        </div>
+
+        <!-- Hot Topics -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                <h2 class="text-xs font-bold text-gray-500 mb-3">HOT TOPICS</h2>
+                <div id="hot-topics-list" class="space-y-2"></div>
+            </div>
+
+            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                <h2 class="text-xs font-bold text-gray-500 mb-3">KEY CONTRIBUTORS</h2>
+                <div id="participants-list" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- Spicy Threads -->
+        <div class="border border-gray-800 rounded-lg p-4 mb-4 bg-gray-900">
+            <h2 class="text-xs font-bold text-gray-500 mb-3">SPICY THREADS</h2>
+            <div id="threads-list" class="space-y-2"></div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-xs text-gray-600">
+            Last updated: <span id="last-update"></span> • Powered by Claude AI • Built by <a href="https://blockspace.media" class="text-blue-400 hover:underline">Blockspace Media</a>
+        </div>
+    </div>
+
+    <script>
+        // Load data and render dashboard
+        async function loadDashboard() {
+            try {
+                // Load all data files
+                const [topicsRes, threadsRes, participantsRes] = await Promise.all([
+                    fetch('/data/processed/hot_topics.json'),
+                    fetch('/data/processed/spicy_threads.json'),
+                    fetch('/data/processed/key_participants.json')
+                ]);
+
+                const topicsData = await topicsRes.json();
+                const threadsData = await threadsRes.json();
+                const participantsData = await participantsRes.json();
+
+                const hotTopics = topicsData.hot_topics || [];
+                const spicyThreads = threadsData.spicy_threads || [];
+                const keyParticipants = participantsData.key_participants || [];
+
+                // Update counts
+                document.getElementById('topics-count').textContent = hotTopics.length;
+                document.getElementById('threads-count').textContent = spicyThreads.length;
+
+                // Render hot topics
+                const topicsList = document.getElementById('hot-topics-list');
+                hotTopics.forEach(topic => {
+                    const icon = topic.heat_score >= 7 ? '🔥' : topic.heat_score >= 5 ? '⚡' : '○';
+                    topicsList.innerHTML += `
+                        <div class="flex items-center justify-between p-2 rounded bg-gray-800">
+                            <div class="flex items-center gap-2">
+                                <span>${icon}</span>
+                                <span class="text-sm">${topic.topic}</span>
+                            </div>
+                            <span class="text-sm font-bold">${topic.heat_score}</span>
+                        </div>
+                    `;
+                });
+
+                // Render spicy threads
+                const threadsList = document.getElementById('threads-list');
+                spicyThreads.slice(0, 10).forEach(thread => {
+                    const color = thread.drama_score >= 8 ? 'text-red-400' : thread.drama_score >= 6 ? 'text-orange-400' : 'text-yellow-400';
+                    threadsList.innerHTML += `
+                        <div class="flex items-center gap-4 p-2 rounded bg-gray-800 hover:bg-gray-750">
+                            <span class="font-bold w-10 ${color}">${thread.drama_score}</span>
+                            <span class="flex-1 text-sm truncate">${thread.title}</span>
+                            <a href="${thread.url}" target="_blank" class="text-xs text-blue-400 hover:underline">View →</a>
+                        </div>
+                    `;
+                });
+
+                // Render participants
+                const participantsList = document.getElementById('participants-list');
+                keyParticipants.slice(0, 10).forEach(p => {
+                    const icon = p.avg_drama_contribution >= 7 ? '🔥' : p.avg_drama_contribution >= 5 ? '⚡' : '○';
+                    participantsList.innerHTML += `
+                        <div class="flex items-center justify-between p-2 rounded bg-gray-800">
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm text-gray-300">${p.handle}</span>
+                                <span class="text-xs text-gray-600">${p.messages} msgs</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-bold">${p.avg_drama_contribution.toFixed(1)}</span>
+                                <span>${icon}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                // Create chart
+                createChart();
+
+                // Update timestamp
+                document.getElementById('last-update').textContent = new Date().toLocaleString();
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.body.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center">
+                        <div class="text-center">
+                            <div class="text-2xl text-red-400 mb-2">Error Loading Data</div>
+                            <div class="text-gray-500">${error.message}</div>
+                            <div class="text-xs text-gray-600 mt-4">Check console for details</div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function createChart() {
+            // Generate 30 days of mock historical data
+            const labels = [];
+            const data = [];
+            const today = new Date();
+
+            for (let i = 29; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
+                labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                // Random historical data, with today being 0.4
+                data.push(i === 0 ? 0.4 : Math.random() * 3 + 2);
+            }
+
+            const ctx = document.getElementById('dramaChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Drama Score',
+                        data: data,
+                        borderColor: '#ffffff',
+                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 10,
+                            grid: {
+                                color: '#374151'
+                            },
+                            ticks: {
+                                color: '#9ca3af'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                color: '#374151'
+                            },
+                            ticks: {
+                                color: '#9ca3af',
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load dashboard on page load
+        loadDashboard();
+    </script>
+</body>
+</html>

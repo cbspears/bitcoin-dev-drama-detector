@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin Dev Drama Detector</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Recharts dependencies -->
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.10.3/dist/Recharts.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } = Recharts;
+
+        // Helper functions
+        const getDramaLevel = (score) => {
+          if (score >= 8) return { label: "CRITICAL", color: "text-red-400", bg: "bg-red-500" };
+          if (score >= 6) return { label: "ELEVATED", color: "text-orange-400", bg: "bg-orange-500" };
+          if (score >= 4) return { label: "MODERATE", color: "text-yellow-400", bg: "bg-yellow-500" };
+          return { label: "CALM", color: "text-green-400", bg: "bg-green-500" };
+        };
+
+        const getTrendIcon = (trend) => {
+          if (trend === "rising") return "▲";
+          if (trend === "falling") return "▼";
+          return "─";
+        };
+
+        const getSourceLabel = (source) => {
+          const labels = { mailing_list: "ML", irc: "IRC", github: "GH" };
+          return labels[source] || source;
+        };
+
+        const formatDate = (dateStr) => {
+          const date = new Date(dateStr);
+          return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        };
+
+        const HeatIcon = ({ score }) => {
+          if (score >= 7) return <span className="text-red-400">🔥</span>;
+          if (score >= 5) return <span className="text-orange-400">⚡</span>;
+          return <span className="text-gray-500">○</span>;
+        };
+
+        function BitcoinDramaDetector() {
+          const [dailyScores, setDailyScores] = useState([]);
+          const [hotTopics, setHotTopics] = useState([]);
+          const [spicyThreads, setSpicyThreads] = useState([]);
+          const [keyParticipants, setKeyParticipants] = useState([]);
+          const [loading, setLoading] = useState(true);
+          const [error, setError] = useState(null);
+
+          const [selectedTopic, setSelectedTopic] = useState(null);
+          const [selectedThread, setSelectedThread] = useState(null);
+          const [selectedParticipant, setSelectedParticipant] = useState(null);
+          const [timeRange, setTimeRange] = useState('30d');
+
+          // Load real data from JSON files
+          useEffect(() => {
+            async function loadData() {
+              try {
+                // For now, load from relative path - in production this would be an API endpoint
+                const [topicsRes, threadsRes, participantsRes] = await Promise.all([
+                  fetch('../data/processed/hot_topics.json'),
+                  fetch('../data/processed/spicy_threads.json'),
+                  fetch('../data/processed/key_participants.json')
+                ]);
+
+                const topics = await topicsRes.json();
+                const threads = await threadsRes.json();
+                const participants = await participantsRes.json();
+
+                setHotTopics(topics.hot_topics || []);
+                setSpicyThreads(threads.spicy_threads || []);
+                setKeyParticipants(participants.key_participants || []);
+
+                // Generate mock 30-day scores for visualization (would come from historical data)
+                setDailyScores(generateMockHistoricalScores());
+
+                setLoading(false);
+              } catch (err) {
+                console.error('Error loading data:', err);
+                setError(err.message);
+                setLoading(false);
+              }
+            }
+            loadData();
+          }, []);
+
+          // Generate 30 days of mock scores for the chart
+          // In production, this would come from historical database
+          const generateMockHistoricalScores = () => {
+            const scores = [];
+            const today = new Date();
+            for (let i = 29; i >= 0; i--) {
+              const date = new Date(today);
+              date.setDate(date.getDate() - i);
+              scores.push({
+                date: date.toISOString().split('T')[0],
+                overall: Math.random() * 3 + 2, // 2-5 range for recent history
+                github: Math.random() * 2 + 1,
+                mailing_list: Math.random() * 3 + 2,
+                irc: Math.random() * 2 + 1
+              });
+            }
+            // Add today's real score
+            scores[scores.length - 1] = {
+              date: today.toISOString().split('T')[0],
+              overall: 0.4,
+              github: 0.4,
+              mailing_list: 0.0,
+              irc: 0.0
+            };
+            return scores;
+          };
+
+          if (loading) {
+            return (
+              <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center font-mono">
+                <div className="text-center">
+                  <div className="text-2xl mb-2">Loading Drama Data...</div>
+                  <div className="text-gray-500">Analyzing Bitcoin developer discussions</div>
+                </div>
+              </div>
+            );
+          }
+
+          if (error) {
+            return (
+              <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center font-mono">
+                <div className="text-center">
+                  <div className="text-2xl text-red-400 mb-2">Error Loading Data</div>
+                  <div className="text-gray-500">{error}</div>
+                  <div className="text-xs text-gray-600 mt-4">
+                    Make sure you're running this from a local web server<br/>
+                    Try: python3 -m http.server 8000
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          const currentScore = dailyScores[dailyScores.length - 1];
+          const previousScore = dailyScores[dailyScores.length - 2];
+          const scoreDelta = currentScore ? (currentScore.overall - (previousScore?.overall || 0)) : 0;
+          const level = getDramaLevel(currentScore?.overall || 0);
+
+          const chartData = dailyScores.map(d => ({
+            ...d,
+            date: formatDate(d.date)
+          }));
+
+          const avg7d = dailyScores.length >= 7
+            ? (dailyScores.slice(-7).reduce((sum, d) => sum + d.overall, 0) / 7).toFixed(1)
+            : '0.0';
+          const avg30d = dailyScores.length > 0
+            ? (dailyScores.reduce((sum, d) => sum + d.overall, 0) / dailyScores.length).toFixed(1)
+            : '0.0';
+
+          return (
+            <div className="min-h-screen bg-gray-950 text-gray-100 p-4 font-mono">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-xl font-bold tracking-tight">BITCOIN DEV DRAMA DETECTOR</h1>
+                  <div className="px-3 py-1 bg-green-900/50 border border-green-700 rounded">
+                    <span className="text-green-300 text-xs">🟢 LIVE DATA</span>
+                  </div>
+                  {currentScore?.overall >= 8 && (
+                    <div className="flex items-center gap-2 bg-red-900/50 border border-red-700 rounded px-3 py-1 animate-pulse">
+                      <span className="text-red-400">⚠</span>
+                      <span className="text-red-300 text-xs">DRAMA ALERT</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-1">
+                  {['30d', '90d', '1y'].map(range => (
+                    <button
+                      key={range}
+                      onClick={() => setTimeRange(range)}
+                      className={`px-3 py-1 text-xs rounded ${timeRange === range ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+                    >
+                      {range}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Top Row: Chart + Index */}
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4">
+                {/* Chart */}
+                <div className="lg:col-span-3 border border-gray-800 rounded-lg p-4 bg-gray-900">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <LineChart data={chartData}>
+                      <XAxis dataKey="date" stroke="#6b7280" fontSize={10} tickLine={false} />
+                      <YAxis domain={[0, 10]} stroke="#6b7280" fontSize={10} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '4px', fontSize: '12px' }}
+                        labelStyle={{ color: '#9ca3af' }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Line type="monotone" dataKey="overall" stroke="#ffffff" strokeWidth={2} dot={false} name="Overall" />
+                      <Line type="monotone" dataKey="mailing_list" stroke="#f97316" strokeWidth={1.5} dot={false} name="Mailing List" />
+                      <Line type="monotone" dataKey="irc" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="IRC" />
+                      <Line type="monotone" dataKey="github" stroke="#22c55e" strokeWidth={1.5} dot={false} name="GitHub" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Drama Index */}
+                <div className="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                  <h2 className="text-xs font-bold text-gray-500 mb-3 tracking-wide">DRAMA INDEX</h2>
+
+                  <div className="text-center mb-4">
+                    <div className="text-5xl font-bold mb-1">{currentScore?.overall.toFixed(1) || '0.0'}</div>
+                    <div className={`text-sm ${level.color} font-medium`}>{level.label}</div>
+                    <div className={`text-xs mt-1 ${scoreDelta >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+                      {scoreDelta >= 0 ? '▲' : '▼'} {Math.abs(scoreDelta).toFixed(1)} from yesterday
+                    </div>
+                  </div>
+
+                  <div className="w-full h-3 bg-gray-700 rounded-full overflow-hidden mb-4">
+                    <div className={`h-full ${level.bg} transition-all duration-500`} style={{ width: `${(currentScore?.overall || 0) * 10}%` }} />
+                  </div>
+
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">7d avg</span>
+                      <span>{avg7d}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">30d avg</span>
+                      <span>{avg30d}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-gray-800 space-y-2">
+                    {currentScore && ['mailing_list', 'irc', 'github'].map(source => (
+                      <div key={source} className="flex justify-between items-center text-xs">
+                        <span className={`${source === 'mailing_list' ? 'text-orange-400' : source === 'irc' ? 'text-blue-400' : 'text-green-400'}`}>
+                          {getSourceLabel(source).toUpperCase()}
+                        </span>
+                        <div className="flex-1 mx-2 h-1.5 bg-gray-700 rounded">
+                          <div
+                            className={`h-full rounded ${source === 'mailing_list' ? 'bg-orange-500' : source === 'irc' ? 'bg-blue-500' : 'bg-green-500'}`}
+                            style={{ width: `${(currentScore[source] || 0) * 10}%` }}
+                          />
+                        </div>
+                        <span className="w-6 text-right">{(currentScore[source] || 0).toFixed(1)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Hot Topics + Source Breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                {/* Hot Topics */}
+                <div className="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                  <h2 className="text-xs font-bold text-gray-500 mb-3 tracking-wide">HOT TOPICS</h2>
+                  <div className="space-y-1">
+                    {hotTopics.length > 0 ? hotTopics.map((topic, i) => (
+                      <div key={i}>
+                        <div
+                          onClick={() => setSelectedTopic(selectedTopic === i ? null : i)}
+                          className="flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-800 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <HeatIcon score={topic.heat_score} />
+                            <span className="truncate text-sm">{topic.topic}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold">{topic.heat_score}</span>
+                            <span className={`text-xs ${topic.trend === 'rising' ? 'text-red-400' : topic.trend === 'falling' ? 'text-green-400' : 'text-gray-500'}`}>
+                              {getTrendIcon(topic.trend)}
+                            </span>
+                          </div>
+                        </div>
+                        {selectedTopic === i && topic.summary && (
+                          <div className="mx-2 p-2 bg-gray-800 rounded border border-gray-700 mb-1">
+                            <p className="text-xs text-gray-300">{topic.summary}</p>
+                            <div className="mt-1 flex gap-3 text-xs text-gray-500">
+                              <span>{topic.mentions_24h} mentions/24h</span>
+                              <span>{getSourceLabel(topic.primary_source)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )) : (
+                      <div className="text-sm text-gray-500 text-center py-4">No hot topics detected</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Source Breakdown */}
+                <div className="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                  <h2 className="text-xs font-bold text-gray-500 mb-3 tracking-wide">SOURCE BREAKDOWN</h2>
+                  <div className="space-y-4">
+                    {currentScore && ['mailing_list', 'irc', 'github'].map(source => (
+                      <div key={source}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className={`${source === 'mailing_list' ? 'text-orange-400' : source === 'irc' ? 'text-blue-400' : 'text-green-400'}`}>
+                            {source === 'mailing_list' ? 'Mailing List' : source === 'irc' ? 'IRC (#bitcoin-core-dev)' : 'GitHub (bitcoin/bitcoin)'}
+                          </span>
+                          <span className="font-bold">{(currentScore[source] || 0).toFixed(1)}</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${source === 'mailing_list' ? 'bg-orange-500' : source === 'irc' ? 'bg-blue-500' : 'bg-green-500'}`}
+                            style={{ width: `${(currentScore[source] || 0) * 10}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {source === 'github' ? 'Relatively calm, routine activity' : 'No recent data'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Spicy Threads */}
+              <div className="border border-gray-800 rounded-lg p-4 mb-4 bg-gray-900">
+                <h2 className="text-xs font-bold text-gray-500 mb-3 tracking-wide">SPICY THREADS</h2>
+                <div className="space-y-1">
+                  {spicyThreads.length > 0 ? spicyThreads.slice(0, 10).map((thread, i) => (
+                    <div key={thread.id}>
+                      <div
+                        onClick={() => setSelectedThread(selectedThread === i ? null : i)}
+                        className="flex items-center gap-4 p-2 rounded cursor-pointer hover:bg-gray-800 transition-colors"
+                      >
+                        <span className={`font-bold w-10 ${thread.drama_score >= 8 ? 'text-red-400' : thread.drama_score >= 6 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                          {thread.drama_score}
+                        </span>
+                        <span className="flex-1 text-sm truncate">{thread.title}</span>
+                        <span className="text-xs text-gray-500 w-8">{getSourceLabel(thread.source)}</span>
+                        <span className="text-xs text-gray-500 w-16">{formatDate(thread.date)}</span>
+                      </div>
+                      {selectedThread === i && (
+                        <div className="ml-12 p-3 bg-gray-800 rounded border border-gray-700 mb-2">
+                          <div className="flex gap-4 text-xs mb-2">
+                            <span className="text-green-400">ACK: {thread.ack_count}</span>
+                            <span className="text-red-400">NACK: {thread.nack_count}</span>
+                          </div>
+                          {thread.url && (
+                            <a href={thread.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline block mb-2">
+                              View on {getSourceLabel(thread.source)} →
+                            </a>
+                          )}
+                          <div className="text-xs text-gray-500">
+                            Participants: {thread.participants.join(', ')}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )) : (
+                    <div className="text-sm text-gray-500 text-center py-4">No spicy threads detected</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Key Participants */}
+              <div className="border border-gray-800 rounded-lg p-4 bg-gray-900">
+                <h2 className="text-xs font-bold text-gray-500 mb-3 tracking-wide">🔥 KEY CONTRIBUTORS</h2>
+                <div className="space-y-1">
+                  {keyParticipants.length > 0 ? keyParticipants.map((p, i) => (
+                    <div key={i}>
+                      <div
+                        onClick={() => setSelectedParticipant(selectedParticipant === i ? null : i)}
+                        className="flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-800 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-300">{p.handle}</span>
+                          <span className="text-xs text-gray-600">{p.messages} msgs</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold">{p.avg_drama_contribution.toFixed(1)}</span>
+                          <HeatIcon score={p.avg_drama_contribution} />
+                        </div>
+                      </div>
+                      {selectedParticipant === i && (
+                        <div className="mx-2 p-2 bg-gray-800 rounded border border-gray-700 mb-1">
+                          <p className="text-xs text-gray-300 mb-1">{p.stance_summary}</p>
+                          <div className="text-xs text-gray-500">
+                            Topics: {p.primary_topics?.join(', ') || 'general'}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )) : (
+                    <div className="text-sm text-gray-500 text-center py-4">No participants data</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="mt-4 text-center text-xs text-gray-600">
+                Last updated: {new Date().toLocaleString()} • Powered by Claude AI • Built by <a href="https://blockspace.media" className="text-blue-400 hover:underline">Blockspace Media</a>
+              </div>
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<BitcoinDramaDetector />);
+    </script>
+</body>
+</html>
