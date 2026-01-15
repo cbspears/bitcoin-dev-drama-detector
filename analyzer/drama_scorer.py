@@ -31,6 +31,9 @@ from scrapers.utils import (
     PROCESSED_DATA_DIR
 )
 
+# Multi-dimensional analyzer
+from analyzer.multi_dimensional_analyzer import MultiDimensionalAnalyzer, ParticipantProfiler
+
 # Load environment variables
 load_dotenv()
 
@@ -51,6 +54,67 @@ class DramaScorer:
 
         self.client = Anthropic(api_key=self.api_key)
         self.model = "claude-sonnet-4-20250514"
+
+        # Add the multi-dimensional analyzer
+        self.md_analyzer = MultiDimensionalAnalyzer()
+        self.profiler = ParticipantProfiler(self.md_analyzer)
+
+    def analyze_content(self, content: str, author: str = None) -> dict:
+        """
+        Analyze content using multi-dimensional analyzer.
+
+        Returns simple scores but internally uses sophisticated analysis.
+
+        Args:
+            content: Text content to analyze
+            author: Optional author handle for participant profiling
+
+        Returns:
+            Dictionary with drama_score, neutrality_score, health, and dimensions
+        """
+        # Get multi-dimensional scores
+        scores = self.md_analyzer.analyze(content)
+
+        # Update participant profile if author provided
+        if author:
+            self.profiler.add_message(author, content)
+
+        # Return simplified output (user-facing)
+        return {
+            "drama_score": scores.drama_score,
+            "neutrality_score": scores.neutrality_score,
+            "health": scores.health_assessment,
+            # Include dimensional breakdown for data files (not shown to users directly)
+            "_dimensions": {
+                "vader_negativity": scores.vader_negativity,
+                "subjectivity": scores.subjectivity,
+                "politeness": scores.politeness,
+                "face_threats": scores.face_threats,
+                "argument_quality": scores.argument_quality,
+                "fallacy_score": scores.fallacy_score,
+                "stonewalling": scores.stonewalling_indicators
+            }
+        }
+
+    def analyze_thread(self, messages: List[dict]) -> dict:
+        """
+        Analyze a full thread using multi-dimensional analyzer.
+
+        Args:
+            messages: List of message dictionaries with 'author' and 'content' keys
+
+        Returns:
+            Thread analysis with drama scores and participant analysis
+        """
+        return self.md_analyzer.analyze_thread(messages)
+
+    def get_participant_profiles(self) -> dict:
+        """Get all participant profiles for data export."""
+        return self.profiler.get_all_profiles()
+
+    def get_difficult_participants(self) -> List[str]:
+        """Get list of difficult participants."""
+        return self.profiler.get_difficult_participants()
 
     def _create_drama_analysis_prompt(self, content: str, context: str = "GitHub PR") -> str:
         """
