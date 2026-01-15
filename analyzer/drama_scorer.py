@@ -214,7 +214,7 @@ Respond in JSON format:
 
     def analyze_github_pr(self, pr: Dict) -> Dict:
         """
-        Analyze a GitHub PR for drama signals.
+        Analyze a GitHub PR for drama signals using multi-dimensional analyzer.
 
         Args:
             pr: PR data dict from scraper
@@ -236,10 +236,8 @@ Respond in JSON format:
 
         full_content = "\n\n".join(content_parts)
 
-        analysis = self.analyze_text(
-            full_content,
-            context=f"GitHub PR #{pr['number']}"
-        )
+        # Use multi-dimensional analyzer
+        analysis = self.analyze_content(full_content, author=pr.get('user'))
 
         return {
             **pr,
@@ -249,7 +247,7 @@ Respond in JSON format:
 
     def analyze_github_issue(self, issue: Dict) -> Dict:
         """
-        Analyze a GitHub issue for drama signals.
+        Analyze a GitHub issue for drama signals using multi-dimensional analyzer.
 
         Args:
             issue: Issue data dict from scraper
@@ -269,10 +267,8 @@ Respond in JSON format:
 
         full_content = "\n\n".join(content_parts)
 
-        analysis = self.analyze_text(
-            full_content,
-            context=f"GitHub Issue #{issue['number']}"
-        )
+        # Use multi-dimensional analyzer
+        analysis = self.analyze_content(full_content, author=issue.get('user'))
 
         return {
             **issue,
