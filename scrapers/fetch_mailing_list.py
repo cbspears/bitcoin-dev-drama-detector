@@ -16,6 +16,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, parse_qs
+from typing import Optional, List, Dict
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -61,7 +62,7 @@ class MailingListScraper:
             time.sleep(self.request_delay - elapsed)
         self.last_request_time = time.time()
     
-    def _fetch_page(self, url: str) -> BeautifulSoup | None:
+    def _fetch_page(self, url: str) -> Optional[BeautifulSoup]:
         """
         Fetch and parse a web page.
         
@@ -81,7 +82,7 @@ class MailingListScraper:
             logger.error(f"Error fetching {url}: {e}")
             return None
     
-    def _fetch_text(self, url: str) -> str | None:
+    def _fetch_text(self, url: str) -> Optional[str]:
         """
         Fetch raw text content.
         
@@ -108,7 +109,7 @@ class MailingListScraper:
         month_name = datetime(year, month, 1).strftime('%Y-%B')
         return f"{self.PIPERMAIL_URL}/{month_name}/"
     
-    def _parse_pipermail_index(self, soup: BeautifulSoup, base_url: str) -> list[dict]:
+    def _parse_pipermail_index(self, soup: BeautifulSoup, base_url: str) -> List[dict]:
         """
         Parse the thread index page from pipermail archive.
         
@@ -139,7 +140,7 @@ class MailingListScraper:
         
         return threads
     
-    def _parse_pipermail_message(self, url: str) -> dict | None:
+    def _parse_pipermail_message(self, url: str) -> Optional[dict]:
         """
         Parse an individual message from pipermail archive.
         
@@ -195,7 +196,7 @@ class MailingListScraper:
         
         return message
     
-    def _fetch_pipermail_month(self, year: int, month: int) -> list[dict]:
+    def _fetch_pipermail_month(self, year: int, month: int) -> List[dict]:
         """
         Fetch all messages from a specific month.
         
@@ -238,7 +239,7 @@ class MailingListScraper:
     
     # ==================== MAIN FETCH METHODS ====================
     
-    def _group_into_threads(self, messages: list[dict]) -> list[dict]:
+    def _group_into_threads(self, messages: List[dict]) -> List[dict]:
         """
         Group messages into conversation threads based on subject.
         

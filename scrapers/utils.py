@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Union, Optional, Tuple
 
 # Setup logging
 logging.basicConfig(
@@ -26,7 +27,7 @@ RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def get_date_range(days_back: int = 1) -> tuple[datetime, datetime]:
+def get_date_range(days_back: int = 1) -> Tuple[datetime, datetime]:
     """
     Get the date range for scraping.
     
@@ -41,7 +42,7 @@ def get_date_range(days_back: int = 1) -> tuple[datetime, datetime]:
     return start_date, end_date
 
 
-def save_raw_data(data: dict | list, source: str, date_str: str = None) -> Path:
+def save_raw_data(data: Union[dict, list], source: str, date_str: str = None) -> Path:
     """
     Save raw scraped data to JSON file.
     
@@ -68,7 +69,7 @@ def save_raw_data(data: dict | list, source: str, date_str: str = None) -> Path:
     return filepath
 
 
-def load_raw_data(source: str, date_str: str) -> dict | list | None:
+def load_raw_data(source: str, date_str: str) -> Optional[Union[dict, list]]:
     """
     Load raw data for a specific source and date.
     
@@ -89,7 +90,7 @@ def load_raw_data(source: str, date_str: str) -> dict | list | None:
         return json.load(f)
 
 
-def save_processed_data(data: dict | list, filename: str) -> Path:
+def save_processed_data(data: Union[dict, list], filename: str) -> Path:
     """
     Save processed data to the processed directory.
     
@@ -109,7 +110,7 @@ def save_processed_data(data: dict | list, filename: str) -> Path:
     return filepath
 
 
-def load_processed_data(filename: str) -> dict | list | None:
+def load_processed_data(filename: str) -> Optional[Union[dict, list]]:
     """
     Load processed data.
     

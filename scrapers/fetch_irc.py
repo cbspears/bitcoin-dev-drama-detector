@@ -15,6 +15,7 @@ import re
 import requests
 from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
+from typing import Optional, List, Dict
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -69,7 +70,7 @@ class IRCScraper:
         date_str = date.strftime('%Y-%m-%d')
         return f"{self.BASE_URL}/{date_str}.log"
     
-    def _fetch_log_file(self, date: datetime) -> str | None:
+    def _fetch_log_file(self, date: datetime) -> Optional[str]:
         """
         Fetch the raw log file for a specific date.
         
@@ -96,7 +97,7 @@ class IRCScraper:
             logger.error(f"Error fetching IRC log: {e}")
             return None
     
-    def _parse_log_line(self, line: str) -> dict | None:
+    def _parse_log_line(self, line: str) -> Optional[dict]:
         """
         Parse a single line from the IRC log.
         
@@ -178,7 +179,7 @@ class IRCScraper:
             'messages': messages
         }
     
-    def _identify_threads(self, messages: list[dict]) -> list[dict]:
+    def _identify_threads(self, messages: List[dict]) -> List[dict]:
         """
         Attempt to identify conversation threads from messages.
         
@@ -225,7 +226,7 @@ class IRCScraper:
         
         return threads
     
-    def _summarize_thread(self, messages: list[dict]) -> dict:
+    def _summarize_thread(self, messages: List[dict]) -> dict:
         """
         Create a summary of a conversation thread.
         
@@ -259,7 +260,7 @@ class IRCScraper:
             }
         }
     
-    def fetch_date(self, date: datetime) -> dict | None:
+    def fetch_date(self, date: datetime) -> Optional[dict]:
         """
         Fetch and parse IRC logs for a specific date.
         

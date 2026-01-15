@@ -14,7 +14,11 @@ import sys
 import time
 import requests
 from datetime import datetime, timezone
-from typing import Generator
+from typing import Generator, Optional, List, Dict, Union
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -56,7 +60,7 @@ class GitHubScraper:
         else:
             logger.warning("No GitHub token - rate limits will be stricter (60 req/hr)")
     
-    def _request(self, endpoint: str, params: dict = None) -> dict | list:
+    def _request(self, endpoint: str, params: dict = None) -> Union[dict, list]:
         """
         Make a request to the GitHub API with rate limit handling.
         
@@ -118,7 +122,7 @@ class GitHubScraper:
             
             page += 1
     
-    def fetch_pull_requests(self, since: datetime) -> list[dict]:
+    def fetch_pull_requests(self, since: datetime) -> List[dict]:
         """
         Fetch pull requests updated since the given date.
         
@@ -148,20 +152,20 @@ class GitHubScraper:
                 'id': pr['id'],
                 'number': pr['number'],
                 'title': pr['title'],
-                'body': pr['body'] or '',
+                'body': pr.get('body') or '',
                 'state': pr['state'],
                 'user': pr['user']['login'],
                 'created_at': pr['created_at'],
                 'updated_at': pr['updated_at'],
                 'merged_at': pr.get('merged_at'),
-                'comments': pr['comments'],
-                'review_comments': pr['review_comments'],
+                'comments': pr.get('comments', 0),
+                'review_comments': pr.get('review_comments', 0),
                 'url': pr['html_url'],
                 'labels': [l['name'] for l in pr.get('labels', [])],
             }
             
             # Fetch comments if there are any
-            if pr['comments'] > 0 or pr['review_comments'] > 0:
+            if pr_data['comments'] > 0 or pr_data['review_comments'] > 0:
                 pr_data['comment_data'] = self._fetch_pr_comments(pr['number'], since)
             
             # Calculate basic drama signals
@@ -174,7 +178,7 @@ class GitHubScraper:
         logger.info(f"Fetched {len(prs)} pull requests")
         return prs
     
-    def _fetch_pr_comments(self, pr_number: int, since: datetime) -> list[dict]:
+    def _fetch_pr_comments(self, pr_number: int, since: datetime) -> List[dict]:
         """
         Fetch comments on a specific PR.
         
@@ -218,7 +222,7 @@ class GitHubScraper:
         
         return comments
     
-    def fetch_issues(self, since: datetime) -> list[dict]:
+    def fetch_issues(self, since: datetime) -> List[dict]:
         """
         Fetch issues updated since the given date.
         
@@ -248,19 +252,19 @@ class GitHubScraper:
                 'id': issue['id'],
                 'number': issue['number'],
                 'title': issue['title'],
-                'body': issue['body'] or '',
+                'body': issue.get('body') or '',
                 'state': issue['state'],
                 'user': issue['user']['login'],
                 'created_at': issue['created_at'],
                 'updated_at': issue['updated_at'],
                 'closed_at': issue.get('closed_at'),
-                'comments': issue['comments'],
+                'comments': issue.get('comments', 0),
                 'url': issue['html_url'],
                 'labels': [l['name'] for l in issue.get('labels', [])],
             }
             
             # Fetch comments if there are any
-            if issue['comments'] > 0:
+            if issue_data['comments'] > 0:
                 issue_data['comment_data'] = self._fetch_issue_comments(issue['number'], since)
             
             # Calculate basic drama signals
@@ -273,7 +277,7 @@ class GitHubScraper:
         logger.info(f"Fetched {len(issues)} issues")
         return issues
     
-    def _fetch_issue_comments(self, issue_number: int, since: datetime) -> list[dict]:
+    def _fetch_issue_comments(self, issue_number: int, since: datetime) -> List[dict]:
         """
         Fetch comments on a specific issue.
         
