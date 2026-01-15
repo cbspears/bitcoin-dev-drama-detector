@@ -135,6 +135,142 @@ class HistoricalDataFetcher:
             logger.error(f"  ❌ Error: {e}")
             return False
 
+    def fetch_bips_for_date(self, date):
+        """
+        Fetch BIPs repository data for a specific date.
+
+        Fetches PRs and issues from bitcoin/bips created/updated on that date.
+        """
+        date_str = date.strftime('%Y-%m-%d')
+        logger.info(f"Fetching BIPs data for {date_str}")
+
+        # Check if already exists
+        existing_path = f"data/raw/bips/{date_str}.json"
+        if os.path.exists(existing_path):
+            logger.info(f"  Already exists, skipping")
+            return True
+
+        try:
+            headers = {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'BitcoinDramaDetector/1.0'
+            }
+            if self.github_token:
+                headers['Authorization'] = f'token {self.github_token}'
+
+            # Fetch PRs created on this date
+            next_day = date + timedelta(days=1)
+            date_filter = f"{date.strftime('%Y-%m-%dT%H:%M:%SZ')}..{next_day.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+
+            pull_requests = []
+            issues = []
+
+            # Fetch PRs (limit to 100 for historical data)
+            pr_url = f"https://api.github.com/repos/bitcoin/bips/pulls"
+            params = {
+                'state': 'all',
+                'sort': 'created',
+                'direction': 'desc',
+                'per_page': 100
+            }
+
+            response = requests.get(pr_url, headers=headers, params=params, timeout=30)
+            if response.status_code == 200:
+                all_prs = response.json()
+                # Filter by date
+                for pr in all_prs:
+                    created_at = datetime.strptime(pr['created_at'], '%Y-%m-%dT%H:%M:%SZ')
+                    if created_at.date() == date.date():
+                        pull_requests.append({
+                            'id': pr['id'],
+                            'number': pr['number'],
+                            'title': pr['title'],
+                            'body': pr.get('body') or '',
+                            'state': pr['state'],
+                            'user': pr['user']['login'],
+                            'created_at': pr['created_at'],
+                            'updated_at': pr['updated_at'],
+                            'merged_at': pr.get('merged_at'),
+                            'comments': pr.get('comments', 0),
+                            'review_comments': pr.get('review_comments', 0),
+                            'url': pr['html_url'],
+                            'labels': [l['name'] for l in pr.get('labels', [])],
+                            'drama_signals': {
+                                'drama_keywords': 0,
+                                'positive_keywords': 0,
+                                'text_length': len(pr['title']) + len(pr.get('body') or ''),
+                                'has_nack': False,
+                                'has_ack': False
+                            }
+                        })
+
+            # Fetch issues
+            issue_url = f"https://api.github.com/repos/bitcoin/bips/issues"
+            params = {
+                'state': 'all',
+                'sort': 'created',
+                'direction': 'desc',
+                'per_page': 100
+            }
+
+            response = requests.get(issue_url, headers=headers, params=params, timeout=30)
+            if response.status_code == 200:
+                all_issues = response.json()
+                # Filter by date and exclude PRs
+                for issue in all_issues:
+                    if 'pull_request' in issue:
+                        continue
+                    created_at = datetime.strptime(issue['created_at'], '%Y-%m-%dT%H:%M:%SZ')
+                    if created_at.date() == date.date():
+                        issues.append({
+                            'id': issue['id'],
+                            'number': issue['number'],
+                            'title': issue['title'],
+                            'body': issue.get('body') or '',
+                            'state': issue['state'],
+                            'user': issue['user']['login'],
+                            'created_at': issue['created_at'],
+                            'updated_at': issue['updated_at'],
+                            'closed_at': issue.get('closed_at'),
+                            'comments': issue.get('comments', 0),
+                            'url': issue['html_url'],
+                            'labels': [l['name'] for l in issue.get('labels', [])],
+                            'drama_signals': {
+                                'drama_keywords': 0,
+                                'positive_keywords': 0,
+                                'text_length': len(issue['title']) + len(issue.get('body') or ''),
+                                'has_nack': False,
+                                'has_ack': False
+                            }
+                        })
+
+            # Save data
+            data = {
+                'source': 'bips',
+                'repo': 'bitcoin/bips',
+                'fetched_at': datetime.now(timezone.utc).isoformat(),
+                'date_range': {
+                    'since': date.isoformat(),
+                    'until': next_day.isoformat()
+                },
+                'pull_requests': pull_requests,
+                'issues': issues,
+                'summary': {
+                    'total_prs': len(pull_requests),
+                    'total_issues': len(issues),
+                    'total_comments': 0,
+                    'unique_participants': len(set([pr['user'] for pr in pull_requests] + [issue['user'] for issue in issues]))
+                }
+            }
+
+            save_raw_data(data, 'bips', date_str)
+            logger.info(f"  ✅ Saved {len(pull_requests)} PRs, {len(issues)} issues")
+            return True
+
+        except Exception as e:
+            logger.error(f"  ❌ Error: {e}")
+            return False
+
     def fetch_irc_for_date(self, date):
         """Fetch IRC logs for a specific date."""
         date_str = date.strftime('%Y-%m-%d')
@@ -217,10 +353,11 @@ class HistoricalDataFetcher:
 
             # Fetch from all sources
             github_ok = self.fetch_github_for_date(current)
+            bips_ok = self.fetch_bips_for_date(current)
             irc_ok = self.fetch_irc_for_date(current)
             ml_ok = self.fetch_mailing_list_for_date(current)
 
-            if github_ok or irc_ok or ml_ok:
+            if github_ok or bips_ok or irc_ok or ml_ok:
                 success_count += 1
 
             current += timedelta(days=1)

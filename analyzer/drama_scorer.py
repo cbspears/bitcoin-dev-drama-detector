@@ -219,6 +219,7 @@ Respond in JSON format:
     def calculate_daily_scores(
         self,
         github_data: Optional[Dict] = None,
+        bips_data: Optional[Dict] = None,
         irc_data: Optional[Dict] = None,
         mailing_list_data: Optional[Dict] = None
     ) -> Dict:
@@ -227,6 +228,7 @@ Respond in JSON format:
 
         Args:
             github_data: GitHub data dict from scraper
+            bips_data: BIPs repository data dict from scraper
             irc_data: IRC data dict from scraper
             mailing_list_data: Mailing list data dict from scraper
 
@@ -235,6 +237,7 @@ Respond in JSON format:
         """
         scores = {
             'github': 0.0,
+            'bips': 0.0,
             'mailing_list': 0.0,
             'irc': 0.0,
             'overall': 0.0
@@ -256,6 +259,23 @@ Respond in JSON format:
 
             if all_scores:
                 scores['github'] = round(sum(all_scores) / len(all_scores), 1)
+
+        # Calculate BIPs score if data available
+        if bips_data:
+            all_scores = []
+
+            # Analyze BIP PRs
+            for pr in bips_data.get('pull_requests', [])[:20]:  # Sample first 20
+                analyzed = self.analyze_github_pr(pr)
+                all_scores.append(analyzed['drama_score'])
+
+            # Analyze BIP issues
+            for issue in bips_data.get('issues', [])[:10]:  # Sample first 10
+                analyzed = self.analyze_github_issue(issue)
+                all_scores.append(analyzed['drama_score'])
+
+            if all_scores:
+                scores['bips'] = round(sum(all_scores) / len(all_scores), 1)
 
         # Calculate IRC score if data available
         if irc_data:
@@ -285,7 +305,7 @@ Respond in JSON format:
                 scores['mailing_list'] = round(sum(all_scores) / len(all_scores), 1)
 
         # Overall is average of available sources
-        available_scores = [s for s in [scores['github'], scores['mailing_list'], scores['irc']] if s > 0]
+        available_scores = [s for s in [scores['github'], scores['bips'], scores['mailing_list'], scores['irc']] if s > 0]
         if available_scores:
             scores['overall'] = round(sum(available_scores) / len(available_scores), 1)
 
@@ -294,6 +314,7 @@ Respond in JSON format:
     def extract_hot_topics(
         self,
         github_data: Optional[Dict] = None,
+        bips_data: Optional[Dict] = None,
         irc_data: Optional[Dict] = None,
         mailing_list_data: Optional[Dict] = None
     ) -> List[Dict]:
@@ -302,6 +323,7 @@ Respond in JSON format:
 
         Args:
             github_data: GitHub data dict
+            bips_data: BIPs repository data dict
             irc_data: IRC data dict
             mailing_list_data: Mailing list data dict
 
@@ -310,6 +332,7 @@ Respond in JSON format:
         """
         topics_counter = Counter()
         topic_drama_scores = defaultdict(list)
+        topic_sources = defaultdict(set)
 
         if github_data:
             # Analyze a sample of PRs and issues
@@ -330,6 +353,25 @@ Respond in JSON format:
                 for topic in topics:
                     topics_counter[topic] += 1
                     topic_drama_scores[topic].append(drama_score)
+                    topic_sources[topic].add('github')
+
+        if bips_data:
+            # Analyze BIPs PRs and issues
+            items = (
+                bips_data.get('pull_requests', [])[:30] +
+                bips_data.get('issues', [])[:20]
+            )
+
+            for item in items:
+                content = f"{item['title']} {item.get('body', '')}"
+                drama_score = item.get('drama_signals', {}).get('drama_keywords', 0)
+
+                topics = self._extract_topics_from_text(item['title'])
+
+                for topic in topics:
+                    topics_counter[topic] += 1
+                    topic_drama_scores[topic].append(drama_score)
+                    topic_sources[topic].add('bips')
 
         # Build hot topics list
         hot_topics = []
@@ -337,12 +379,16 @@ Respond in JSON format:
             scores = topic_drama_scores[topic]
             avg_score = sum(scores) / len(scores) if scores else 0
 
+            # Determine primary source (the one with most mentions)
+            sources = list(topic_sources[topic])
+            primary_source = sources[0] if sources else 'github'
+
             hot_topics.append({
                 'topic': topic,
                 'heat_score': min(10, round(avg_score * 2, 1)),  # Scale up for visibility
                 'trend': 'stable',  # Would need historical data for real trends
                 'mentions_24h': count,
-                'primary_source': 'github'
+                'primary_source': primary_source
             })
 
         return hot_topics
@@ -388,6 +434,7 @@ Respond in JSON format:
     def identify_spicy_threads(
         self,
         github_data: Optional[Dict] = None,
+        bips_data: Optional[Dict] = None,
         irc_data: Optional[Dict] = None,
         mailing_list_data: Optional[Dict] = None,
         limit: int = 10
@@ -397,6 +444,7 @@ Respond in JSON format:
 
         Args:
             github_data: GitHub data dict
+            bips_data: BIPs repository data dict
             irc_data: IRC data dict
             mailing_list_data: Mailing list data dict
             limit: Number of threads to return
@@ -406,6 +454,7 @@ Respond in JSON format:
         """
         threads = []
 
+        # Process GitHub data
         if github_data:
             # Combine PRs and issues
             items = github_data.get('pull_requests', []) + github_data.get('issues', [])
@@ -446,6 +495,47 @@ Respond in JSON format:
                         'url': item['url']
                     })
 
+        # Process BIPs data
+        if bips_data:
+            # Combine PRs and issues
+            items = bips_data.get('pull_requests', []) + bips_data.get('issues', [])
+
+            # Score each item based on basic signals
+            for item in items:
+                signals = item.get('drama_signals', {})
+
+                # Calculate a quick drama score
+                drama_score = (
+                    signals.get('drama_keywords', 0) * 2.0 +
+                    signals.get('has_nack', False) * 3.0 -
+                    signals.get('positive_keywords', 0) * 0.5
+                )
+
+                comment_count = item.get('comments', 0) + item.get('review_comments', 0)
+
+                # Boost score for high activity
+                if comment_count > 20:
+                    drama_score += 2.0
+                elif comment_count > 10:
+                    drama_score += 1.0
+
+                # Normalize to 0-10
+                drama_score = max(0, min(10, drama_score))
+
+                if drama_score >= 4.0:  # Only include moderately spicy threads
+                    threads.append({
+                        'id': f"bip-{item['number']}",
+                        'title': item['title'],
+                        'source': 'bips',
+                        'drama_score': round(drama_score, 1),
+                        'date': item['created_at'][:10],
+                        'participants': [item['user']],
+                        'nack_count': 1 if signals.get('has_nack') else 0,
+                        'ack_count': 1 if signals.get('has_ack') else 0,
+                        'key_phrases': [],  # Would need full analysis
+                        'url': item['url']
+                    })
+
         # Sort by drama score and return top threads
         threads.sort(key=lambda x: x['drama_score'], reverse=True)
         return threads[:limit]
@@ -453,6 +543,7 @@ Respond in JSON format:
     def identify_key_participants(
         self,
         github_data: Optional[Dict] = None,
+        bips_data: Optional[Dict] = None,
         irc_data: Optional[Dict] = None,
         mailing_list_data: Optional[Dict] = None,
         limit: int = 10
@@ -462,6 +553,7 @@ Respond in JSON format:
 
         Args:
             github_data: GitHub data dict
+            bips_data: BIPs repository data dict
             irc_data: IRC data dict
             mailing_list_data: Mailing list data dict
             limit: Number of participants to return
@@ -485,6 +577,24 @@ Respond in JSON format:
                 participant_stats[user]['drama_contributions'].append(drama_level)
 
             for issue in github_data.get('issues', []):
+                user = issue['user']
+                signals = issue.get('drama_signals', {})
+                drama_level = signals.get('drama_keywords', 0)
+
+                participant_stats[user]['messages'] += 1
+                participant_stats[user]['drama_contributions'].append(drama_level)
+
+        if bips_data:
+            # Count BIP PR/issue authors
+            for pr in bips_data.get('pull_requests', []):
+                user = pr['user']
+                signals = pr.get('drama_signals', {})
+                drama_level = signals.get('drama_keywords', 0)
+
+                participant_stats[user]['messages'] += 1
+                participant_stats[user]['drama_contributions'].append(drama_level)
+
+            for issue in bips_data.get('issues', []):
                 user = issue['user']
                 signals = issue.get('drama_signals', {})
                 drama_level = signals.get('drama_keywords', 0)
@@ -528,12 +638,17 @@ Respond in JSON format:
 
         # Load raw data from all sources
         github_data = load_raw_data('github', date_str)
+        bips_data = load_raw_data('bips', date_str)
         irc_data = load_raw_data('irc', date_str)
         mailing_list_data = load_raw_data('mailing_list', date_str)
 
         if not github_data:
             logger.warning(f"No GitHub data found for {date_str}")
             github_data = None
+
+        if not bips_data:
+            logger.warning(f"No BIPs data found for {date_str}")
+            bips_data = None
 
         if not irc_data:
             logger.warning(f"No IRC data found for {date_str}")
@@ -547,17 +662,17 @@ Respond in JSON format:
         logger.info("Calculating daily scores...")
         daily_scores = {
             'date': date_str,
-            **self.calculate_daily_scores(github_data, irc_data, mailing_list_data)
+            **self.calculate_daily_scores(github_data, bips_data, irc_data, mailing_list_data)
         }
 
         logger.info("Extracting hot topics...")
-        hot_topics = self.extract_hot_topics(github_data, irc_data, mailing_list_data)
+        hot_topics = self.extract_hot_topics(github_data, bips_data, irc_data, mailing_list_data)
 
         logger.info("Identifying spicy threads...")
-        spicy_threads = self.identify_spicy_threads(github_data, irc_data, mailing_list_data)
+        spicy_threads = self.identify_spicy_threads(github_data, bips_data, irc_data, mailing_list_data)
 
         logger.info("Identifying key participants...")
-        key_participants = self.identify_key_participants(github_data, irc_data, mailing_list_data)
+        key_participants = self.identify_key_participants(github_data, bips_data, irc_data, mailing_list_data)
 
         # Save processed data
         save_processed_data(daily_scores, f'daily_scores_{date_str}.json')
