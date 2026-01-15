@@ -1,0 +1,91 @@
+{
+  "source": "github",
+  "repository": "bitcoin/bitcoin",
+  "fetched_at": "2026-01-15T05:41:34.840961+00:00",
+  "date": "2026-01-11",
+  "pull_requests": [
+    {
+      "number": 34257,
+      "title": "txgraph: deterministic optimal transaction order",
+      "user": "sipa",
+      "state": "open",
+      "created_at": "2026-01-11T23:56:09Z",
+      "updated_at": "2026-01-14T23:00:01Z",
+      "body": "Part of #30289. Builds on top of #34259. Alternative to #33335; see the discussion there for motivation.\r\n\r\nThis makes the order of transaction in txgraph deterministic (as long as the set of transactions is fixed, and all clusters manage to reach optimal linearization), by introducing tie-break rules in the order of transactions within a chunk, chunk within a cluster, and chunks across clusters.\r\n\r\nThe order of transactions within a chunk becomes:\r\n1. Topology (parents before children)\r\n2. Individual transaction feerate (high to low)\r\n3. Individual transaction weight (small to large)\r\n4. Txid (low to high txid)\r\n(and then fed to `PostLinearize`, which may improve the sub-chunk ordering but introduce *deterministic* violations of 3 and 4)\r\n\r\nThe order of chunks within a cluster becomes:\r\n1. Topology (chunks before their dependent chunks)\r\n2. Chunk feerate (high to low)\r\n3. Chunk weight (small to large)\r\n4. Max-txid (chunk with lowest maximum-txid first)\r\n\r\nThe order of chunks across clusters becomes:\r\n1. Feerate (high to low)\r\n2. Equal-feerate-chunk-prefix weight (small to large)\r\n3. Max-txid (chunk with lowest maximum-txid first)\r\n\r\nThe equal-feerate-chunk-prefix weight of a chunk C is defined as the sum of the weights of all chunks in the same cluster as C, with the same feerate as C, up to and including C itself, in linearization order (but excluding such chunks that appear after C). This is a well-defined approximation of sorting chunks from small to large across clusters, while remaining consistent with intra-cluster linearization order.\r\n",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34257"
+    },
+    {
+      "number": 34256,
+      "title": "test: support `get_bind_addrs` and `feature_bind_extra` on macOS",
+      "user": "l0rinc",
+      "state": "open",
+      "created_at": "2026-01-11T21:42:11Z",
+      "updated_at": "2026-01-13T20:05:18Z",
+      "body": "### Problem\r\n\r\nSome functional tests are shown as skipped when running on macOS because `test_framework/netutil.py` only implemented the Linux-specific logic for checking which TCP sockets a node is listening on.\r\n\r\n### Fix\r\n\r\nAdd macOS implementations in `test/functional/test_framework/netutil.py` so tests can query:\r\n\r\n* which TCP sockets a node is listening on (`get_bind_addrs()`, via `lsof`)\r\n* a non-loopback interface address (`all_interfaces()`, via `ifconfig`)\r\n\r\nThen enable the previously Linux-only tests by switching to a shared platform guard.\r\n\r\n### Commands\r\n<details>\r\n<summary><code>get_bind_addrs()</code> (<code>lsof</code> + regex)</summary>\r\n\r\n> Command used\r\n```bash\r\nlsof -nP -a -p <pid> -iTCP -sTCP:LISTEN -Ftn\r\n```\r\n\r\n> Flags\r\n\r\n- -n: no hostname resolution\r\n- -P: no service/port-name resolution\r\n- -a: AND all conditions\r\n- -p <pid>: filter by process ID\r\n- -iTCP: TCP sockets only\r\n- -sTCP:LISTEN: listening sockets only\r\n- -Ftn: machine-readable output (fields: type t, name n)\r\n\r\n> Regex parser\r\n\r\n```regex\r\nt(IPv[46])\\nn(\\*|\\[.+?]|[^:]+):(\\d+)\r\n```\r\n> Captured groups\r\n\r\n- group 1: IPv4 / IPv6 (used to disambiguate *)\r\n- group 2: host (*, [::1], 127.0.0.1, …)\r\n- group 3: port\r\n</details>\r\n\r\n<details>\r\n<summary><code>all_interfaces()</code> (<code>ifconfig</code> + regex)</summary>\r\n\r\n> Command used\r\n\r\n```bash\r\nifconfig -au\r\n```\r\n\r\n> Regex parsing\r\n\r\nInterface blocks:\r\n```regex\r\n(?m)^(?P<iface>\\S+):(?P<block>[^\\n]*(?:\\n[ \\t]+[^\\n]*)*)\r\n```\r\n\r\nIPv4 extraction within each block:\r\n```regex\r\ninet (\\S+)\r\n```\r\n</details>\r\n\r\n### Notes\r\n\r\nThe only remaining platform skips on macOS are the USDT/BPF tracing tests (interface_usdt_*.py).\r\n\r\n",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34256"
+    },
+    {
+      "number": 34254,
+      "title": "validation: Prevent duplicate logging and looping in invalid block handling",
+      "user": "mzumsande",
+      "state": "open",
+      "created_at": "2026-01-11T16:59:21Z",
+      "updated_at": "2026-01-12T21:48:42Z",
+      "body": "`InvalidChainFound()` is called from 3 spots:\r\n1. from `InvalidBlockFound()`\r\n2. from `ActivateBestChain()`, with the highest connectable block of the chain\r\nas an arg (after having called `InvalidBlockFound()` already for the block that failed in `ConnectTip()`)\r\n3. from `InvalidateBlock()` (rpc-only)\r\n\r\nMost of the logic in `InvalidChainFound()` is not required for 2) and 3):\r\nIn `ActivateBestChain()`, the previous call to `InvalidChainFound()` before via `InvalidBlockFound` did the flag updates, best header calculation and logging, so only `m_best_invalid` could need additional updating.\r\nIn `InvalidateBlock()` (which doesn't call `InvalidBlockFound()`), we do most of the accounting manually.\r\n\r\nTherefore move of all logic but the `m_best_invalid` update into `InvalidBlockFound()`, avoiding duplicate logging and unnecessary work (the loops over the block index in `SetBlockFailureFlags()` and `RecalculateBestHeader()`\r\nwere done twice before).\r\n\r\nThe second commit renames `InvalidChainFound` to `UpdateBestInvalid` to adjust to its remaining role.\r\n\r\nThis addresses past discussions about repeated work in `InvalidateBlock()` (https://github.com/bitcoin/bitcoin/pull/31405#discussion_r2135717500) and `ActivateBestChain()` (https://github.com/bitcoin/bitcoin/pull/31533#discussion_r2607189790)",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34254"
+    },
+    {
+      "number": 34253,
+      "title": "validation: cache tip recency for lock-free `IsInitialBlockDownload()`",
+      "user": "l0rinc",
+      "state": "open",
+      "created_at": "2026-01-11T15:15:32Z",
+      "updated_at": "2026-01-13T12:10:06Z",
+      "body": "### Context\r\nThis PR is a follow-up to the stale #32885.\r\n\r\n### Problem\r\n`ChainstateManager::IsInitialBlockDownload()` currently acquires `cs_main` internally, even though most existing call sites already hold the lock. This becomes relevant for proposals like #34054, which would call `IsInitialBlockDownload()` from the scheduler thread without holding `cs_main`, potentially introducing lock contention.\r\n\r\n### Fix\r\nMake `ChainstateManager::IsInitialBlockDownload()` lock-free by caching its result in a single atomic `m_cached_is_ibd` (true while in IBD, latched to false on exit).\r\nMove the IBD exit checks out of `IsInitialBlockDownload()` (reader-side) into a new `ChainstateManager::UpdateIBDStatus()` (writer-side, called under cs_main).\r\n\r\nCall UpdateIBDStatus() at strategic points where IBD exit conditions may change, after active chain tip updates in `ConnectTip()`, `DisconnectTip()`, and `LoadChainTip()`, and after `ImportBlocks()` returns.\r\n\r\nWith this, `IsInitialBlockDownload()` becomes a lock-free atomic read, avoiding internal `cs_main` acquisition on hot paths.\r\n\r\n### Testing and Benchmarks\r\nThis isn't strictly an optimization - though some usecases might benefit from it -, so rather as a sanity check I ran a reindex-chainstate and an AssumeUTXO load (without background validation).\r\n\r\n<details>\r\n<summary>assumeutxo load | 910000 blocks | dbcache 4500 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | xfs | SSD</summary>\r\n\r\n```\r\nCOMMITS=\"595504a43209bead162da54a204df7d140a25f0e 63e822b637f67242e3689adedc0155b34100e651\"; \\\r\nCC=gcc; CXX=g++; \\\r\nBASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/ShallowBitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; UTXO_SNAPSHOT_PATH=\"$BASE_DIR/utxo-910000.dat\"; \\\r\n(echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done; echo \"\") && \\\r\nfor DBCACHE in 4500; do \\\r\n  (echo \"assumeutxo load | 910000 blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(df -T $BASE_DIR | awk 'NR==2{print $2}') | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 0 && echo SSD || echo HDD)\";) &&\\\r\n  hyperfine \\\r\n  --sort command \\\r\n  --runs 3 \\\r\n  --export-json \"$BASE_DIR/assumeutxo-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$DBCACHE-$CC-$(date +%s).json\" \\\r\n  --parameter-list COMMIT ${COMMITS// /,} \\\r\n  --prepare \"killall -9 bitcoind 2>/dev/null; rm -rf $DATA_DIR/blocks $DATA_DIR/chainstate $DATA_DIR/chainstate_snapshot $DATA_DIR/debug.log; git clean -fxd; git reset --hard {COMMIT} && \\\r\n             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && ninja -C build bitcoind bitcoin-cli -j2 && \\\r\n             ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=1 -printtoconsole=0; sleep 20 && \\\r\n             ./build/bin/bitcoind -datadir=$DATA_DIR -daemon -blocksonly -connect=0 -dbcache=$DBCACHE -printtoconsole=0; sleep 20\" \\\r\n   --conclude \"build/bin/bitcoin-cli -datadir=$DATA_DIR stop || true; killall bitcoind || true; sleep 10; \\\r\n               echo '{COMMIT} | dbcache=$DBCACHE | chainstate: $(find $DATA_DIR/chainstate_snapshot -type f 2>/dev/null | wc -l) files, $(du -sb $DATA_DIR/chainstate_snapshot 2>/dev/null | cut -f1) bytes' >> $DATA_DIR/debug.log; \\\r\n               cp $DATA_DIR/debug.log $LOG_DIR/debug-assumeutxo-{COMMIT}-dbcache-$DBCACHE-$(date +%s).log\" \\\r\n    \"COMPILER=$CC DBCACHE=$DBCACHE ./build/bin/bitcoin-cli -datadir=$DATA_DIR -rpcclienttimeout=0 loadtxoutset $UTXO_SNAPSHOT_PATH\"; \\\r\ndone\r\n\r\n595504a432 Merge bitcoin/bitcoin#34236: Add sedited to trusted-keys\r\n63e822b637 validation: make `IsInitialBlockDownload()` lock-free\r\n\r\nassumeutxo load | 910000 blocks | dbcache 4500 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | xfs | SSD\r\n\r\nBenchmark 1: COMPILER=gcc DBCACHE=4500 ./build/bin/bitcoin-cli -datadir=/mnt/my_storage/ShallowBitcoinData -rpcclienttimeout=0 loadtxoutset /mnt/my_storage/utxo-910000.dat (COMMIT = 595504a43209bead162da54a204df7d140a25f0e)\r\n  Time (mean ± σ):     418.452 s ±  0.461 s    [User: 0.001 s, System: 0.001 s]\r\n  Range (min … max):   418.070 s … 418.964 s    3 runs\r\n \r\nBenchmark 2: COMPILER=gcc DBCACHE=4500 ./build/bin/bitcoin-cli -datadir=/mnt/my_storage/ShallowBitcoinData -rpcclienttimeout=0 loadtxoutset /mnt/my_storage/utxo-910000.dat (COMMIT = 63e822b637f67242e3689adedc0155b34100e651)\r\n  Time (mean ± σ):     415.994 s ±  0.294 s    [User: 0.001 s, System: 0.001 s]\r\n  Range (min … max):   415.788 s … 416.330 s    3 runs\r\n \r\nRelative speed comparison\r\n        1.01 ±  0.00  COMPILER=gcc DBCACHE=4500 ./build/bin/bitcoin-cli -datadir=/mnt/my_storage/ShallowBitcoinData -rpcclienttimeout=0 loadtxoutset /mnt/my_storage/utxo-910000.dat (COMMIT = 595504a43209bead162da54a204df7d140a25f0e)\r\n        1.00          COMPILER=gcc DBCACHE=4500 ./build/bin/bitcoin-cli -datadir=/mnt/my_storage/ShallowBitcoinData -rpcclienttimeout=0 loadtxoutset /mnt/my_storage/utxo-910000.dat (COMMIT = 63e822b637f67242e3689adedc0155b34100e651)\r\n```\r\n\r\n</details>\r\n\r\n<details>\r\n<summary>2026-01-12 | reindex-chainstate | 931139 blocks | dbcache 4500 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD</summary>\r\n\r\n```\r\nfor DBCACHE in 4500; do \\                                                                                                                           \r\n  COMMITS=\"595504a43209bead162da54a204df7d140a25f0e 63e822b637f67242e3689adedc0155b34100e651\"; \\\r\n  STOP=931139; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | SSD\"; echo \"\") &&\\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f $DATA_DIR/debug.log; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n\r\n595504a432 Merge bitcoin/bitcoin#34236: Add sedited to trusted-keys\r\n63e822b637 validation: make `IsInitialBlockDownload()` lock-free\r\n\r\n2026-01-12 | reindex-chainstate | 931139 blocks | dbcache 4500 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=931139 -dbcache=4500 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 595504a43209bead162da54a204df7d140a25f0e)\r\n  Time (abs ≡):        17187.310 s               [User: 33104.415 s, System: 937.548 s]\r\n \r\nBenchmark 2: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=931139 -dbcache=4500 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 63e822b637f67242e3689adedc0155b34100e651)\r\n  Time (abs ≡):        17240.300 s               [User: 33164.803 s, System: 976.485 s]\r\n \r\nRelative speed comparison\r\n        1.00          COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=931139 -dbcache=4500 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 595504a43209bead162da54a204df7d140a25f0e)\r\n        1.00          COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=931139 -dbcache=4500 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 63e822b637f67242e3689adedc0155b34100e651)\r\n```\r\n\r\n</details>",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34253"
+    },
+    {
+      "number": 34252,
+      "title": "doc: add 433 (Pay to Anchor) to bips.md",
+      "user": "theStack",
+      "state": "closed",
+      "created_at": "2026-01-11T13:16:55Z",
+      "updated_at": "2026-01-14T17:26:53Z",
+      "body": "See PR https://github.com/bitcoin/bips/pull/1982 (merged recently) and #30352 (first released in v28.0).",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34252"
+    }
+  ],
+  "issues": [
+    {
+      "number": 34255,
+      "title": "rpc `dumptxoutset` breaks with default optional value.",
+      "user": "jaoleal",
+      "state": "closed",
+      "created_at": "2026-01-11T19:02:27Z",
+      "updated_at": "2026-01-13T07:56:17Z",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nI was testing `dumptxoutset` and by omitting the `type` field the command just broke even if the field itself claims to be optional.\n\nIn the documentation it says that the default value for `type` is `\" \"` but appears the command is expecting either `rollback` or `latest`.\n\n### Expected behaviour\n\nSince the documentation is already stating the problem itself, this may be a desired behavior ? But why make the field optional if thats not exactly the case ? Why not making the default value for `type` to be `latest` ?\n\n### Steps to reproduce\n\nbitcoin-cli dumtxoutset filename.dat\n\n### Relevant log output\n\n[nix-shell:~]$ sudo bitcoin-cli -rpcclienttimeout=0 dumptxoutset pau.dat\n[sudo] password for jaoleal: \nerror code: -8\nerror message:\nInvalid snapshot type \"\" specified. Please specify \"rollback\" or \"latest\"\n\n### How did you obtain Bitcoin Core\n\nPackage manager\n\n### What version of Bitcoin Core are you using?\n\nv30.0\n\n### Operating system and version\n\nNixOs 25.11\n\n### Machine specifications\n\nEnough",
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34255"
+    },
+    {
+      "number": 34251,
+      "title": ".",
+      "user": "TraceScamCEO",
+      "state": "closed",
+      "created_at": "2026-01-11T04:30:22Z",
+      "updated_at": "2026-01-11T05:23:14Z",
+      "body": ".",
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34251"
+    }
+  ],
+  "summary": {
+    "pull_requests": 5,
+    "issues": 2
+  }
+}
