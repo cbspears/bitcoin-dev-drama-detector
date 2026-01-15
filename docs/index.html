@@ -185,40 +185,48 @@
                 setSpicyThreads(threads.spicy_threads || []);
                 setKeyParticipants(participants.key_participants || []);
 
-                // Load today's real scores
-                let todayScores = {
-                  overall: 0.4,
-                  github: 0.4,
-                  mailing_list: 0.0,
-                  irc: 0.0
-                };
-
-                if (dailyScoresRes && dailyScoresRes.ok) {
-                  const realScores = await dailyScoresRes.json();
-                  todayScores = {
-                    overall: realScores.overall || 0,
-                    github: realScores.github || 0,
-                    mailing_list: realScores.mailing_list || 0,
-                    irc: realScores.irc || 0
-                  };
-                }
-
-                // Generate 30-day historical data (mix of mock + real today)
+                // Load 30 days of historical data (real files when available)
                 const scores = [];
+                const loadPromises = [];
+
                 for (let i = 29; i >= 0; i--) {
                   const date = new Date(today);
                   date.setDate(date.getDate() - i);
+                  const dateStr = date.toISOString().split('T')[0];
 
-                  if (i === 0) {
-                    // Use real scores for today
+                  loadPromises.push(
+                    fetch(`${baseUrl}/daily_scores_${dateStr}.json`)
+                      .then(res => res.ok ? res.json() : null)
+                      .then(data => ({
+                        date: dateStr,
+                        data: data,
+                        index: i
+                      }))
+                      .catch(() => ({ date: dateStr, data: null, index: i }))
+                  );
+                }
+
+                // Wait for all historical data attempts
+                const historicalResults = await Promise.all(loadPromises);
+
+                // Sort by index to maintain chronological order
+                historicalResults.sort((a, b) => b.index - a.index);
+
+                // Build scores array
+                for (const result of historicalResults) {
+                  if (result.data) {
+                    // Real data exists
                     scores.push({
-                      date: date.toISOString().split('T')[0],
-                      ...todayScores
+                      date: result.date,
+                      overall: result.data.overall || 0,
+                      github: result.data.github || 0,
+                      mailing_list: result.data.mailing_list || 0,
+                      irc: result.data.irc || 0
                     });
                   } else {
-                    // Mock historical data for visualization
+                    // No data for this day - use mock data for now
                     scores.push({
-                      date: date.toISOString().split('T')[0],
+                      date: result.date,
                       overall: Math.random() * 3 + 2,
                       github: Math.random() * 2 + 1,
                       mailing_list: Math.random() * 3 + 2,
@@ -226,6 +234,7 @@
                     });
                   }
                 }
+
                 setDailyScores(scores);
 
                 setLoading(false);
