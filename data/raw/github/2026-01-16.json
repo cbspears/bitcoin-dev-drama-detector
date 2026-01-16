@@ -1,12 +1,515 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-01-16T01:16:37.869171+00:00",
+  "fetched_at": "2026-01-16T08:22:37.750183+00:00",
   "date_range": {
-    "since": "2026-01-09T01:16:37.869112+00:00",
-    "until": "2026-01-16T01:16:37.869112+00:00"
+    "since": "2026-01-09T08:22:37.750107+00:00",
+    "until": "2026-01-16T08:22:37.750107+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3164120126,
+      "number": 34257,
+      "title": "txgraph: deterministic optimal transaction order",
+      "body": "Part of #30289.\r\n\r\nTxGraph's fundamental responsibility is deciding the order of transactions in the mempool. It relies on the `cluster_linearize.h` code to optimize it, but there can and often will be many different orderings that are essentially equivalent from a quality perspective, so we have to pick one. At a high level, the solution will involve one or more of:\r\n* Deciding based on **internal identifiers** (`Cluster::m_sequence`, `DepGraphIndex`). This is very simple, but risks leaking information about transaction receive order.\r\n* Deciding **randomly**, which is private, but may interfere with relay expectations, block propagation, and ability to monitor network behavior.\r\n* Deciding **based on txid**, which is private and deterministic, but risks incentivizing grinding to get an edge (though we haven't really seen such behavior).\r\n* Deciding **based on size** (e.g. prefer smaller transactions), which is somewhat related to quality, but not unconditionally (depending on mempool layout, the ideal ordering might call for smaller transactions first, last, or anywhere in between). It's also not a strong ordering as there can be many identically-sized transactions. However, if it were to encourage grinding behavior, incentivizing smaller transactions is probably not a bad thing.\r\n\r\nAs of #32545, the current behavior is primarily picking randomly, though inconsistently, as some code paths also use internal identifiers and size. #33335 sought to change it to use random (preferring size in a few places), with the downsides listed above.\r\n\r\nThis PR is an alternative to that, which changes the order to tie-break based on size everywhere possible, and use lowest-txid-first as final fallback. This is fully deterministic: for any given set of mempool transactions, if all linearized optimally, the transaction order exposed by TxGraph is deterministic.\r\n\r\nThe order of transactions within a chunk is tie-broken using:\r\n1. The output of `PostLinearize` (which improves sub-chunk order), using an initial linearization created using the rules 2-4 below.\r\n2. Individual transaction feerate (high to low)\r\n3. Individual transaction weight (small to large)\r\n4. Txid (low to high txid)\r\n\r\nThe order of chunks within a cluster is tie-broken using:\r\n1. Chunk feerate (high to low)\r\n2. Chunk weight (small to large)\r\n3. Max-txid (chunk with lowest maximum-txid first)\r\n\r\nThe order of chunks across clusters is tie-broken using:\r\n1. Feerate (high to low)\r\n2. Equal-feerate-chunk-prefix weight (small to large)\r\n3. Max-txid (chunk with lowest maximum-txid first)\r\n\r\nThe equal-feerate-chunk-prefix weight of a chunk C is defined as the sum of the weights of all chunks in the same cluster as C, with the same feerate as C, up to and including C itself, in linearization order (but excluding such chunks that appear after C). This is a well-defined approximation of sorting chunks from small to large across clusters, while remaining consistent with intra-cluster linearization order.\r\n",
+      "state": "open",
+      "user": "sipa",
+      "created_at": "2026-01-11T23:56:09Z",
+      "updated_at": "2026-01-16T08:21:04Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34257",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3047,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3180151419,
+      "number": 34314,
+      "title": "wallet: Fix MaxSatisfactionWeight calculation for Taproot descriptors",
+      "body": "This PR fixes a bug in the `MaxSatisfactionWeight` calculation for Taproot descriptors. Previously, the implementation contained a FIXME comment and only calculated keypath spend weight, leading to significant underestimations for script path spending.\r\n\r\n### What Changed:\r\n\r\n**1. TaprootDescriptor::MaxSatisfactionWeight** - Replaced the placeholder implementation with proper script path weight calculation:\r\n   - Now iterates through all subdescriptors to find the heaviest script path\r\n   - Uses `MaxSatSize()` instead of `MaxSatisfactionWeight()` for subdescriptors (Taproot SegWit v1 has a 1:1 ratio between witness bytes and weight units, unlike the 4:1 ratio in legacy SegWit v0)\r\n   - Accounts for satisfaction size, script size, and control block size\r\n   - Returns the maximum of keypath (66 weight units) and all script paths\r\n\r\n**2. PKDescriptor::MaxSatSize** - Corrected Schnorr signature size from 65 to 64 bytes (SIGHASH_DEFAULT is omitted in Schnorr signatures)\r\n\r\n**3. MultiADescriptor::MaxSatSize** - Corrected Schnorr signature size from 65 to 64 bytes\r\n\r\n**4. Added comprehensive unit tests** - New test case `descriptor_tr_max_satisfaction_weight` with:\r\n   - Test for `tr(key, pk(key))` verifying script path weight (134) exceeds keypath weight (66)\r\n   - Test for `tr(key, sortedmulti_a(2, K1, K2))` verifying complex script path calculation (235 weight units)\r\n   - Detailed comments explaining the weight calculations for each component\r\n\r\n### Why:\r\n\r\nAccurate weight estimation for Taproot descriptors is critical for:\r\n- **Fee calculation** - Underestimated weights lead to insufficient fees and transaction rejection\r\n- **Transaction size estimation** - Affects PSBT construction and validation\r\n- **Wallet coin selection** - Incorrect weights cause suboptimal UTXO selection\r\n\r\nThe tests demonstrate the bug (old code would return 66 for both cases) and prove the fix produces correct weight estimates.",
+      "state": "open",
+      "user": "tboy1337",
+      "created_at": "2026-01-16T07:17:28Z",
+      "updated_at": "2026-01-16T08:06:09Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34314",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 3,
+        "positive_keywords": 0,
+        "text_length": 2003,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3174426479,
+      "number": 34288,
+      "title": "fuzz: Exclude too expensive inputs in miniscript_string target",
+      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/30498\r\n\r\nAccepting \"expensive\" fuzz inputs which have no real use-case is problematic, because it prevents the fuzz engine from spending time on the next useful fuzz input.\r\n\r\nFor example this one will take several seconds (the flamegraph shows the time is spent in minscipt `NoDupCheck`):\r\n\r\n```\r\ncurl -fLO 'https://raw.githubusercontent.com/bitcoin-core/qa-assets/eac1c57614d7823bcd6079814749f72018aea438/fuzz_corpora/miniscript_string/41bae50cffd1741150a1b330d02ab09f46ff8cd1'\r\nFUZZ=miniscript_string /usr/bin/time   ./bld-cmake/bin/fuzz  ./41bae50cffd1741150a1b330d02ab09f46ff8cd1\r\n```\r\n\r\nInspecting the inputs shows that it has many sub frags, so rejecting based on `HasTooManySubFrag` should be sufficient.",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2026-01-14T17:49:39Z",
+      "updated_at": "2026-01-16T07:51:30Z",
+      "merged_at": "2026-01-15T13:55:33Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34288",
+      "labels": [
+        "Fuzzing"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 823,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2977401488,
+      "number": 33779,
+      "title": "ci, iwyu: Fix warnings in `src/kernel` and treat them as errors",
+      "body": "Now seems like a good time to update the includes in `src/kernel`.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-11-04T17:03:05Z",
+      "updated_at": "2026-01-16T07:41:18Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33779",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 130,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3180205533,
+      "number": 34315,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "maximtea64",
+      "created_at": "2026-01-16T07:40:13Z",
+      "updated_at": "2026-01-16T07:40:43Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34315",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 3,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3013940276,
+      "number": 33878,
+      "title": "refactor, docs: Embedded ASMap [2/3]: Refactor asmap internals and add documentation",
+      "body": "This is a second slice carved out of #28792. It contains the following changes that are crucial for the embedding of asmap data which is added the following PR in the series (probably this will remain in #28792).\r\n\r\nThe changes are:\r\n- Modernizes and simplifies the asmap code by operating on `std::byte` instead of bits\r\n- Unifies asmap version calculation and naming (previously it was called version and checksum interchangeably)\r\n- Operate on a `span` rather than a vector in the asmap internal to prevent holding the asmap data in memory twice\r\n- Add more extensive documentation to the asmap implementation\r\n- Unify asmap casing in implemetation function names\r\n\r\nThe first three commits were already part of #28792, the others are new.\r\n\r\nThe documentation commit came out of feedback gathered at the latest CoreDev. The primary input for the documentation was the documentation that already existed in the Python implementation (`contrib/asmap/asmap.py`) but there are several other comments as well. Please note: I have also asked several LLMs to provide suggestions on how to explain pieces of the implementation and better demonstrate how the parts work together. I have copied bits and pieces that I liked but everything has been edited further by me and obviously all mistakes here are my own. ",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-11-15T20:50:29Z",
+      "updated_at": "2026-01-16T07:39:53Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33878",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1392,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3034182041,
+      "number": 33922,
+      "title": "mining: add getMemoryLoad() and track template non-mempool memory footprint",
+      "body": "Implements a way to track the memory footprint of all non-mempool transactions that are still being referenced by block templates, see discussion in  #33899. It does not impose a limit.\r\n\r\nIPC clients can query this footprint (total, across all clients) using the `getMemoryLoad()` IPC method. Its client-side usage is demonstrated here:\r\n- https://github.com/stratum-mining/sv2-tp/pull/63\r\n\r\nAdditionally, the functional test in `interface_ipc.py` is expanded to demonstrate how template memory management works: templates are not released until the client drops references to them, or calls the template destroy method, or disconnects. The destroy method is called automatically by clients using [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess), as [sv2-tp](https://github.com/stratum-mining/sv2-tp) does. In the Python tests it also happens when references are destroyed or go out of scope.\r\n\r\nThe PR starts with preparation refactor commits:\r\n\r\n1. Tweaks `interface_ipc.py` so `destroy()` calls happen in an order that's useful to later demonstrate memory management\r\n2. Change `std::unique_ptr<BlockTemplate> block_template` from a `static` defined in `rpc/mining.cpp` to `NodeContext`. This prevents a crash when we switch to a non-trivial destructor later (which uses `m_node`).\r\n\r\nThen the main commits:\r\n\r\n3. Add `template_tx_refs` to `NodeContext` to track how many templates contain any given transaction. This map is updated by the `BlockTemplate` constructor and destructor.\r\n4. Add `GetTemplateMemoryUsage()` which loops over this map and sums up the memory footprint for transactions outside the mempool\r\n5. Expose this information to IPC clients via `getMemoryLoad()` and add test coverage\r\n",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-21T15:34:14Z",
+      "updated_at": "2026-01-16T06:50:35Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33922",
+      "labels": [
+        "Mining"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1801,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3039837291,
+      "number": 33936,
+      "title": "mining: pass missing context to createNewBlock() and checkBlock()",
+      "body": "Adding a `context` parameter ensures that these methods are run in their own thread and don't block other calls.\r\n\r\nFor `createNewBlock()` this is not expected to have much impact, because block template creation is fast.\r\n\r\nFor `checkBlock()` this ensures that if we receive a slow to validate block from an untrusted origin (the IPC connection itself is assumed to trusted), it will not block the IPC server. But since validation itself blocks `cs_main` this is also not a huge performance win.\r\n\r\nThis is a breaking change both ways:\r\n- clients must use the updated capnp file\r\n- updated clients can't call these methods on an unupgraded node\r\n\r\n---\r\n\r\nBecause it's a breaking change, but not really important, this PR is marked pending some other more important breaking change. See #33777.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-24T12:36:43Z",
+      "updated_at": "2026-01-16T06:24:59Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33936",
+      "labels": [
+        "Mining"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 860,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3102178109,
+      "number": 34075,
+      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
+      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-12-15T11:53:35Z",
+      "updated_at": "2026-01-16T06:23:31Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 1,
+        "text_length": 8927,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3054115118,
+      "number": 33965,
+      "title": "mining: fix -blockreservedweight shadows IPC option",
+      "body": "Also enforce `MINIMUM_BLOCK_RESERVED_WEIGHT` for IPC clients.\r\n\r\nThe `-blockreservedweight` startup option should only affect RPC code, because IPC clients (currently) do not have a way to signal their intent to use the node default (the `BlockCreateOptions` struct defaults merely document a recommendation for client software).\r\n\r\nBefore this PR however, if the user set `-blockreservedweight` then `ApplyArgsManOptions` would cause the `block_reserved_weight` option passed by IPC clients to be ignored. _Users who don't set this value were not affected._\r\n\r\nFix this by making BlockCreateOptions::block_reserved_weight an\r\nstd::optional.\r\n\r\nInternal interface users, such as the RPC call sites, don't set a\r\nvalue so -blockreservedweight is used. Whereas IPC clients do set\r\na value which is no longer ignored.\r\n\r\nTest coverage is added, with a preliminary commit that refactors the `create_block_template` and `wait_next_template` helpers.\r\n\r\n`mining_basic.py` already ensured `-blockreservedweight` is enforced by mining RPC methods. The second commit adds coverage for Mining interface IPC clients. It also verifies that `-blockreservedweight` has no effect on them.\r\n\r\nThe third commit enforces `MINIMUM_BLOCK_RESERVED_WEIGHT` for IPC clients. Previously lower values were quietly clamped.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-28T13:38:33Z",
+      "updated_at": "2026-01-16T05:47:24Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33965",
+      "labels": [
+        "Mining"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1349,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3054407979,
+      "number": 33966,
+      "title": "refactor: disentangle miner startup defaults from runtime options",
+      "body": "The interaction between node startup options like `-blockreservedweight` and runtime options, especially those passed via IPC, is confusing.\r\n\r\nThey're combined in `BlockAssembler::Options`, which this PR gets rid of in favour of two distinct structs:\r\n\r\n1. `BlockCreateOptions`: used by interface clients. As before, IPC clients have access to a safe / sane subset, whereas RPC and test code can use all fields.\r\n2. `MiningArgs`: these are set once during node startup\r\n\r\nBoth structs have a member for the maximum block height, which is not a problem since they're different structs. The one on `MiningArgs` (`block_max_weight`) matches `-maxblockheight` and is left alone. The one on `BlockCreateOptions` (`block_max_weight`) is an optional, it's set by `ApplyMiningDefaults` only if empty. \r\n\r\nThis all happens in the last commit and requires some preparation to keep things easy to review.\r\n\r\nWe get rid of `BlockAssembler::Options` but this is used in many tests. Since large churn is inevitable, we might as well switch all tests, bench and fuzzers over to the Mining interface. The first (non-base) commit does that, dramatically reducing direct use of `BlockAssembler`. Two exceptions are documented in the commit message. Because `test_block_validity` wasn't available via the interface and the block_assemble benchmark needs it, it's moved from `BlockAssembler::Options` to `BlockCreateOptions` (still not exposed via IPC).\r\n\r\nWe need access to mining related defaults and structs from both the miner and node initialization code. To avoid having to pull in all of `BlockAssembler` for the latter, the second commit introduces `node/mining.h` and moves constants and structs there from `src/node/types.h` (`BlockCreateOptions`, `BlockWaitOptions`, `BlockCheckOptions`) and `src/node/miner.h` (`DEFAULT_PRINT_MODIFIED_FEE`).\r\n\r\nI considered also moving `DEFAULT_BLOCK_MAX_WEIGHT`, `DEFAULT_BLOCK_RESERVED_WEIGHT`, `MINIMUM_BLOCK_RESERVED_WEIGHT` and `DEFAULT_BLOCK_MIN_TX_FEE` there from `policy.h`, since they are distinct from relay policy and not needed by the kernel. But this seems more appropriate for a follow-up and requires additional discussion.\r\n\r\nThe meat and potatoes of this PR is split between the three last commits for easier review:\r\n\r\n1. Adds `node/mining_args.{h,cpp}` and move the options checking out of `init.cpp`, without adding storage\r\n2. Add `block_max_weight` to `BlockCreateOptions` as explained above\r\n3. Introduce the `MiningArgs` struct, add it to the `NodeContext`, expand `mining_args.cpp` to store it, pass it to `BlockAssembler`, etc.\r\n\r\nI kept variable renaming and other formatting changes to a minimum to ease review with `--color-moved=dimmed-zebra`.\r\n\r\nThis PR builds on the bug fix in:\r\n- [ ] #33965\r\n\r\nOnce that is merged, this PR should not change behaviour.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-28T15:42:31Z",
+      "updated_at": "2026-01-16T05:35:08Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33966",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2878,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3059986313,
+      "number": 33986,
+      "title": "doc: improvements to doc/descriptors.md",
+      "body": "This brings doc/descriptors.md up to date:\r\n* Stop trying to exhaustively list all RPCs that involve descriptors. They're used everywhere.\r\n* Stop trying to give the history of descriptor support, we have release notes for that.\r\n* Mention that wallets are now built around descriptors (especially with legacy wallets gone).\r\n* Mention `musig()` KEY expressions in the specification part.\r\n* Reference the relevant output descriptor BIPs in the text.",
+      "state": "open",
+      "user": "sipa",
+      "created_at": "2025-12-01T16:25:09Z",
+      "updated_at": "2026-01-16T05:04:33Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33986",
+      "labels": [
+        "Docs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 490,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2550873429,
+      "number": 32636,
+      "title": "Split `CWallet::Create()` into `CreateNew` and `LoadExisting`",
+      "body": "This PR is mostly a refactor which splits out logic used for creating wallets and for loading wallets, both of which are presently contained in `CWallet::Create()` into `CWallet::CreateNew()` and `CWallet::LoadExisting()`\r\n\r\nThe real win of this PR is that `CWallet::Create()` uses a very bad heuristic for trying to guess whether or not it is supposed to be creating a new wallet or loading an existing wallet:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/370c59261269fd9043674e0f4fd782a89e724473/src/wallet/wallet.cpp#L2882-L2885\r\n\r\nThis heuristic assumes that wallets with no `ScriptPubKeyMans` are being created, which sounds reasonable, but as demonstrated in #32112 and #32111, this can happen when the user tries to load a wallet file that is corrupted, both issues are fixed by this PR and any other misbehavior for wallet files which succeeded the broken heuristic's sniff test for new wallets.\r\n\r\nIt was already the case that every caller of `CWallet::Create()` knows whether it is creating a wallet or loading one, so we can avoid replacing this bad heuristic with another one, and just shift the burden to the caller.",
+      "state": "open",
+      "user": "davidgumberg",
+      "created_at": "2025-05-29T00:37:09Z",
+      "updated_at": "2026-01-16T04:20:40Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32636",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1189,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3084582953,
+      "number": 34032,
+      "title": "util: Add some more Unexpected and Expected methods",
+      "body": "Reviewers requested more member functions In https://github.com/bitcoin/bitcoin/pull/34006.\r\n\r\nThey are currently unused, but bring the port closer to the original `std::expected` implementation:\r\n\r\n* Make `Expected::value()` throw when no value exists\r\n* Add `Unexpected::error()` methods\r\n* Add `Expected<void, E>` specialization\r\n* Add `Expected::value()&&` and `Expected::error()&&` methods\r\n* Add `Expected::swap()`\r\n\r\nAlso, include a tiny tidy fixup:\r\n\r\n* tidy: Set `AllowCastToVoid` in the `bugprone-unused-return-value` check",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2025-12-09T08:01:34Z",
+      "updated_at": "2026-01-16T04:03:31Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34032",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 585,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3161681681,
+      "number": 34247,
+      "title": "security: harden CI actions and subprocess calls",
+      "body": "Harden several CI and deployment scripts against potential injection vectors.\n\n### Changes\n\n- **.github/actions/configure-docker/action.yml**: Migrated direct `github` context interpolation to intermediate environment variables to prevent potential script injection from untrusted context data.\n- **contrib/macdeploy/macdeployqtplus**: Refactored the `codesign` subprocess call to use `shell=False` and list-based arguments. Fixed several linting issues (E401, F841).\n- **contrib/verify-binaries/verify.py**:\n    - Replaced `wget` with `urllib.request` for file retrieval, enforcing HTTP(S) protocols to mitigate potential LFI risks.\n    - Fixed a bug in `verify_with_gpg` where an empty string was passed to the `--output` argument when no output file was specified.\n    - Removed unused imports and cleaned up code.\n- **contrib/verify-binaries/test.py**: Updated `run_verify` to execute via `shell=False`.\n\nThese changes reduce the attack surface for command injection in automated environments and local deployment scripts while improving code quality and reliability.",
+      "state": "open",
+      "user": "RinZ27",
+      "created_at": "2026-01-10T07:33:15Z",
+      "updated_at": "2026-01-16T03:51:17Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34247",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 1120,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3167553868,
+      "number": 34268,
+      "title": "[29.x] backports + final changes for 29.3",
+      "body": "Backports:\r\n\r\n- #34227 \r\n- #33723 \r\n- #33475 \r\n- #33268 \r\n\r\nAnd final changes for 29.3rc1",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2026-01-12T22:47:22Z",
+      "updated_at": "2026-01-16T03:14:31Z",
+      "merged_at": "2026-01-15T10:23:14Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34268",
+      "labels": [
+        "Backport"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 131,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2806431312,
+      "number": 33335,
+      "title": "txgraph: randomize order of same-feerate distinct-cluster transactions",
+      "body": "Part of #30289.\r\n\r\nBefore, the implicit ordering of transactions in a TxGraph's main graph is sorted by:\r\n- feerate, high to low\r\n- `Cluster`, low to high `m_sequence`\r\n- linearization order within clusters\r\n\r\nHowever, since `m_sequence` values are assigned deterministically and predictably, the ordering of same-feerate distinct-Cluster transactions can reveal something about the order they were inserted into `TxGraph`.\r\n\r\nIn #28676, this ordering (through `TxGraph::CompareMainOrder`) is used to decide the order of to-be-announced transactions. These should not expose information about insertion order.\r\n\r\nTo deal with this, do not compare the `m_sequence` values directly, but hash them with a fixed but random key first. In case this yields a collision (which needs ~192000 clusters to have a probability of 10^-9 of existing), fall back to comparing the `m_sequence` values directly.\r\n\r\nAlternatives: we could instead use the pre-cluster-mempool approach of sorting by wtxid in case of ties, which is equally non-revealing, and deterministic. I find it cleaner to have a randomized internal total ordering rather than needing a partial ordering within `TxGraph` that needs to be complemented by tie-breaking logic inside the mempool, however, and I don't think the determinism is that valuable.\r\n\r\nFor context: https://github.com/bitcoin/bitcoin/pull/28676#discussion_r2328804847\r\n",
+      "state": "closed",
+      "user": "sipa",
+      "created_at": "2025-09-07T23:43:53Z",
+      "updated_at": "2026-01-16T02:11:53Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33335",
+      "labels": [
+        "Mempool"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1462,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1785565107,
+      "number": 29700,
+      "title": "kernel, refactor: return error status on all fatal errors",
+      "body": "Return util::Result objects from all functions that can trigger fatal errors.\n\nThere are many validation functions that handle failures by calling `AbortNode` and triggering shutdowns, without returning error information to their callers. This makes error handling in libbitcoinkernel application code difficult, because the only way to handle these errors is to register for [notification callbacks](https://github.com/bitcoin/bitcoin/blob/master/src/kernel/notifications_interface.h). Improve this by making all functions that trigger fatal errors return util::Result objects with the error information.\n\nThis PR is a pure refactoring that returns extra result information from functions without changing their behavior. It's a possible alternative to and subset of #29642, which adds similar return information but also makes behavior changes and exposes a FatalError type.\n\n---\n\n<!-- begin based-on -->\n**This is based on #25665.** The non-base commits are:\n\n- [`fdf8ae6ffa5` refactor, kernel: Add FlushStatus / FlushResult types](https://github.com/bitcoin/bitcoin/pull/29700/commits/fdf8ae6ffa5a3836aa4195b362f753d877e6fd1b)\n- [`f4d6cabac5a` refactor: Add InfoType field to util::Result](https://github.com/bitcoin/bitcoin/pull/29700/commits/f4d6cabac5a7d8f83d51a068c3e313e64d7a6611)\n- [`36833bd474d` refactor, blockstorage: Return FlushResult from flush methods](https://github.com/bitcoin/bitcoin/pull/29700/commits/36833bd474d07b7e6073d5512464638f8f6e6ff6)\n- [`6371e7f268b` refactor, blockstorage: Return fatal errors from block writes](https://github.com/bitcoin/bitcoin/pull/29700/commits/6371e7f268bef60fca35216a264ce19236b3f298)\n- [`b1cae2ab090` refactor, validation: Switch to result.Update](https://github.com/bitcoin/bitcoin/pull/29700/commits/b1cae2ab09000f275925922559e74dd238ae397c)\n- [`1d6ea5fb6a6` refactor, blockstorage: Return fatal error from LoadBlockIndex](https://github.com/bitcoin/bitcoin/pull/29700/commits/1d6ea5fb6a679c6082e5a75a62b56cef8b639934)\n- [`dbd3b6f98aa` refactor, validation: Return fatal errors from FlushStateToDisk](https://github.com/bitcoin/bitcoin/pull/29700/commits/dbd3b6f98aa8cd46a3edecad4a634ee28a6057e5)\n- [`23f96272f40` refactor, validation: Return fatal errors from mempool accept functions](https://github.com/bitcoin/bitcoin/pull/29700/commits/23f96272f4060fc93456565bad8ecb82e33be1cb)\n- [`3b73dd08516` refactor, validation: Return fatal errors from assumeutxo snapshot functions](https://github.com/bitcoin/bitcoin/pull/29700/commits/3b73dd085169396c43ada282603ff0b0fce1e8e5)\n- [`99095011af2` refactor, validation: Return fatal errors from block connect functions](https://github.com/bitcoin/bitcoin/pull/29700/commits/99095011af228d5500731916fe6d085ec119a494)\n- [`495eb44f8a8` refactor, validation: Return fatal errors from activate best chain functions](https://github.com/bitcoin/bitcoin/pull/29700/commits/495eb44f8a86a2e46cdfc6965671f4f176fa2910)\n- [`54da9b8f4cd` refactor, validation: Return fatal errors from new block functions](https://github.com/bitcoin/bitcoin/pull/29700/commits/54da9b8f4cdc736c6b45afe6feefd6f685f94392)\n- [`001c7b2e840` refactor, blockstorage: Return fatal error from ImportBlocks](https://github.com/bitcoin/bitcoin/pull/29700/commits/001c7b2e8406b4cbcd31f0c5afea5008582b03ac)\n- [`15fa85163f3` refactor, validation: Return more errors from VerifyDB](https://github.com/bitcoin/bitcoin/pull/29700/commits/15fa85163f324d50f6365b1865c320c974bcc3ee)<!-- end -->",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2024-03-21T23:11:56Z",
+      "updated_at": "2026-01-16T02:06:11Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/29700",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3504,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1444867984,
+      "number": 28122,
+      "title": "Silent Payments: Implement BIP352",
+      "body": "This PR is part of integrating silent payments into Bitcoin Core. The project is tracked in https://github.com/bitcoin/bitcoin/issues/28536\r\n\r\nBased on https://github.com/bitcoin-core/secp256k1/pull/1698\r\n\r\n## BIP352\r\n\r\nThis PR focuses strictly on the BIP logic and attempts to separate it from the wallet and transaction implementation details. This is accomplished by working directly with public and private keys, instead of needing a wallet backend and transactions for testing. Labels for the receiver are optional and thus deferred for a later PR.\r\n\r\nTest vectors from the BIP are included as unit tests.\r\n",
+      "state": "open",
+      "user": "josibake",
+      "created_at": "2023-07-21T18:36:37Z",
+      "updated_at": "2026-01-16T02:00:10Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/28122",
+      "labels": [
+        "Wallet",
+        "Privacy",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 646,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1746125849,
+      "number": 29491,
+      "title": "[EXPERIMENTAL] Schnorr batch verification for blocks",
+      "body": "This is a simple draft implementation of Schnorr signature batch verification in blocks, put here for conceptual discussion, and collaborative benchmarking. Most of code added here is from the `secp256k1` implementation.\r\n\r\nThe `secp256k1` code is still under review itself, please spend some time giving feedback on the API etc. if you can:\r\n- [Original PR](https://github.com/bitcoin-core/secp256k1/pull/1134)\r\n- [My rebase used here including fixes and adds cmake support](https://github.com/fjahr/secp256k1/tree/pr1134-rebase-2024)\r\n\r\nTODOs\r\n- [ ] Fix `functional/feature_taproot.py`\r\n- [x] Extensive benchmarking using `ConnectBlock()` tracing\r\n- [x] Add unit tests\r\n- [ ] Batch taproot tweak verification as well\r\n- [ ] Conceptual discussion in what form this realistically could be introduced into the code base, and later, a release",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2024-02-27T17:06:26Z",
+      "updated_at": "2026-01-16T02:00:09Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/29491",
+      "labels": [
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 893,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1460109729,
+      "number": 28201,
+      "title": "Silent Payments: sending",
+      "body": "This PR is part of integrating silent payments into Bitcoin Core. Status and tracking for the project is managed in https://github.com/bitcoin/bitcoin/issues/28536\r\n\r\nThis PR depends on #28122 and is marked as a draft until it is merged. If interested in those commits, please review on #28122\r\n\r\n## Sending \r\n### Silent Payments logic\r\n\r\nThe main focus of this PR is:\r\n\r\n* Applying the Taptweak to a taproot internal private key (this is a copy-paste of the code for applying the taptweak in the signing process)\r\n* Getting a private key from a given `scriptPubKey`\r\n* Creating silent payment outputs\r\n* Applying the created scriptPubKeys back to the vector of `CRecipients`\r\n\r\nThe functions are then used together to create silent payment outputs during `CreateTransactionInternal`.\r\n\r\n### Final steps\r\n\r\nThe last commits ensure that:\r\n\r\n* Coin selection is silent payments aware and knows to exclude taproot script path spends and inputs with unknown witness when funding a transaction which pays to a silent payment address\r\n* The change output type is correctly chosen when paying to a silent payment address\r\n* Functional tests\r\n",
+      "state": "open",
+      "user": "josibake",
+      "created_at": "2023-08-02T16:37:04Z",
+      "updated_at": "2026-01-16T02:00:09Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/28201",
+      "labels": [
+        "Wallet",
+        "Privacy",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1160,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
     {
       "id": 3149157644,
       "number": 34207,
@@ -126,30 +629,6 @@
       }
     },
     {
-      "id": 2806431312,
-      "number": 33335,
-      "title": "txgraph: randomize order of same-feerate distinct-cluster transactions",
-      "body": "Part of #30289.\r\n\r\nBefore, the implicit ordering of transactions in a TxGraph's main graph is sorted by:\r\n- feerate, high to low\r\n- `Cluster`, low to high `m_sequence`\r\n- linearization order within clusters\r\n\r\nHowever, since `m_sequence` values are assigned deterministically and predictably, the ordering of same-feerate distinct-Cluster transactions can reveal something about the order they were inserted into `TxGraph`.\r\n\r\nIn #28676, this ordering (through `TxGraph::CompareMainOrder`) is used to decide the order of to-be-announced transactions. These should not expose information about insertion order.\r\n\r\nTo deal with this, do not compare the `m_sequence` values directly, but hash them with a fixed but random key first. In case this yields a collision (which needs ~192000 clusters to have a probability of 10^-9 of existing), fall back to comparing the `m_sequence` values directly.\r\n\r\nAlternatives: we could instead use the pre-cluster-mempool approach of sorting by wtxid in case of ties, which is equally non-revealing, and deterministic. I find it cleaner to have a randomized internal total ordering rather than needing a partial ordering within `TxGraph` that needs to be complemented by tie-breaking logic inside the mempool, however, and I don't think the determinism is that valuable.\r\n\r\nFor context: https://github.com/bitcoin/bitcoin/pull/28676#discussion_r2328804847\r\n",
-      "state": "closed",
-      "user": "sipa",
-      "created_at": "2025-09-07T23:43:53Z",
-      "updated_at": "2026-01-15T22:50:16Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33335",
-      "labels": [
-        "Mempool"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1462,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3136708013,
       "number": 34181,
       "title": "refactor: [p2p] Make ProcessMessage private again, Use references when non-null",
@@ -195,30 +674,6 @@
         "text_length": 1422,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 2977401488,
-      "number": 33779,
-      "title": "ci, iwyu: Fix warnings in `src/kernel` and treat them as errors",
-      "body": "Now seems like a good time to update the includes in `src/kernel`.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-11-04T17:03:05Z",
-      "updated_at": "2026-01-15T22:35:00Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33779",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 130,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -527,30 +982,6 @@
       }
     },
     {
-      "id": 3084582953,
-      "number": 34032,
-      "title": "util: Add some more Unexpected and Expected methods",
-      "body": "Reviewers requested more member functions In https://github.com/bitcoin/bitcoin/pull/34006.\r\n\r\nThey are currently unused, but bring the port closer to the original `std::expected` implementation:\r\n\r\n* Make `Expected::value()` throw when no value exists\r\n* Add `Unexpected::error()` methods\r\n* Add `Expected<void, E>` specialization\r\n* Add `Expected::value()&&` and `Expected::error()&&` methods\r\n* Add `Expected::swap()`\r\n\r\nAlso, include a tiny tidy fixup:\r\n\r\n* tidy: Set `AllowCastToVoid` in the `bugprone-unused-return-value` check",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2025-12-09T08:01:34Z",
-      "updated_at": "2026-01-15T19:44:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34032",
-      "labels": [
-        "Utils/log/libs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 585,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2999849822,
       "number": 33856,
       "title": "kernel, validation: Refactor ProcessNewBlockHeaders to return BlockValidationState",
@@ -761,28 +1192,6 @@
         "text_length": 237,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3164120126,
-      "number": 34257,
-      "title": "txgraph: deterministic optimal transaction order",
-      "body": "Part of #30289.\r\n\r\nTxGraph's fundamental responsibility is deciding the order of transactions in the mempool. It relies on the `cluster_linearize.h` code to optimize it, but there can and often will be many different orderings that are essentially equivalent from a quality perspective, so we have to pick one. At a high level, the solution will involve one or more of:\r\n* Deciding based on **internal identifiers** (`Cluster::m_sequence`, `DepGraphIndex`). This is very simple, but risks leaking information about transaction receive order.\r\n* Deciding **randomly**, which is private, but may interfere with relay expectations, block propagation, and ability to monitor network behavior.\r\n* Deciding **based on txid**, which is private and deterministic, but risks incentivizing grinding to get an edge (though we haven't really seen such behavior).\r\n* Deciding **based on size** (e.g. prefer smaller transactions), which is somewhat related to quality, but not unconditionally (depending on mempool layout, the ideal ordering might call for smaller transactions first, last, or anywhere in between). It's also not a strong ordering as there can be many identically-sized transactions. However, if it were to encourage grinding behavior, incentivizing smaller transactions is probably not a bad thing.\r\n\r\nAs of #32545, the current behavior is primarily picking randomly, though inconsistently, as some code paths also use internal identifiers and size. #33335 sought to change it to use random (preferring size in a few places), with the downsides listed above.\r\n\r\nThis PR is an alternative to that, which changes the order to tie-break based on size everywhere possible, and use lowest-txid-first as final fallback. This is fully deterministic: for any given set of mempool transactions, if all linearized optimally, the transaction order exposed by TxGraph is deterministic.\r\n\r\nThe order of transactions within a chunk is tie-broken using:\r\n1. The output of `PostLinearize` (which improves sub-chunk order), using an initial linearization created using the rules 2-4 below.\r\n2. Individual transaction feerate (high to low)\r\n3. Individual transaction weight (small to large)\r\n4. Txid (low to high txid)\r\n\r\nThe order of chunks within a cluster is tie-broken using:\r\n1. Chunk feerate (high to low)\r\n2. Chunk weight (small to large)\r\n3. Max-txid (chunk with lowest maximum-txid first)\r\n\r\nThe order of chunks across clusters is tie-broken using:\r\n1. Feerate (high to low)\r\n2. Equal-feerate-chunk-prefix weight (small to large)\r\n3. Max-txid (chunk with lowest maximum-txid first)\r\n\r\nThe equal-feerate-chunk-prefix weight of a chunk C is defined as the sum of the weights of all chunks in the same cluster as C, with the same feerate as C, up to and including C itself, in linearization order (but excluding such chunks that appear after C). This is a well-defined approximation of sorting chunks from small to large across clusters, while remaining consistent with intra-cluster linearization order.\r\n",
-      "state": "open",
-      "user": "sipa",
-      "created_at": "2026-01-11T23:56:09Z",
-      "updated_at": "2026-01-15T17:30:52Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34257",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3047,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -1017,30 +1426,6 @@
         "text_length": 6242,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3174426479,
-      "number": 34288,
-      "title": "fuzz: Exclude too expensive inputs in miniscript_string target",
-      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/30498\r\n\r\nAccepting \"expensive\" fuzz inputs which have no real use-case is problematic, because it prevents the fuzz engine from spending time on the next useful fuzz input.\r\n\r\nFor example this one will take several seconds (the flamegraph shows the time is spent in minscipt `NoDupCheck`):\r\n\r\n```\r\ncurl -fLO 'https://raw.githubusercontent.com/bitcoin-core/qa-assets/eac1c57614d7823bcd6079814749f72018aea438/fuzz_corpora/miniscript_string/41bae50cffd1741150a1b330d02ab09f46ff8cd1'\r\nFUZZ=miniscript_string /usr/bin/time   ./bld-cmake/bin/fuzz  ./41bae50cffd1741150a1b330d02ab09f46ff8cd1\r\n```\r\n\r\nInspecting the inputs shows that it has many sub frags, so rejecting based on `HasTooManySubFrag` should be sufficient.",
-      "state": "closed",
-      "user": "maflcko",
-      "created_at": "2026-01-14T17:49:39Z",
-      "updated_at": "2026-01-15T15:10:37Z",
-      "merged_at": "2026-01-15T13:55:33Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34288",
-      "labels": [
-        "Fuzzing"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 823,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -1348,30 +1733,6 @@
       }
     },
     {
-      "id": 3161681681,
-      "number": 34247,
-      "title": "security: harden CI actions and subprocess calls",
-      "body": "Harden several CI and deployment scripts against potential injection vectors.\n\n### Changes\n\n- **.github/actions/configure-docker/action.yml**: Migrated direct `github` context interpolation to intermediate environment variables to prevent potential script injection from untrusted context data.\n- **contrib/macdeploy/macdeployqtplus**: Refactored the `codesign` subprocess call to use `shell=False` and list-based arguments. Fixed several linting issues (E401, F841).\n- **contrib/verify-binaries/verify.py**:\n    - Replaced `wget` with `urllib.request` for file retrieval, enforcing HTTP(S) protocols to mitigate potential LFI risks.\n    - Fixed a bug in `verify_with_gpg` where an empty string was passed to the `--output` argument when no output file was specified.\n    - Removed unused imports and cleaned up code.\n- **contrib/verify-binaries/test.py**: Updated `run_verify` to execute via `shell=False`.\n\nThese changes reduce the attack surface for command injection in automated environments and local deployment scripts while improving code quality and reliability.",
-      "state": "open",
-      "user": "RinZ27",
-      "created_at": "2026-01-10T07:33:15Z",
-      "updated_at": "2026-01-15T13:30:35Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34247",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 1120,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3174345401,
       "number": 34287,
       "title": "[RFC] test: integrate secp256k1lab as subtree and use it for low-level EC ops",
@@ -1391,30 +1752,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1694,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3054115118,
-      "number": 33965,
-      "title": "mining: fix -blockreservedweight shadows IPC option",
-      "body": "Also enforce `MINIMUM_BLOCK_RESERVED_WEIGHT` for IPC clients.\r\n\r\nThe `-blockreservedweight` startup option should only affect RPC code, because IPC clients (currently) do not have a way to signal their intent to use the node default (the `BlockCreateOptions` struct defaults merely document a recommendation for client software).\r\n\r\nBefore this PR however, if the user set `-blockreservedweight` then `ApplyArgsManOptions` would cause the `block_reserved_weight` option passed by IPC clients to be ignored. _Users who don't set this value were not affected._\r\n\r\nFix this by making BlockCreateOptions::block_reserved_weight an\r\nstd::optional.\r\n\r\nInternal interface users, such as the RPC call sites, don't set a\r\nvalue so -blockreservedweight is used. Whereas IPC clients do set\r\na value which is no longer ignored.\r\n\r\nTest coverage is added, with a preliminary commit that refactors the `create_block_template` and `wait_next_template` helpers.\r\n\r\n`mining_basic.py` already ensured `-blockreservedweight` is enforced by mining RPC methods. The second commit adds coverage for Mining interface IPC clients. It also verifies that `-blockreservedweight` has no effect on them.\r\n\r\nThe third commit enforces `MINIMUM_BLOCK_RESERVED_WEIGHT` for IPC clients. Previously lower values were quietly clamped.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-28T13:38:33Z",
-      "updated_at": "2026-01-15T12:58:16Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33965",
-      "labels": [
-        "Mining"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1349,
         "has_nack": false,
         "has_ack": false
       }
@@ -1488,30 +1825,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 588,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3167553868,
-      "number": 34268,
-      "title": "[29.x] backports + final changes for 29.3",
-      "body": "Backports:\r\n\r\n- #34227 \r\n- #33723 \r\n- #33475 \r\n- #33268 \r\n\r\nAnd final changes for 29.3rc1",
-      "state": "closed",
-      "user": "glozow",
-      "created_at": "2026-01-12T22:47:22Z",
-      "updated_at": "2026-01-15T10:23:15Z",
-      "merged_at": "2026-01-15T10:23:14Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34268",
-      "labels": [
-        "Backport"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 131,
         "has_nack": false,
         "has_ack": true
       }
@@ -3159,30 +3472,6 @@
       }
     },
     {
-      "id": 3059986313,
-      "number": 33986,
-      "title": "doc: improvements to doc/descriptors.md",
-      "body": "This brings doc/descriptors.md up to date:\r\n* Stop trying to exhaustively list all RPCs that involve descriptors. They're used everywhere.\r\n* Stop trying to give the history of descriptor support, we have release notes for that.\r\n* Mention that wallets are now built around descriptors (especially with legacy wallets gone).\r\n* Mention `musig()` KEY expressions in the specification part.\r\n* Reference the relevant output descriptor BIPs in the text.",
-      "state": "open",
-      "user": "sipa",
-      "created_at": "2025-12-01T16:25:09Z",
-      "updated_at": "2026-01-14T13:54:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33986",
-      "labels": [
-        "Docs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 490,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2902093523,
       "number": 33593,
       "title": "guix: Use UCRT runtime for Windows release binaries",
@@ -3378,54 +3667,6 @@
       }
     },
     {
-      "id": 3034182041,
-      "number": 33922,
-      "title": "mining: add getMemoryLoad() and track template non-mempool memory footprint",
-      "body": "Implements a way to track the memory footprint of all non-mempool transactions that are still being referenced by block templates, see discussion in  #33899. It does not impose a limit.\r\n\r\nIPC clients can query this footprint (total, across all clients) using the `getMemoryLoad()` IPC method. Its client-side usage is demonstrated here:\r\n- https://github.com/stratum-mining/sv2-tp/pull/63\r\n\r\nAdditionally, the functional test in `interface_ipc.py` is expanded to demonstrate how template memory management works: templates are not released until the client drops references to them, or calls the template destroy method, or disconnects. The destroy method is called automatically by clients using [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess), as [sv2-tp](https://github.com/stratum-mining/sv2-tp) does. In the Python tests it also happens when references are destroyed or go out of scope.\r\n\r\nThe PR starts with preparation refactor commits:\r\n\r\n1. Tweaks `interface_ipc.py` so `destroy()` calls happen in an order that's useful to later demonstrate memory management\r\n2. Change `std::unique_ptr<BlockTemplate> block_template` from a `static` defined in `rpc/mining.cpp` to `NodeContext`. This prevents a crash when we switch to a non-trivial destructor later (which uses `m_node`).\r\n\r\nThen the main commits:\r\n\r\n3. Add `template_tx_refs` to `NodeContext` to track how many templates contain any given transaction. This map is updated by the `BlockTemplate` constructor and destructor.\r\n4. Add `GetTemplateMemoryUsage()` which loops over this map and sums up the memory footprint for transactions outside the mempool\r\n5. Expose this information to IPC clients via `getMemoryLoad()` and add test coverage\r\n",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-21T15:34:14Z",
-      "updated_at": "2026-01-14T11:18:00Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33922",
-      "labels": [
-        "Mining"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1801,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3054407979,
-      "number": 33966,
-      "title": "refactor: disentangle miner startup defaults from runtime options",
-      "body": "The interaction between node startup options like `-blockreservedweight` and runtime options, especially those passed via IPC, is confusing.\r\n\r\nThey're combined in `BlockAssembler::Options`, which this PR gets rid of in favour of two distinct structs:\r\n\r\n1. `BlockCreateOptions`: used by interface clients. As before, IPC clients have access to a safe / sane subset, whereas RPC and test code can use all fields.\r\n2. `MiningArgs`: these are set once during node startup\r\n\r\nBoth structs have a member for the maximum block height, which is not a problem since they're different structs. The one on `MiningArgs` (`block_max_weight`) matches `-maxblockheight` and is left alone. The one on `BlockCreateOptions` (`block_max_weight`) is an optional, it's set by `ApplyMiningDefaults` only if empty. \r\n\r\nThis all happens in the last commit and requires some preparation to keep things easy to review.\r\n\r\nWe get rid of `BlockAssembler::Options` but this is used in many tests. Since large churn is inevitable, we might as well switch all tests, bench and fuzzers over to the Mining interface. The first (non-base) commit does that, dramatically reducing direct use of `BlockAssembler`. Two exceptions are documented in the commit message. Because `test_block_validity` wasn't available via the interface and the block_assemble benchmark needs it, it's moved from `BlockAssembler::Options` to `BlockCreateOptions` (still not exposed via IPC).\r\n\r\nWe need access to mining related defaults and structs from both the miner and node initialization code. To avoid having to pull in all of `BlockAssembler` for the latter, the second commit introduces `node/mining.h` and moves constants and structs there from `src/node/types.h` (`BlockCreateOptions`, `BlockWaitOptions`, `BlockCheckOptions`) and `src/node/miner.h` (`DEFAULT_PRINT_MODIFIED_FEE`).\r\n\r\nI considered also moving `DEFAULT_BLOCK_MAX_WEIGHT`, `DEFAULT_BLOCK_RESERVED_WEIGHT`, `MINIMUM_BLOCK_RESERVED_WEIGHT` and `DEFAULT_BLOCK_MIN_TX_FEE` there from `policy.h`, since they are distinct from relay policy and not needed by the kernel. But this seems more appropriate for a follow-up and requires additional discussion.\r\n\r\nThe meat and potatoes of this PR is split between the three last commits for easier review:\r\n\r\n1. Adds `node/mining_args.{h,cpp}` and move the options checking out of `init.cpp`, without adding storage\r\n2. Add `block_max_weight` to `BlockCreateOptions` as explained above\r\n3. Introduce the `MiningArgs` struct, add it to the `NodeContext`, expand `mining_args.cpp` to store it, pass it to `BlockAssembler`, etc.\r\n\r\nI kept variable renaming and other formatting changes to a minimum to ease review with `--color-moved=dimmed-zebra`.\r\n\r\nThis PR builds on the bug fix in:\r\n- [ ] #33965\r\n\r\nOnce that is merged, this PR should not change behaviour.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-28T15:42:31Z",
-      "updated_at": "2026-01-14T11:17:27Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33966",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 2878,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3070554287,
       "number": 34004,
       "title": "Implementation of SwiftSync",
@@ -3593,30 +3834,6 @@
         "text_length": 32,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3102178109,
-      "number": 34075,
-      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
-      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-12-15T11:53:35Z",
-      "updated_at": "2026-01-14T10:39:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 1,
-        "text_length": 8927,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -3927,30 +4144,6 @@
         "text_length": 1738,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3039837291,
-      "number": 33936,
-      "title": "mining: pass missing context to createNewBlock() and checkBlock()",
-      "body": "Adding a `context` parameter ensures that these methods are run in their own thread and don't block other calls.\r\n\r\nFor `createNewBlock()` this is not expected to have much impact, because block template creation is fast.\r\n\r\nFor `checkBlock()` this ensures that if we receive a slow to validate block from an untrusted origin (the IPC connection itself is assumed to trusted), it will not block the IPC server. But since validation itself blocks `cs_main` this is also not a huge performance win.\r\n\r\nThis is a breaking change both ways:\r\n- clients must use the updated capnp file\r\n- updated clients can't call these methods on an unupgraded node\r\n\r\n---\r\n\r\nBecause it's a breaking change, but not really important, this PR is marked pending some other more important breaking change. See #33777.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-24T12:36:43Z",
-      "updated_at": "2026-01-13T19:54:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33936",
-      "labels": [
-        "Mining"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 860,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -4627,30 +4820,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 61,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2550873429,
-      "number": 32636,
-      "title": "Split `CWallet::Create()` into `CreateNew` and `LoadExisting`",
-      "body": "This PR is mostly a refactor which splits out logic used for creating wallets and for loading wallets, both of which are presently contained in `CWallet::Create()` into `CWallet::CreateNew()` and `CWallet::LoadExisting()`\r\n\r\nThe real win of this PR is that `CWallet::Create()` uses a very bad heuristic for trying to guess whether or not it is supposed to be creating a new wallet or loading an existing wallet:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/370c59261269fd9043674e0f4fd782a89e724473/src/wallet/wallet.cpp#L2882-L2885\r\n\r\nThis heuristic assumes that wallets with no `ScriptPubKeyMans` are being created, which sounds reasonable, but as demonstrated in #32112 and #32111, this can happen when the user tries to load a wallet file that is corrupted, both issues are fixed by this PR and any other misbehavior for wallet files which succeeded the broken heuristic's sniff test for new wallets.\r\n\r\nIt was already the case that every caller of `CWallet::Create()` knows whether it is creating a wallet or loading one, so we can avoid replacing this bad heuristic with another one, and just shift the burden to the caller.",
-      "state": "open",
-      "user": "davidgumberg",
-      "created_at": "2025-05-29T00:37:09Z",
-      "updated_at": "2026-01-13T08:16:39Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32636",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1189,
         "has_nack": false,
         "has_ack": false
       }
@@ -6115,6 +6284,32 @@
     }
   ],
   "issues": [
+    {
+      "id": 2947965588,
+      "number": 32142,
+      "title": "Feature Request: testmempoolaccept with an argument to ignore nLocktime/nSequence time-locking",
+      "body": "### Please describe the feature you'd like to see added.\n\nExecute `testmempoolaccept` in a way that will ignore the time/block-height validations of the transactions' `nSequence` and `nLocktime`.\n\n### Is your feature related to a problem, if so please describe it.\n\n`testmempoolaccept` is a very useful tool to verify transactions that aren't supposed to be broadcasted immediately - for example, for emergency recovery in case the seed is lost.\n`nLocktime` is also useful in such case, to prevent the recovery transaction from being broadcasted too early. However, after signing a transaction with a future `nLocktime`, I couldn't be sure that it is indeed valid: `testmempoolaccept` considers this transaction as `non-final` because of its future `nLocktime`, without explaining whether it has other problems (i.e. invalid signatures etc.).\n\n### Describe the solution you'd like\n\nA third optional parameter to `testmempoolaccept` (after `rawtxs` and `maxfeerate`) called `ignoretimelocks`, that will be a boolean.\n\n### Describe any alternatives you've considered\n\nI've tried writing code that would parse the transaction and, given the current mempool utxos, verify its scripts. This becomes complicated to implement in multisig and segwit transactions, and doesn't give me the guarantees that I want for such long-term transaction.\n\nAnother suggestion is that `testmempoolaccept` will accumulate all the reasons a transaction is unacceptable, and not exit after the first reason.\n\n### Please leave any additional context\n\n`nSequence` is a bitfield with multiple purposes, like RBF, and possibly other features in the future. My suggestion only regards BIP-68 validations of `nSequence` and not other features.",
+      "state": "open",
+      "user": "oren-z0",
+      "created_at": "2025-03-25T23:07:46Z",
+      "updated_at": "2026-01-16T03:59:18Z",
+      "closed_at": null,
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/32142",
+      "labels": [
+        "Feature",
+        "RPC/REST/ZMQ",
+        "Mempool"
+      ],
+      "comment_data": [],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 1807,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3818770788,
       "number": 34312,
@@ -8769,9 +8964,9 @@
     }
   ],
   "summary": {
-    "total_prs": 256,
-    "total_issues": 73,
+    "total_prs": 263,
+    "total_issues": 74,
     "total_comments": 64,
-    "unique_participants": 105
+    "unique_participants": 108
   }
 }
