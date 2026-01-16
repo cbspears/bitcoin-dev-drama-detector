@@ -292,7 +292,7 @@ def fetch_historical_irc(start_date: datetime, end_date: datetime) -> None:
 
         # Check if we already have this file with real data
         if os.path.exists(output_path):
-            with open(output_path, 'r') as f:
+            with open(output_path, 'r', encoding='utf-8') as f:
                 existing = json.load(f)
                 if existing.get('summary', {}).get('total_messages', 0) > 0:
                     logger.info(f"IRC {date_str}: Already has data, skipping")
@@ -359,7 +359,7 @@ def fetch_historical_mailing_list(start_date: datetime, end_date: datetime) -> N
 
         # Check if we already have this file with real data
         if os.path.exists(output_path):
-            with open(output_path, 'r') as f:
+            with open(output_path, 'r', encoding='utf-8') as f:
                 existing = json.load(f)
                 if existing.get('summary', {}).get('total_messages', 0) > 0:
                     logger.info(f"Mailing list {date_str}: Already has data, skipping")
