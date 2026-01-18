@@ -1,12 +1,469 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-01-18T08:20:49.447181+00:00",
+  "fetched_at": "2026-01-18T16:18:30.100119+00:00",
   "date_range": {
-    "since": "2026-01-11T08:20:49.447108+00:00",
-    "until": "2026-01-18T08:20:49.447108+00:00"
+    "since": "2026-01-11T16:18:30.100044+00:00",
+    "until": "2026-01-18T16:18:30.100044+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3070554287,
+      "number": 34004,
+      "title": "Implementation of SwiftSync",
+      "body": "Link to the original protocol writeup found [here](https://gist.github.com/RubenSomsen/a61a37d14182ccd78760e477c78133cd). See the [Delving Bitcoin post](https://delvingbitcoin.org/t/swiftsync-speeding-up-ibd-with-pre-generated-hints-poc/1562) for initial works and discussion.\r\n\r\n# Motivation\r\n\r\nWhile many coins are available in cache when spent, every cache miss requires a trip to the disk. Memory can be scarce for single board machines, so cache misses are expected to be far more frequent. A trip to disk is all-the-more severe on low end hardware, so any minimization of disk interactions can speed up initial block download for limited resource devices. One such example may be a block template provider serving a home miner.\r\n\r\n# Intuition\r\n\r\nThe vast majority of coins created are later spent. The cost of this observation is many coins will be written to disk, only to be removed later. The SwiftSync protocol alleviates the problem by recording what coins have been added and removed with a small, in-memory aggregate. This allows for the removal of intermediate coin states until SwiftSync has completed. The state of the aggregate is verified at a predetermined chain height, and IBD continues as usual thereafter.\r\n\r\nFor any chain height, we know `all outputs - all inputs = UTXO set`, which is equivalently `all outputs - UTXO set = all inputs`. The goal is to verify the set `all outputs - UTXO set` is equal to `all inputs`. Addition and subtraction modulo a field offers a way to do so. For any set, if we add all elements of the set and subtract them, regardless of ordering, we will arrive at zero. In the current implementation, the set elements being compared are hashed outpoints.\r\n\r\nThe SwiftSync protocol is comprised of two structures. First, the aggregate that will record the state of what outpoints have been added (created) or subtracted (spent). Next, notice that the UTXO set must be reported in order to verify `all outputs - UTXO set = all inputs`. SwiftSync introduces a hints file, which may be provided to the client at startup. This hints file is nothing more than a pointer to each unspent output by recording the block height and the indexes that will remain unspent. By using this file, a client may omit outpoints that will be in the UTXO set when updating the aggregate. Note this file is not trusted. If a malicious actor provides a faulty UTXO set, the set comparison above will fail, and the client may begin a reindex.\r\n# Implementation\r\n\r\n## Aggregate\r\n\r\nThe hash aggregate takes outpoints, hashes them with a salted hasher, and updates 4, 64-bit limbs with wrapping modulo arithmetic. The choice of 4, 64-bit limbs with no carries between limbs was made to: 1. minimize code complexity within the aggregate 2. conform to existing APIs, namely `uint256`. After adding and subtracting some arbitrary list of outpoints, we may poll if the sets were equivalent with `IsZero`.\r\n## Hintsfile\r\n\r\nThe hints file is a map of block height to the indexes of the outputs in that block that _will_ be in the UTXO set. To construct this file for a particular UTXO set state, each block must be read and queried to find the outputs in that block that remain unspent. Because this is a read-only operation, this may be done on parallel threads in the future. To allow for parallelization, the hints file contains a \"contents\" section, which denotes the height and corresponding file position to find the hints for that block.\r\n\r\nTo save space when representing the indexes that remain unspent in a block, an easy choice is to take the difference between the last coin that was unspent and the next one in the block. AFICT this is a version of run-length-encoding. These indexes are encoded using `compactSize` to further save space, the run-lengths should normally fit into at least 16 bits, often 8 bits.\r\n## Parameter Interaction\r\n\r\nA side effect of omitting intermediate UTXO states while performing IBD is the \"undo data\" cannot be derived. There are already configurations that do not have full undo data history, namely pruned nodes. To avoid additional complexity in this PR, this version of accelerated IBD is only made available to pruned nodes, as the undo data would have been removed regardless of the this setting.\r\n\r\nOther parameter interactions, not yet implemented:\r\n- `assumeutxo`: Startup should fail if both are configured. A hints file will have no effect, as the UTXO set is already present.\r\n- `assumevalid`: A natural choice is to only allow SwiftSync when using `assumevalid`, and to only allow a hints file that commits to the `assumevalid` block. Similar to `assumeutxo`, a hash of the hints file may be committed to in the binary, which would be resistant to griefing attacks.\r\n# Testing [Linux example]\r\n\r\nIn your `bitcoin` directory, download the hints from the test server:\r\n\r\n```bash\r\ncurl -o signet.hints http://utxohints.store/hints/signet\r\n```\r\n\r\nVerify the hash of the file:\r\n\r\n```bash\r\necho \"2b625392ecb2adba2b5f9d7b00c8f3a8adca0d3c  signet.hints\" | sha1sum --check -\r\n```\r\n\r\nBuild the branch:\r\n\r\n```bash\r\ncmake -B build && cmake --build build -j $(nproc)\r\n```\r\n\r\nRemove existing chain state:\r\n\r\n```bash\r\nrm -rf ~/.bitcoin/signet/\r\n```\r\n\r\nProvide the file at startup:\r\n\r\n```bash\r\n./build/bin/bitcoind --chain=signet --utxohints=./signet.hints --prune=550\r\n```\r\n\r\n#### Other networks:\r\n- ~Testnet4: endpoint `http://utxohints.store/hints/testnet4`, expected checksum `7acbb25b651ffc5ebc59c46fd065a510c149f00e  testnet4.hints`~\r\n\r\n# Open Questions\r\n\r\n- Given the outcome of SwiftSync is pass/fail, and there is no use of intermediate states, should blocks be persisted to disk at all during the protocol?\r\n- To what degree should a hints file be committed to in the binary. No commitment allows for a server to provide hints for an arbitrary height, providing a convenience for the client, but opens up the possibility of a grief attack. Of course the server risks losing reputation for serving faulty files.\r\n\r\n# Future Iteration\r\n\r\nThis is the first iteration of the SwiftSync proposal, however more optimizations may be made. Namely, because set elements may be added or subtracted from the aggregate in any order, blocks may be downloaded in parallel from multiple peers. If you are interested in benchmarking the performance of a fully-parallel version, see the [Rust implementation](https://github.com/2140-dev/swiftsync).\r\n",
+      "state": "open",
+      "user": "rustaceanrob",
+      "created_at": "2025-12-04T09:50:39Z",
+      "updated_at": "2026-01-18T15:37:28Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34004",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 1,
+        "text_length": 6426,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3088060609,
+      "number": 34038,
+      "title": "logging: API improvements",
+      "body": "A few changes:\r\n\r\n * Provide `STDLOCK(m_cs)` instead of `StdLockGuard g(m_cs)` for the logging mutexes, so that we can get better warnings from clang if annotations have been missed\r\n * Allow writing `LogInfo(BCLog::NO_RATE_LIMIT, \"log message\")` to avoid rate limiting, rather than having to supply a false argument to `LogPrintLevel_(...)`\r\n * Replace the `-loglevel` parameter with a new `-trace` parameter that works the same as `-debug`\r\n * Change the `logging` RPC to allow enabling trace debugging, and to differentiate trace vs debug levels\r\n ",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2025-12-10T05:56:20Z",
+      "updated_at": "2026-01-18T15:15:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34038",
+      "labels": [
+        "Needs release note"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 577,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3091431534,
+      "number": 34049,
+      "title": "rpc: Disallow captures in RPCMethodImpl",
+      "body": "When defining `RPCHelpMan` objects, we usually return a lambda, and mostly we define those via `[&](...) { ... }` which explicitly captures any parameters or local variables by reference. If we were to actually use any of those captures (we don't), we would invoke undefined behaviour. So instead, convert all the `[&]` to `[]` to avoid capturing, and as part of `RPCHelpMan` check that the function we provide is convertible to a bare function pointer, so that any attempts to capture anything (even if it's by-copy, which is safe) results in an error.\r\n\r\nWhile we're at it, rename `RPCHelpMan` to `RPCMethod`, reflecting it's greater responsibility since #19386.",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2025-12-11T03:25:25Z",
+      "updated_at": "2026-01-18T15:06:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34049",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 704,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3132300728,
+      "number": 34158,
+      "title": "torcontrol: Remove libevent usage",
+      "body": "This is part of the effort to remove the libevent dependency from our code base: https://github.com/bitcoin/bitcoin/issues/31194\r\n\r\nThere is a dependency on #32061 but it only really needs one commit which is cherry-picked here in first position (add `LineReader`). I hope that a first chunk of that PR can be sliced off and reviewed independently so this PR here is not blocked by it.\r\n\r\nThe current approach tries to reuse existing code and follows roughly similar design decisions. It replaces the libevent-based async I/O with blocking I/O utilizing the existing `Sock` and `CThreadInterrupt`. The controller runs in a dedicated thread.\r\n\r\nThere are some optional code modernizations thrown in made along the way (namings, constexpr etc.). These are not strictly necessary but make the end result with the new code more consistent.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-12-27T14:20:31Z",
+      "updated_at": "2026-01-18T14:50:14Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34158",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 869,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3184839812,
+      "number": 34329,
+      "title": "rpc,net: Add private broadcast RPCs",
+      "body": "Follow up from #29415 \r\n\r\nSending a transaction via private broadcast does not have any way for a user to track the status of the transaction before it gets returned by another peer. The default logs will likely be removed as well in #34267. Nor is there any way to abort a transaction once it has been added to the private broadcast queue.\r\n\r\nThis adds two new RPCs:\r\n- `getprivatebroadastinfo` returns information about what transactions are in the private broadcast queue, including how many times and how recently the transactions have been sent and acknowledged by peers.\r\n- `abortprivatebroadcast` removes a transaction from the private broadcast queue.",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2026-01-18T01:46:20Z",
+      "updated_at": "2026-01-18T14:46:32Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34329",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 695,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2999849822,
+      "number": 33856,
+      "title": "kernel, validation: Refactor ProcessNewBlockHeaders to return BlockValidationState",
+      "body": "## Motivation\r\n\r\nThis PR refactors `ProcessNewBlockHeaders()` to return `BlockValidationState` by value instead of using out-parameters or boolean returns. This follows the pattern established in #31981 (commit 74690f4) which refactored `TestBlockValidity()` in a similar manner.\r\n\r\n### Current Issues\r\n **ProcessNewBlockHeaders()**: Uses an out-parameter `BlockValidationState& state`, making the API less intuitive.\r\n\r\nAs noted by @theCharlatan in #33822 [comment](https://github.com/bitcoin/bitcoin/pull/33822#discussion_r2508065115) and can be a fix for that too:\r\n> One thing that could be considered here is returning the BlockValidationState directly instead of having an in/out param. To safely do that I think we'd need to refactor ProcessNewBlockHeaders though, similarly to what was done in 74690f4.\r\n\r\nThe changes are split into two commits, see individual commit message for more info.",
+      "state": "open",
+      "user": "yuvicc",
+      "created_at": "2025-11-11T17:23:59Z",
+      "updated_at": "2026-01-18T14:43:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33856",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 981,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1681972231,
+      "number": 29256,
+      "title": "log, refactor: Allow log macros to accept context arguments",
+      "body": "Allow `LogDebug()`, `LogTrace()`, `LogInfo()`, `LogWarning()`, and `LogError()` macros to accept context arguments to provide more information in log messages and more control over logging to callers.\r\n\r\nThis functionality is used in followup PRs:\r\n\r\n- [#30342](https://github.com/bitcoin/bitcoin/pull/30342) - To let libbitcoinkernel send output to specfic `BCLog::Logger` instances instead of a global instance, so output can be disambiguated and applications can have more control over logging.\r\n\r\n- [#30343](https://github.com/bitcoin/bitcoin/pull/30343) - To replace custom `WalletLogPrintf` calls with standard logging calls that automatically include wallet names and don't log everything at info level.\r\n\r\nThis PR does not change behavior of current log prints or require them to be updated. It includes tests and documentation covering the new functionality.\r\n\r\n---\r\n\r\nNote: Originally this PR also removed some restrictions around passing category constants to log macros to try to make them more consistent, but these changes were too controversial and have been dropped.",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2024-01-16T22:09:35Z",
+      "updated_at": "2026-01-18T14:38:02Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/29256",
+      "labels": [
+        "Utils/log/libs",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1142,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3142897675,
+      "number": 34193,
+      "title": "wallet: make migration more robust against failures",
+      "body": "This is just me finding a few more edge cases after #34156 and #34176\r\n\r\nThe goal of the PR is to handle failures in a controlled way. Just so the process can automatically restore the original wallet without requiring user manual intervention.\r\n\r\nThe covered cases are:\r\n\r\n1. During `DoMigration()`: There are methods that can throw exceptions and abruptly abort the process. \r\nInstead of crashing (GUI) or returning a generic exception, we now will catch and return the error gracefully. This lets the process restore the original wallet automatically.\r\n\r\n2. Trying to migrate a wallet in a read-only directory throws a filesystem exception and skips cleanup.\r\n Now the process will fail gracefully with a clear error msg, and automatically restore the original wallet.\r\n\r\n3. Any failure during `MigrateToSQLite` requires user manual intervention. \r\nNow the original wallet db will remain untouched, and only be updated once the sqlite db creation fully succeeds.",
+      "state": "open",
+      "user": "furszy",
+      "created_at": "2026-01-02T20:59:40Z",
+      "updated_at": "2026-01-18T13:41:30Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34193",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1017,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3161681681,
+      "number": 34247,
+      "title": "security: harden CI actions and subprocess calls",
+      "body": "Harden several CI and deployment scripts against potential injection vectors.\n\n### Changes\n\n- **.github/actions/configure-docker/action.yml**: Migrated direct `github` context interpolation to intermediate environment variables to prevent potential script injection from untrusted context data.\n- **contrib/macdeploy/macdeployqtplus**: Refactored the `codesign` subprocess call to use `shell=False` and list-based arguments. Fixed several linting issues (E401, F841).\n- **contrib/verify-binaries/verify.py**:\n    - Replaced `wget` with `urllib.request` for file retrieval, enforcing HTTP(S) protocols to mitigate potential LFI risks.\n    - Fixed a bug in `verify_with_gpg` where an empty string was passed to the `--output` argument when no output file was specified.\n    - Removed unused imports and cleaned up code.\n- **contrib/verify-binaries/test.py**: Updated `run_verify` to execute via `shell=False`.\n\nThese changes reduce the attack surface for command injection in automated environments and local deployment scripts while improving code quality and reliability.",
+      "state": "open",
+      "user": "RinZ27",
+      "created_at": "2026-01-10T07:33:15Z",
+      "updated_at": "2026-01-18T13:08:21Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34247",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 1120,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3167650906,
+      "number": 34269,
+      "title": "wallet: disallow creating new or restoring to an unnamed (default) wallet",
+      "body": "We've been moving in the direction that all wallets must have a name. Therefore, we shouldn't allow creating new unnamed wallets. `createwallet`, `restorewallet`, and the wallet tool's `create` and `createfromdump` all now require the user to provide a non-empty wallet name when creating/restoring a wallet.\r\n\r\nThe GUI is already enforcing this, but we were not enforcing it for RPCs or in the underlying `CreateWallet` and `RestoreWallet` functions.\r\n\r\nWallet migration does still need to be able to restore unnamed wallets, so there is a new argument to `RestoreWallet` to explicitly allow that behavior for migration only.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2026-01-12T23:39:06Z",
+      "updated_at": "2026-01-18T12:48:26Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34269",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 700,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3176742789,
+      "number": 34301,
+      "title": "wallet: remove outdated `RewriteDB` calls from SPKM & `DBErrors::NEED_REWRITE` enum value",
+      "body": "ISTM that there is no implementation left of the `RewriteDB` method in any of the SPKMs, and thus, its call sites can be removed safely.\r\n\r\nAlso remove `DBErrors::NEED_REWRITE` enum value as its usage is outdated now.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "open",
+      "user": "rkrux",
+      "created_at": "2026-01-15T10:11:36Z",
+      "updated_at": "2026-01-18T12:05:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34301",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 2373,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3182466003,
+      "number": 34322,
+      "title": "node: Persist private broadcast transactions over node restarts",
+      "body": "Follow-up from #29415 \r\n\r\nCurrently private broadcast transactions are stored in peer manager and do not persist over restarts. A submitted transaction can be lost if the node restarts before it is privately broadcast.\r\n\r\nThis change dumps the set of private broadcast transactions to a `privatebroadcast.dat` file on shutdown, and adds the transactions back to the private broadcast data structure on restart.",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2026-01-16T19:37:05Z",
+      "updated_at": "2026-01-18T11:29:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34322",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 474,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3086363450,
+      "number": 34036,
+      "title": "contrib: update macOS SDK to Xcode-26.1.1-17B100",
+      "body": "Would close #34034.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2025-12-09T16:45:55Z",
+      "updated_at": "2026-01-18T11:26:23Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34036",
+      "labels": [
+        "Scripts and tools",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 68,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2282546380,
+      "number": 31675,
+      "title": "[test] fix p2p_orphan_handling.py empty orphanage check",
+      "body": "Fix CI: https://cirrus-ci.com/task/4584274617171968?logs=ci#L2784",
+      "state": "closed",
+      "user": "glozow",
+      "created_at": "2025-01-16T18:58:24Z",
+      "updated_at": "2026-01-18T10:55:58Z",
+      "merged_at": "2025-01-17T09:37:30Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31675",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 121,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3176275662,
+      "number": 34296,
+      "title": "refactor: [move-only] Merge core_io module, remove from libkernel",
+      "body": "Currently the core_io module is split across two translation units. This will confuse code readers and tooling about the real state of the module.\r\n\r\nFix that by merging the module and removing the mapping workarounds.\r\n\r\nAlso, remove the module from the kernel lib, because it is not used there: The kernel does not use any json or string parsing or formatting.",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-01-15T07:31:40Z",
+      "updated_at": "2026-01-18T09:44:25Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34296",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 428,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 112846431,
+      "number": 10102,
+      "title": "Multiprocess bitcoin",
+      "body": "<!-- begin based-on -->\n**This is based on #29409.** The non-base commits are:\n\n- [`93f471464dd` test: Increase feature_block.py and feature_taproot.py timeouts](https://github.com/bitcoin/bitcoin/pull/10102/commits/93f471464dda67bf59ec474979e5e04989616ff2)\n- [`9c2f8ce25b2` test: Fix multiprocess test for unclean shutdown on kill](https://github.com/bitcoin/bitcoin/pull/10102/commits/9c2f8ce25b263eddcd5e33986626e98d5f391430)\n- [`3582e4a12a3` util: Add util::Result workaround to be compatible with libmultiprocess](https://github.com/bitcoin/bitcoin/pull/10102/commits/3582e4a12a341376e0fcb1d67cda5cc510bb1ae9)\n- [`f1d2d87c6d8` multiprocess: Add capnp serialization code for bitcoin types](https://github.com/bitcoin/bitcoin/pull/10102/commits/f1d2d87c6d87c58749f0f2fb100e184a3ab11303)\n- [`65e4390dcaa` interfaces, refactor: Change WalletLoader::restoreWallet parameter order](https://github.com/bitcoin/bitcoin/pull/10102/commits/65e4390dcaa23ab347a832e3f1ff130650efd2be)\n- [`0e436699c59` multiprocess: Add capnp wrapper for Wallet interface](https://github.com/bitcoin/bitcoin/pull/10102/commits/0e436699c59b537a5948389613dacb5c68fc2872)\n- [`0381cc5dc99` multiprocess: Add capnp wrapper for Node interface](https://github.com/bitcoin/bitcoin/pull/10102/commits/0381cc5dc999795aa1f5bcb77e8d429a9f5221e6)\n- [`88f3246ae7f` multiprocess: Make bitcoin-gui spawn a bitcoin-node process](https://github.com/bitcoin/bitcoin/pull/10102/commits/88f3246ae7f2c0cf79c3f22ba002967dda7a0b16)\n- [`aebc163451b` multiprocess: Make bitcoin-node spawn a bitcoin-wallet process](https://github.com/bitcoin/bitcoin/pull/10102/commits/aebc163451bc8c5fa8cbbcc66b553e17e06e1d82)\n- [`c5b9fe54c9c` multiprocess: Add debug.log .wallet/.gui suffixes](https://github.com/bitcoin/bitcoin/pull/10102/commits/c5b9fe54c9cc367b81487f5c9a4574243e33e7f8)\n- [`a73f70fac8d` doc: Multiprocess misc doc and comment updates](https://github.com/bitcoin/bitcoin/pull/10102/commits/a73f70fac8d396a8d719cafe10853390c53f687b)\n- [`2503f57e93c` combine_logs: Handle multiprocess wallet log files](https://github.com/bitcoin/bitcoin/pull/10102/commits/2503f57e93c32158f837e1c9f0dc9f1061b84346)<!-- end -->\n\n---\n\nThis PR adds an `--enable-multiprocess` configure option which builds new `bitcoin-node`, `bitcoin-wallet`, and `bitcoin-gui` executables with relevant functionality isolated into different processes. See [doc/design/multiprocess.md](https://github.com/ryanofsky/bitcoin/tree/pr/ipc/doc/design/multiprocess.md) for usage details and future plans.\n\nThe change is implemented by adding a new [`Init`](https://github.com/ryanofsky/bitcoin/blob/pr/ipc/src/interfaces/init.h) interface that spawns new wallet and node subprocesses that can be controlled over a [socketpair](http://man7.org/linux/man-pages/man2/socketpair.2.html) by calling [`Node`](https://github.com/ryanofsky/bitcoin/blob/pr/ipc/src/interfaces/node.h), [`Wallet`](https://github.com/ryanofsky/bitcoin/blob/pr/ipc/src/interfaces/wallet.h), and [`ChainClient`](https://github.com/ryanofsky/bitcoin/blob/pr/ipc/src/interfaces/chain.h) methods. When running with split processes, you can see the IPC messages going back and forth in `-debug=1` output. Followup PR's #19460 and #19461 add `-ipcbind` and `-ipcconnect` options that allow more flexibility in how processes are connected.\n\nThe IPC protocol used is Cap'n Proto, but this could be swapped out for another protocol. Cap'n Proto types and libraries are only accessed in the [src/ipc/capnp/](https://github.com/ryanofsky/bitcoin/tree/pr/ipc/src/ipc/capnp) directory, and not in any public headers or other parts of bitcoin code.\n\nSlides from a presentation describing this change are available on [google drive](https://docs.google.com/presentation/d/1AeJ-7gD-dItUgs5yH-HoEzLvXaEWe_2ZiGUUxYIXcws/edit). Demo code used in the presentation was from an older version this PR (tag [ipc.21](https://github.com/ryanofsky/bitcoin/releases/tag/pr%2Fipc.21), [commits](https://github.com/ryanofsky/bitcoin/compare/master...pr/ipc.21)).\n\n---\n\nThis PR is part of the [process separation project](https://github.com/bitcoin/bitcoin/issues/28722).",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2017-03-27T21:48:26Z",
+      "updated_at": "2026-01-18T08:32:34Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/10102",
+      "labels": [
+        "GUI",
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 4142,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 304070624,
+      "number": 16545,
+      "title": "refactor: Implement missing error checking for ArgsManager flags",
+      "body": "Trigger startup errors if bitcoin is configured with bad setting values according to flags. Also raise internal errors if settings are registered and retrieved with inconsistent flags.\n\nThis change has no effect on behavior because the new ArgsManager flags added here are not used outside of tests yet.\n\nIt'll probably be easier to start applying type checking flags to _new_ options than _existing_ options. But for examples of how type checking flags can make sense applied to existing options, see the new [example_options unit test](https://github.com/ryanofsky/bitcoin/blob/pr/argcheck/src/test/argsman_tests.cpp#L27) added in this PR.\n\n---\n\nFollowups:\n\n- Support for flag combinations is possible and is added in commit c919f51c044f0e80ecd301f9c9d396ddff2331ba ([branch](https://github.com/ryanofsky/bitcoin/commits/pr/argcomb))\n- ALLOW_LIST flags are added and enforced in [#17580](https://github.com/bitcoin/bitcoin/pull/17580)\n- Bad IsArgSet usages with ALLOW_LIST are removed in [#30529](https://github.com/bitcoin/bitcoin/pull/30529) and prevented in [#17783](https://github.com/bitcoin/bitcoin/pull/17783)\n- Confusing and ignored multiple assignments in config files are disallowed in [#17493](https://github.com/bitcoin/bitcoin/pull/17493)\n- Confusing reverse-precedence settings merging code is removed in [#17581](https://github.com/bitcoin/bitcoin/pull/17581)\n- Type flags added in this PR implement runtime part of a change to add more compile-time checking in [#22978](https://github.com/bitcoin/bitcoin/pull/22978)\n",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2019-08-04T14:13:12Z",
+      "updated_at": "2026-01-18T08:29:28Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/16545",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1600,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 341661607,
+      "number": 17493,
+      "title": "util: Forbid ambiguous multiple assignments in config file",
+      "body": "<!-- begin based-on -->\n**This is based on #16545 + #17580.** The non-base commits are:\n\n- [`92a38cc44c1f` util: Forbid ambiguous multiple assignments in config file](https://github.com/bitcoin/bitcoin/pull/17493/commits/92a38cc44c1f1276d7a0bf513a442d95bf380126)\n- [`20119c310f4e` test: Extend util_ArgsMerge test to check for \"Multiple values specified\" errors](https://github.com/bitcoin/bitcoin/pull/17493/commits/20119c310f4e280488c310427e1fa58f7056e81a)<!-- end -->\n\n---\n\nEnable error \"Multiple values specified for -setting in same section of config file.\", for ALLOW_ANY settings that don't specify ALLOW_LIST.\n\nInstead of silently ignoring settings, this change makes it an error to provide an ambiguous config file that provides assigns multiple values to a single-value setting. Change includes release notes.\n\nPart of the motivation for this change is to improve usability and prevent settings that look valid from being silently ignored. Another motivation is to be able to remove confusing \"reverse precedence\" logic in #17581",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2019-11-15T22:11:44Z",
+      "updated_at": "2026-01-18T08:26:24Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/17493",
+      "labels": [
+        "Refactoring",
+        "Utils/log/libs",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1098,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 344943058,
+      "number": 17580,
+      "title": "refactor: Add ALLOW_LIST flags and enforce usage in CheckArgFlags",
+      "body": "<!-- begin based-on -->\n**This is based on #16545.** The non-base commits are:\n\n- [`63611e626d1d` common: Add support for combining ArgsManager flags](https://github.com/bitcoin/bitcoin/pull/17580/commits/63611e626d1df47110f25abb1996a1e1fdf1f1b3)\n- [`ad4215b6232a` scripted-diff: Add ALLOW_LIST flag to arguments retrieved with GetArgs](https://github.com/bitcoin/bitcoin/pull/17580/commits/ad4215b6232a6686ba5320745de361da540a3343)\n- [`4a50a44383ab` refactor: Fix more ALLOW_LIST arguments](https://github.com/bitcoin/bitcoin/pull/17580/commits/4a50a44383abb73d880eaa014a694ae7bf997fb6)\n- [`e9675b2e490c` Always reject empty -blockfilterindex=\"\" arguments](https://github.com/bitcoin/bitcoin/pull/17580/commits/e9675b2e490c697f02a6ee7a0738af986e73b640)\n- [`b10a597029f7` refactor: Stop calling GetArg/IsArgSet on ALLOW_LIST options](https://github.com/bitcoin/bitcoin/pull/17580/commits/b10a597029f7562503a840c6b42172d290dd796c)\n- [`b03447e135e5` refactor: Always enforce ALLOW_LIST in CheckArgFlags](https://github.com/bitcoin/bitcoin/pull/17580/commits/b03447e135e56d9ecc4cc1db0da3bfea81098fae)<!-- end -->\n\n---\n\nExcept for two `rpcauth` and `blockfilterindex` fixes (update: rpcauth fix was merged separately in #30401) this PR does not change any behavior outside of tests. It is just supposed to enforce internal consistency and prevent bugs by ensuring that list arguments are always retrieved with GetArgs() and non-list arguments are always retrieved with GetArg(). Followup PRs could use the ALLOW_LIST flags for better documentation and error checking in the future. For example, #17493 builds on this to disallow conflicting config values. \n\nThis change was originally made as part of #17493",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2019-11-24T20:05:39Z",
+      "updated_at": "2026-01-18T08:23:21Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/17580",
+      "labels": [
+        "Refactoring",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 1769,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 344944113,
       "number": 17581,
@@ -609,30 +1066,6 @@
       }
     },
     {
-      "id": 3184839812,
-      "number": 34329,
-      "title": "rpc,net: Add private broadcast RPCs",
-      "body": "Follow up from #29415 \r\n\r\nSending a transaction via private broadcast does not have any way for a user to track the status of the transaction before it gets returned by another peer. The default logs will likely be removed as well in #34267. Nor is there any way to abort a transaction once it has been added to the private broadcast queue.\r\n\r\nThis adds two new RPCs:\r\n- `getprivatebroadastinfo` returns information about what transactions are in the private broadcast queue, including how many times and how recently the transactions have been sent and acknowledged by peers.\r\n- `abortprivatebroadcast` removes a transaction from the private broadcast queue.",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2026-01-18T01:46:20Z",
-      "updated_at": "2026-01-18T03:53:08Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34329",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 695,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2607107167,
       "number": 32784,
       "title": "wallet: derivehdkey RPC to get xpub at arbitrary path",
@@ -749,28 +1182,6 @@
       }
     },
     {
-      "id": 3182466003,
-      "number": 34322,
-      "title": "node: Persist private broadcast transactions over node restarts",
-      "body": "Follow-up from #29415 \r\n\r\nCurrently private broadcast transactions are stored in peer manager and do not persist over restarts. A submitted transaction can be lost if the node restarts before it is privately broadcast.\r\n\r\nThis change dumps the set of private broadcast transactions to a `privatebroadcast.dat` file on shutdown, and adds the transactions back to the private broadcast data structure on restart.",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2026-01-16T19:37:05Z",
-      "updated_at": "2026-01-18T03:07:27Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34322",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 474,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2678738082,
       "number": 33014,
       "title": "rpc: Fix internal bug in descriptorprocesspsbt when encountering invalid signatures",
@@ -790,31 +1201,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 660,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1681972231,
-      "number": 29256,
-      "title": "log, refactor: Allow log macros to accept context arguments",
-      "body": "Allow `LogDebug()`, `LogTrace()`, `LogInfo()`, `LogWarning()`, and `LogError()` macros to accept context arguments to provide more information in log messages and more control over logging to callers.\r\n\r\nThis functionality is used in followup PRs:\r\n\r\n- [#30342](https://github.com/bitcoin/bitcoin/pull/30342) - To let libbitcoinkernel send output to specfic `BCLog::Logger` instances instead of a global instance, so output can be disambiguated and applications can have more control over logging.\r\n\r\n- [#30343](https://github.com/bitcoin/bitcoin/pull/30343) - To replace custom `WalletLogPrintf` calls with standard logging calls that automatically include wallet names and don't log everything at info level.\r\n\r\nThis PR does not change behavior of current log prints or require them to be updated. It includes tests and documentation covering the new functionality.\r\n\r\n---\r\n\r\nNote: Originally this PR also removed some restrictions around passing category constants to log macros to try to make them more consistent, but these changes were too controversial and have been dropped.",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2024-01-16T22:09:35Z",
-      "updated_at": "2026-01-18T02:48:24Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/29256",
-      "labels": [
-        "Utils/log/libs",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1142,
         "has_nack": false,
         "has_ack": false
       }
@@ -1085,30 +1471,6 @@
       }
     },
     {
-      "id": 2999849822,
-      "number": 33856,
-      "title": "kernel, validation: Refactor ProcessNewBlockHeaders to return BlockValidationState",
-      "body": "## Motivation\r\n\r\nThis PR refactors `ProcessNewBlockHeaders()` to return `BlockValidationState` by value instead of using out-parameters or boolean returns. This follows the pattern established in #31981 (commit 74690f4) which refactored `TestBlockValidity()` in a similar manner.\r\n\r\n### Current Issues\r\n **ProcessNewBlockHeaders()**: Uses an out-parameter `BlockValidationState& state`, making the API less intuitive.\r\n\r\nAs noted by @theCharlatan in #33822 [comment](https://github.com/bitcoin/bitcoin/pull/33822#discussion_r2508065115) and can be a fix for that too:\r\n> One thing that could be considered here is returning the BlockValidationState directly instead of having an in/out param. To safely do that I think we'd need to refactor ProcessNewBlockHeaders though, similarly to what was done in 74690f4.\r\n\r\nThe changes are split into two commits, see individual commit message for more info.",
-      "state": "open",
-      "user": "yuvicc",
-      "created_at": "2025-11-11T17:23:59Z",
-      "updated_at": "2026-01-18T00:03:04Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33856",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 981,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3054407979,
       "number": 33966,
       "title": "refactor: disentangle miner startup defaults from runtime options",
@@ -1130,30 +1492,6 @@
         "text_length": 2878,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3070554287,
-      "number": 34004,
-      "title": "Implementation of SwiftSync",
-      "body": "Link to the original protocol writeup found [here](https://gist.github.com/RubenSomsen/a61a37d14182ccd78760e477c78133cd). See the [Delving Bitcoin post](https://delvingbitcoin.org/t/swiftsync-speeding-up-ibd-with-pre-generated-hints-poc/1562) for initial works and discussion.\r\n\r\n# Motivation\r\n\r\nWhile many coins are available in cache when spent, every cache miss requires a trip to the disk. Memory can be scarce for single board machines, so cache misses are expected to be far more frequent. A trip to disk is all-the-more severe on low end hardware, so any minimization of disk interactions can speed up initial block download for limited resource devices. One such example may be a block template provider serving a home miner.\r\n\r\n# Intuition\r\n\r\nThe vast majority of coins created are later spent. The cost of this observation is many coins will be written to disk, only to be removed later. The SwiftSync protocol alleviates the problem by recording what coins have been added and removed with a small, in-memory aggregate. This allows for the removal of intermediate coin states until SwiftSync has completed. The state of the aggregate is verified at a predetermined chain height, and IBD continues as usual thereafter.\r\n\r\nFor any chain height, we know `all outputs - all inputs = UTXO set`, which is equivalently `all outputs - UTXO set = all inputs`. The goal is to verify the set `all outputs - UTXO set` is equal to `all inputs`. Addition and subtraction modulo a field offers a way to do so. For any set, if we add all elements of the set and subtract them, regardless of ordering, we will arrive at zero. In the current implementation, the set elements being compared are hashed outpoints.\r\n\r\nThe SwiftSync protocol is comprised of two structures. First, the aggregate that will record the state of what outpoints have been added (created) or subtracted (spent). Next, notice that the UTXO set must be reported in order to verify `all outputs - UTXO set = all inputs`. SwiftSync introduces a hints file, which may be provided to the client at startup. This hints file is nothing more than a pointer to each unspent output by recording the block height and the indexes that will remain unspent. By using this file, a client may omit outpoints that will be in the UTXO set when updating the aggregate. Note this file is not trusted. If a malicious actor provides a faulty UTXO set, the set comparison above will fail, and the client may begin a reindex.\r\n# Implementation\r\n\r\n## Aggregate\r\n\r\nThe hash aggregate takes outpoints, hashes them with a salted hasher, and updates 4, 64-bit limbs with wrapping modulo arithmetic. The choice of 4, 64-bit limbs with no carries between limbs was made to: 1. minimize code complexity within the aggregate 2. conform to existing APIs, namely `uint256`. After adding and subtracting some arbitrary list of outpoints, we may poll if the sets were equivalent with `IsZero`.\r\n## Hintsfile\r\n\r\nThe hints file is a map of block height to the indexes of the outputs in that block that _will_ be in the UTXO set. To construct this file for a particular UTXO set state, each block must be read and queried to find the outputs in that block that remain unspent. Because this is a read-only operation, this may be done on parallel threads in the future. To allow for parallelization, the hints file contains a \"contents\" section, which denotes the height and corresponding file position to find the hints for that block.\r\n\r\nTo save space when representing the indexes that remain unspent in a block, an easy choice is to take the difference between the last coin that was unspent and the next one in the block. AFICT this is a version of run-length-encoding. These indexes are encoded using `compactSize` to further save space, the run-lengths should normally fit into at least 16 bits, often 8 bits.\r\n## Parameter Interaction\r\n\r\nA side effect of omitting intermediate UTXO states while performing IBD is the \"undo data\" cannot be derived. There are already configurations that do not have full undo data history, namely pruned nodes. To avoid additional complexity in this PR, this version of accelerated IBD is only made available to pruned nodes, as the undo data would have been removed regardless of the this setting.\r\n\r\nOther parameter interactions, not yet implemented:\r\n- `assumeutxo`: Startup should fail if both are configured. A hints file will have no effect, as the UTXO set is already present.\r\n- `assumevalid`: A natural choice is to only allow SwiftSync when using `assumevalid`, and to only allow a hints file that commits to the `assumevalid` block. Similar to `assumeutxo`, a hash of the hints file may be committed to in the binary, which would be resistant to griefing attacks.\r\n# Testing [Linux example]\r\n\r\nIn your `bitcoin` directory, download the hints from the test server:\r\n\r\n```bash\r\ncurl -o signet.hints http://utxohints.store/hints/signet\r\n```\r\n\r\nVerify the hash of the file:\r\n\r\n```bash\r\necho \"2b625392ecb2adba2b5f9d7b00c8f3a8adca0d3c  signet.hints\" | sha1sum --check -\r\n```\r\n\r\nBuild the branch:\r\n\r\n```bash\r\ncmake -B build && cmake --build build -j $(nproc)\r\n```\r\n\r\nRemove existing chain state:\r\n\r\n```bash\r\nrm -rf ~/.bitcoin/signet/\r\n```\r\n\r\nProvide the file at startup:\r\n\r\n```bash\r\n./build/bin/bitcoind --chain=signet --utxohints=./signet.hints --prune=550\r\n```\r\n\r\n#### Other networks:\r\n- ~Testnet4: endpoint `http://utxohints.store/hints/testnet4`, expected checksum `7acbb25b651ffc5ebc59c46fd065a510c149f00e  testnet4.hints`~\r\n\r\n# Open Questions\r\n\r\n- Given the outcome of SwiftSync is pass/fail, and there is no use of intermediate states, should blocks be persisted to disk at all during the protocol?\r\n- To what degree should a hints file be committed to in the binary. No commitment allows for a server to provide hints for an arbitrary height, providing a convenience for the client, but opens up the possibility of a grief attack. Of course the server risks losing reputation for serving faulty files.\r\n\r\n# Future Iteration\r\n\r\nThis is the first iteration of the SwiftSync proposal, however more optimizations may be made. Namely, because set elements may be added or subtracted from the aggregate in any order, blocks may be downloaded in parallel from multiple peers. If you are interested in benchmarking the performance of a fully-parallel version, see the [Rust implementation](https://github.com/2140-dev/swiftsync).\r\n",
-      "state": "open",
-      "user": "rustaceanrob",
-      "created_at": "2025-12-04T09:50:39Z",
-      "updated_at": "2026-01-17T23:11:34Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34004",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 1,
-        "text_length": 6426,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -1224,30 +1562,6 @@
         "text_length": 1289,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3167650906,
-      "number": 34269,
-      "title": "wallet: disallow creating new or restoring to an unnamed (default) wallet",
-      "body": "We've been moving in the direction that all wallets must have a name. Therefore, we shouldn't allow creating new unnamed wallets. `createwallet`, `restorewallet`, and the wallet tool's `create` and `createfromdump` all now require the user to provide a non-empty wallet name when creating/restoring a wallet.\r\n\r\nThe GUI is already enforcing this, but we were not enforcing it for RPCs or in the underlying `CreateWallet` and `RestoreWallet` functions.\r\n\r\nWallet migration does still need to be able to restore unnamed wallets, so there is a new argument to `RestoreWallet` to explicitly allow that behavior for migration only.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2026-01-12T23:39:06Z",
-      "updated_at": "2026-01-17T22:01:47Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34269",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 700,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -1441,30 +1755,6 @@
       }
     },
     {
-      "id": 3161681681,
-      "number": 34247,
-      "title": "security: harden CI actions and subprocess calls",
-      "body": "Harden several CI and deployment scripts against potential injection vectors.\n\n### Changes\n\n- **.github/actions/configure-docker/action.yml**: Migrated direct `github` context interpolation to intermediate environment variables to prevent potential script injection from untrusted context data.\n- **contrib/macdeploy/macdeployqtplus**: Refactored the `codesign` subprocess call to use `shell=False` and list-based arguments. Fixed several linting issues (E401, F841).\n- **contrib/verify-binaries/verify.py**:\n    - Replaced `wget` with `urllib.request` for file retrieval, enforcing HTTP(S) protocols to mitigate potential LFI risks.\n    - Fixed a bug in `verify_with_gpg` where an empty string was passed to the `--output` argument when no output file was specified.\n    - Removed unused imports and cleaned up code.\n- **contrib/verify-binaries/test.py**: Updated `run_verify` to execute via `shell=False`.\n\nThese changes reduce the attack surface for command injection in automated environments and local deployment scripts while improving code quality and reliability.",
-      "state": "open",
-      "user": "RinZ27",
-      "created_at": "2026-01-10T07:33:15Z",
-      "updated_at": "2026-01-17T20:40:40Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34247",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 1120,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3163366332,
       "number": 34253,
       "title": "validation: cache tip recency for lock-free `IsInitialBlockDownload()`",
@@ -1603,30 +1893,6 @@
       }
     },
     {
-      "id": 3176275662,
-      "number": 34296,
-      "title": "refactor: [move-only] Merge core_io module, remove from libkernel",
-      "body": "Currently the core_io module is split across two translation units. This will confuse code readers and tooling about the real state of the module.\r\n\r\nFix that by merging the module and removing the mapping workarounds.\r\n\r\nAlso, remove the module from the kernel lib, because it is not used there: The kernel does not use any json or string parsing or formatting.",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-01-15T07:31:40Z",
-      "updated_at": "2026-01-17T19:51:15Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34296",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 428,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3176493415,
       "number": 34298,
       "title": "ci: Add and use ci/test/modernize-deprecated-headers.py",
@@ -1648,30 +1914,6 @@
         "text_length": 517,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3176742789,
-      "number": 34301,
-      "title": "wallet: remove outdated `RewriteDB` calls from SPKM & `DBErrors::NEED_REWRITE` enum value",
-      "body": "ISTM that there is no implementation left of the `RewriteDB` method in any of the SPKMs, and thus, its call sites can be removed safely.\r\n\r\nAlso remove `DBErrors::NEED_REWRITE` enum value as its usage is outdated now.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
-      "state": "open",
-      "user": "rkrux",
-      "created_at": "2026-01-15T10:11:36Z",
-      "updated_at": "2026-01-17T19:40:23Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34301",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 2373,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -1862,28 +2104,6 @@
         "text_length": 952,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3132300728,
-      "number": 34158,
-      "title": "torcontrol: Remove libevent usage",
-      "body": "This is part of the effort to remove the libevent dependency from our code base: https://github.com/bitcoin/bitcoin/issues/31194\r\n\r\nThere is a dependency on #32061 but it only really needs one commit which is cherry-picked here in first position (add `LineReader`). I hope that a first chunk of that PR can be sliced off and reviewed independently so this PR here is not blocked by it.\r\n\r\nThe current approach tries to reuse existing code and follows roughly similar design decisions. It replaces the libevent-based async I/O with blocking I/O utilizing the existing `Sock` and `CThreadInterrupt`. The controller runs in a dedicated thread.\r\n\r\nThere are some optional code modernizations thrown in made along the way (namings, constexpr etc.). These are not strictly necessary but make the end result with the new code more consistent.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2025-12-27T14:20:31Z",
-      "updated_at": "2026-01-17T15:53:13Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34158",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 869,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -3758,31 +3978,6 @@
       }
     },
     {
-      "id": 3086363450,
-      "number": 34036,
-      "title": "contrib: update macOS SDK to Xcode-26.1.1-17B100",
-      "body": "Would close #34034.",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2025-12-09T16:45:55Z",
-      "updated_at": "2026-01-15T14:35:05Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34036",
-      "labels": [
-        "Scripts and tools",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 68,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3104076541,
       "number": 34079,
       "title": "kernel: Remove non-kernel module includes",
@@ -4335,57 +4530,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 427,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 341661607,
-      "number": 17493,
-      "title": "util: Forbid ambiguous multiple assignments in config file",
-      "body": "<!-- begin based-on -->\n**This is based on #16545 + #17580.** The non-base commits are:\n\n- [`92a38cc44c1f` util: Forbid ambiguous multiple assignments in config file](https://github.com/bitcoin/bitcoin/pull/17493/commits/92a38cc44c1f1276d7a0bf513a442d95bf380126)\n- [`20119c310f4e` test: Extend util_ArgsMerge test to check for \"Multiple values specified\" errors](https://github.com/bitcoin/bitcoin/pull/17493/commits/20119c310f4e280488c310427e1fa58f7056e81a)<!-- end -->\n\n---\n\nEnable error \"Multiple values specified for -setting in same section of config file.\", for ALLOW_ANY settings that don't specify ALLOW_LIST.\n\nInstead of silently ignoring settings, this change makes it an error to provide an ambiguous config file that provides assigns multiple values to a single-value setting. Change includes release notes.\n\nPart of the motivation for this change is to improve usability and prevent settings that look valid from being silently ignored. Another motivation is to be able to remove confusing \"reverse precedence\" logic in #17581",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2019-11-15T22:11:44Z",
-      "updated_at": "2026-01-15T05:37:59Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/17493",
-      "labels": [
-        "Refactoring",
-        "Utils/log/libs",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1098,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 344943058,
-      "number": 17580,
-      "title": "refactor: Add ALLOW_LIST flags and enforce usage in CheckArgFlags",
-      "body": "<!-- begin based-on -->\n**This is based on #16545.** The non-base commits are:\n\n- [`63611e626d1d` common: Add support for combining ArgsManager flags](https://github.com/bitcoin/bitcoin/pull/17580/commits/63611e626d1df47110f25abb1996a1e1fdf1f1b3)\n- [`ad4215b6232a` scripted-diff: Add ALLOW_LIST flag to arguments retrieved with GetArgs](https://github.com/bitcoin/bitcoin/pull/17580/commits/ad4215b6232a6686ba5320745de361da540a3343)\n- [`4a50a44383ab` refactor: Fix more ALLOW_LIST arguments](https://github.com/bitcoin/bitcoin/pull/17580/commits/4a50a44383abb73d880eaa014a694ae7bf997fb6)\n- [`e9675b2e490c` Always reject empty -blockfilterindex=\"\" arguments](https://github.com/bitcoin/bitcoin/pull/17580/commits/e9675b2e490c697f02a6ee7a0738af986e73b640)\n- [`b10a597029f7` refactor: Stop calling GetArg/IsArgSet on ALLOW_LIST options](https://github.com/bitcoin/bitcoin/pull/17580/commits/b10a597029f7562503a840c6b42172d290dd796c)\n- [`b03447e135e5` refactor: Always enforce ALLOW_LIST in CheckArgFlags](https://github.com/bitcoin/bitcoin/pull/17580/commits/b03447e135e56d9ecc4cc1db0da3bfea81098fae)<!-- end -->\n\n---\n\nExcept for two `rpcauth` and `blockfilterindex` fixes (update: rpcauth fix was merged separately in #30401) this PR does not change any behavior outside of tests. It is just supposed to enforce internal consistency and prevent bugs by ensuring that list arguments are always retrieved with GetArgs() and non-list arguments are always retrieved with GetArg(). Followup PRs could use the ALLOW_LIST flags for better documentation and error checking in the future. For example, #17493 builds on this to disallow conflicting config values. \n\nThis change was originally made as part of #17493",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2019-11-24T20:05:39Z",
-      "updated_at": "2026-01-15T05:25:28Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/17580",
-      "labels": [
-        "Refactoring",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 1769,
         "has_nack": false,
         "has_ack": false
       }
@@ -5209,30 +5353,6 @@
       }
     },
     {
-      "id": 3088060609,
-      "number": 34038,
-      "title": "logging: API improvements",
-      "body": "A few changes:\r\n\r\n * Provide `STDLOCK(m_cs)` instead of `StdLockGuard g(m_cs)` for the logging mutexes, so that we can get better warnings from clang if annotations have been missed\r\n * Allow writing `LogInfo(BCLog::NO_RATE_LIMIT, \"log message\")` to avoid rate limiting, rather than having to supply a false argument to `LogPrintLevel_(...)`\r\n * Replace the `-loglevel` parameter with a new `-trace` parameter that works the same as `-debug`\r\n * Change the `logging` RPC to allow enabling trace debugging, and to differentiate trace vs debug levels\r\n ",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2025-12-10T05:56:20Z",
-      "updated_at": "2026-01-14T10:56:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34038",
-      "labels": [
-        "Needs release note"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 577,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 1571888838,
       "number": 28724,
       "title": "wallet: Cleanup accidental encryption keys in watchonly wallets",
@@ -5829,31 +5949,6 @@
         "text_length": 3213,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 112846431,
-      "number": 10102,
-      "title": "Multiprocess bitcoin",
-      "body": "<!-- begin based-on -->\n**This is based on #29409.** The non-base commits are:\n\n- [`93f471464dd` test: Increase feature_block.py and feature_taproot.py timeouts](https://github.com/bitcoin/bitcoin/pull/10102/commits/93f471464dda67bf59ec474979e5e04989616ff2)\n- [`9c2f8ce25b2` test: Fix multiprocess test for unclean shutdown on kill](https://github.com/bitcoin/bitcoin/pull/10102/commits/9c2f8ce25b263eddcd5e33986626e98d5f391430)\n- [`3582e4a12a3` util: Add util::Result workaround to be compatible with libmultiprocess](https://github.com/bitcoin/bitcoin/pull/10102/commits/3582e4a12a341376e0fcb1d67cda5cc510bb1ae9)\n- [`f1d2d87c6d8` multiprocess: Add capnp serialization code for bitcoin types](https://github.com/bitcoin/bitcoin/pull/10102/commits/f1d2d87c6d87c58749f0f2fb100e184a3ab11303)\n- [`65e4390dcaa` interfaces, refactor: Change WalletLoader::restoreWallet parameter order](https://github.com/bitcoin/bitcoin/pull/10102/commits/65e4390dcaa23ab347a832e3f1ff130650efd2be)\n- [`0e436699c59` multiprocess: Add capnp wrapper for Wallet interface](https://github.com/bitcoin/bitcoin/pull/10102/commits/0e436699c59b537a5948389613dacb5c68fc2872)\n- [`0381cc5dc99` multiprocess: Add capnp wrapper for Node interface](https://github.com/bitcoin/bitcoin/pull/10102/commits/0381cc5dc999795aa1f5bcb77e8d429a9f5221e6)\n- [`88f3246ae7f` multiprocess: Make bitcoin-gui spawn a bitcoin-node process](https://github.com/bitcoin/bitcoin/pull/10102/commits/88f3246ae7f2c0cf79c3f22ba002967dda7a0b16)\n- [`aebc163451b` multiprocess: Make bitcoin-node spawn a bitcoin-wallet process](https://github.com/bitcoin/bitcoin/pull/10102/commits/aebc163451bc8c5fa8cbbcc66b553e17e06e1d82)\n- [`c5b9fe54c9c` multiprocess: Add debug.log .wallet/.gui suffixes](https://github.com/bitcoin/bitcoin/pull/10102/commits/c5b9fe54c9cc367b81487f5c9a4574243e33e7f8)\n- [`a73f70fac8d` doc: Multiprocess misc doc and comment updates](https://github.com/bitcoin/bitcoin/pull/10102/commits/a73f70fac8d396a8d719cafe10853390c53f687b)\n- [`2503f57e93c` combine_logs: Handle multiprocess wallet log files](https://github.com/bitcoin/bitcoin/pull/10102/commits/2503f57e93c32158f837e1c9f0dc9f1061b84346)<!-- end -->\n\n---\n\nThis PR adds an `--enable-multiprocess` configure option which builds new `bitcoin-node`, `bitcoin-wallet`, and `bitcoin-gui` executables with relevant functionality isolated into different processes. See [doc/design/multiprocess.md](https://github.com/ryanofsky/bitcoin/tree/pr/ipc/doc/design/multiprocess.md) for usage details and future plans.\n\nThe change is implemented by adding a new [`Init`](https://github.com/ryanofsky/bitcoin/blob/pr/ipc/src/interfaces/init.h) interface that spawns new wallet and node subprocesses that can be controlled over a [socketpair](http://man7.org/linux/man-pages/man2/socketpair.2.html) by calling [`Node`](https://github.com/ryanofsky/bitcoin/blob/pr/ipc/src/interfaces/node.h), [`Wallet`](https://github.com/ryanofsky/bitcoin/blob/pr/ipc/src/interfaces/wallet.h), and [`ChainClient`](https://github.com/ryanofsky/bitcoin/blob/pr/ipc/src/interfaces/chain.h) methods. When running with split processes, you can see the IPC messages going back and forth in `-debug=1` output. Followup PR's #19460 and #19461 add `-ipcbind` and `-ipcconnect` options that allow more flexibility in how processes are connected.\n\nThe IPC protocol used is Cap'n Proto, but this could be swapped out for another protocol. Cap'n Proto types and libraries are only accessed in the [src/ipc/capnp/](https://github.com/ryanofsky/bitcoin/tree/pr/ipc/src/ipc/capnp) directory, and not in any public headers or other parts of bitcoin code.\n\nSlides from a presentation describing this change are available on [google drive](https://docs.google.com/presentation/d/1AeJ-7gD-dItUgs5yH-HoEzLvXaEWe_2ZiGUUxYIXcws/edit). Demo code used in the presentation was from an older version this PR (tag [ipc.21](https://github.com/ryanofsky/bitcoin/releases/tag/pr%2Fipc.21), [commits](https://github.com/ryanofsky/bitcoin/compare/master...pr/ipc.21)).\n\n---\n\nThis PR is part of the [process separation project](https://github.com/bitcoin/bitcoin/issues/28722).",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2017-03-27T21:48:26Z",
-      "updated_at": "2026-01-13T12:51:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/10102",
-      "labels": [
-        "GUI",
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 4142,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -6656,80 +6751,113 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
+    }
+  ],
+  "issues": [
     {
-      "id": 2594396603,
-      "number": 32757,
-      "title": "net: Fix Discover() not running when using -bind=0.0.0.0:port",
-      "body": "  This PR fixes two related issues with address discovery when using explicit bind addresses in Bitcoin Core:\r\n\r\n  -  #31293\r\n  -  #31336\r\n\r\nWhen using `-bind=0.0.0.0:port` (or `-bind=::`), the `Discover()` function was not being executed because the code only checked the `bind_on_any` flag. This led to two problems:\r\n- The node would not discover its own local addresses if an explicit \"any\" bind was used.\r\n- The functional test `feature_bind_port_discover.py` would fail, as it expects local addresses to be discovered in these cases.\r\n\r\nThis PR:\r\n1. Checks both `bind_on_any` and any bind addresses using `IsBindAny()`\r\n   Ensures `Discover()` runs when binding to 0.0.0.0 or ::, even if specified explicitly.\r\n2. Ensures correct address discovery\r\n   The node will now discover its own addresses when using explicit \"any\" binds, matching user expectations and fixing the test.\r\n3. Maintains backward compatibility\r\n   The semantic meaning of `bind_on_any` is preserved as defined in `net.h`:  \r\n   > \"True if the user did not specify -bind= or -whitebind= and thus we should bind on 0.0.0.0 (IPv4) and :: (IPv6)\"\r\n4. Updates the test to use dynamic ports\r\n   The functional test `feature_bind_port_discover.py` is updated to use dynamic ports instead of hardcoded ones, improving reliability.\r\n\r\nHow this PR Differs from #31492\r\n\r\n- Preserves the semantic meaning of `bind_on_any` (see `net.h`).\r\n- Uses a simpler approach: checks `IsBindAny()` on bind addresses, without modifying `GetListenPort()`.\r\n- Avoids code duplication with `DefaultOnionServiceTarget()`.\r\n\r\nReferences\r\n\r\n- Implementation follows the approach proposed in my [review comment on #31492](https://github.com/bitcoin/bitcoin/pull/31492#issuecomment-2941773645).\r\n\r\nCloses #31293\r\n\r\nThe #31336 has the overall test failure and requires both this PR and #33362 to be fully resolved.\r\n",
+      "id": 3826801758,
+      "number": 34332,
+      "title": "BTC Node Sync time",
+      "body": "I am currently trying once again to do a BTC core sync. This is proceeding at a pace of around 2% per day and after around 40 days has reached 80% - is this normal. ",
       "state": "open",
-      "user": "b-l-u-e",
-      "created_at": "2025-06-16T04:28:44Z",
-      "updated_at": "2026-01-11T14:02:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32757",
-      "labels": [
-        "P2P",
-        "CI failed"
+      "user": "pcliff069",
+      "created_at": "2026-01-18T13:45:29Z",
+      "updated_at": "2026-01-18T14:42:40Z",
+      "closed_at": null,
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34332",
+      "labels": [],
+      "comment_data": [
+        {
+          "id": 3765320058,
+          "user": "l0rinc",
+          "body": "Can you please provide more details?\nWhat are your specs (CPU, memory, number of processing units available, backing storage (SSD/HDD/SD/Network-attached storage) and its connection type (USB/PCIe), operating system, Core version, command line options, internet connection speed, etc)?\nAre you using a node-in-a-box solution (Umbrel, RaspiBlitz, Start9, NODL, etc.)?\nIs Tor enabled?\nWhat's your dbcache setting?\nAre any other services running simultaneously (Electrs, Fulcrum, Lightning indexing)?\nIf possible, could you share your `debug.log` file (or relevant portions) - just check it first for any private information like IP addresses you'd prefer not to share.",
+          "created_at": "2026-01-18T13:59:43Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 1,
+            "text_length": 666,
+            "has_nack": false,
+            "has_ack": true
+          }
+        },
+        {
+          "id": 3765358473,
+          "user": "pcliff069",
+          "body": "It's a Start9 OS on a BMAX dedicated mini computer. I have never done one of these before and am unsure of the information you are after. Bitcoin Core has service logs - but I have no idea where they are stored when I dowbload them. It's a 2TB SSD, my internet is 1TB down. There are TOR logs so I guess Tor is enabled. Every time I check progress it seems to be Synced Timed out. REtrying soon. I moved from a 1TB SSD system because afrer  spent over a month syncing it I got nothing - Electrs just failed to load. DBcache 5000 Batch 33554432 - not touched by me. I'll try and load whatever logs I can from my main machine tomorrow..\nAnd thanks for the response.",
+          "created_at": "2026-01-18T14:33:50Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 663,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3765366638,
+          "user": "l0rinc",
+          "body": "I have pinged Matt from Start9, maybe he can help you get the details for us, otherwise this is too vague.\nIt would help if you could paste the relevant parts of the `debug.log` for us here.",
+          "created_at": "2026-01-18T14:42:39Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 190,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
       ],
       "drama_signals": {
         "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 184,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3826722076,
+      "number": 34331,
+      "title": "qa: Failure in `p2p_fingerprint.py`",
+      "body": "On FreeBSD 15.0, https://github.com/hebasto/bitcoin-core-nightly/actions/runs/21105606197/job/60696569283:\n```\n386/456 - p2p_fingerprint.py failed, Duration: 0 s\n\nstdout:\n2026-01-18T04:34:49.101209Z TestFramework (INFO): PRNG seed is: 4679507874993432966\n2026-01-18T04:34:49.102528Z TestFramework (INFO): Initializing test directory /tmp/test_runner_₿_🏃_20260118_042715/p2p_fingerprint_63\n2026-01-18T04:34:49.360239Z TestFramework (ERROR): Unexpected exception\nTraceback (most recent call last):\n  File \"/home/runner/work/bitcoin-core-nightly/bitcoin-core-nightly/test/functional/test_framework/test_framework.py\", line 138, in main\n    self.setup()\n  File \"/home/runner/work/bitcoin-core-nightly/bitcoin-core-nightly/test/functional/test_framework/test_framework.py\", line 269, in setup\n    self.setup_network()\n  File \"/home/runner/work/bitcoin-core-nightly/bitcoin-core-nightly/test/functional/test_framework/test_framework.py\", line 360, in setup_network\n    self.setup_nodes()\n  File \"/home/runner/work/bitcoin-core-nightly/bitcoin-core-nightly/test/functional/test_framework/test_framework.py\", line 382, in setup_nodes\n    self.start_nodes()\n  File \"/home/runner/work/bitcoin-core-nightly/bitcoin-core-nightly/test/functional/test_framework/test_framework.py\", line 528, in start_nodes\n    node.wait_for_rpc_connection()\n  File \"/home/runner/work/bitcoin-core-nightly/bitcoin-core-nightly/test/functional/test_framework/test_node.py\", line 316, in wait_for_rpc_connection\n    raise FailedToStartError(self._node_msg(\ntest_framework.test_node.FailedToStartError: [node 0] bitcoind exited with status 1 during initialization. Error: Unable to bind to 127.0.0.1:11756 on this computer. Bitcoin Core is probably already running.\nError: Failed to listen on any port. Use -listen=0 if you want this.\n************************\n\n2026-01-18T04:34:49.423831Z TestFramework (INFO): Not stopping nodes as test failed. The dangling processes will be cleaned up later.\n2026-01-18T04:34:49.424142Z TestFramework (WARNING): Not cleaning up dir /tmp/test_runner_₿_🏃_20260118_042715/p2p_fingerprint_63\n2026-01-18T04:34:49.424336Z TestFramework (ERROR): Test failed. Test logging available at /tmp/test_runner_₿_🏃_20260118_042715/p2p_fingerprint_63/test_framework.log\n2026-01-18T04:34:49.424671Z TestFramework (ERROR): \n2026-01-18T04:34:49.425017Z TestFramework (ERROR): Hint: Call /home/runner/work/bitcoin-core-nightly/bitcoin-core-nightly/test/functional/combine_logs.py '/tmp/test_runner_₿_🏃_20260118_042715/p2p_fingerprint_63' to consolidate all logs\n2026-01-18T04:34:49.425220Z TestFramework (ERROR): \n2026-01-18T04:34:49.425516Z TestFramework (ERROR): If this failure happened unexpectedly or intermittently, please file a bug and provide a link or upload of the combined log.\n2026-01-18T04:34:49.425685Z TestFramework (ERROR): https://github.com/bitcoin/bitcoin/issues\n2026-01-18T04:34:49.425795Z TestFramework (ERROR): \n\n\n```",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2026-01-18T12:22:44Z",
+      "updated_at": "2026-01-18T12:22:44Z",
+      "closed_at": null,
+      "comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34331",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
         "positive_keywords": 1,
-        "text_length": 1922,
+        "text_length": 2957,
         "has_nack": false,
         "has_ack": true
       }
     },
     {
-      "id": 2703168235,
-      "number": 33085,
-      "title": "doc: gen-manpages.py should check build options",
-      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/17506. Second attempt after PR: https://github.com/bitcoin/bitcoin/pull/29457 (closed)\r\n\r\nThis PR fixes the `gen-manpages.py` script to check the build options and exit when there are missing components. It also adds an option to `--skip-build-options-check`\r\n\r\nThe PR also addresses the issues raised on PR: https://github.com/bitcoin/bitcoin/pull/29457:\r\n    - https://github.com/bitcoin/bitcoin/pull/29457#discussion_r1836669430 - the default behaviors is fail\r\n    - https://github.com/bitcoin/bitcoin/pull/29457#issuecomment-1955225976 - by adding  `--skip-build-options-check`\r\n    - https://github.com/bitcoin/bitcoin/pull/29457#pullrequestreview-2433974717 - The PR uses `builddir/src/bitcoin-build-config.h` to check for `HAVE_SYSTEM` option and `builddir/test/config.ini` for the rest as they are only available there respectively",
-      "state": "closed",
-      "user": "BrandonOdiwuor",
-      "created_at": "2025-07-29T07:59:13Z",
-      "updated_at": "2026-01-11T12:48:00Z",
-      "merged_at": null,
+      "id": 3826622158,
+      "number": 34330,
+      "title": "Contributor Retention and Participation Metrics in Bitcoin Core (Project Health Observability)",
+      "body": "Note: I’m approaching this from a research and analysis perspective rather than as a code contributor.\n\nThis issue shares descriptive, non-normative metrics related to contributor retention and participation patterns in the Bitcoin Core repository, derived from publicly observable GitHub activity over time.\n\nLong-lived open-source projects commonly track indicators such as review latency, bus factor, CI reliability, and test coverage. Contributor retention and participation depth are complementary project-health signals, particularly for repositories with high review load and long-lived maintenance requirements.\n\nRecent longitudinal analysis of participation data suggests:\nA large fraction of historical participants become inactive within a year of their last recorded activity.\nLong-term active contributors represent a small fraction of total historical participants.\nHigh exit rates are observable even among contributors whose pull requests were frequently merged.\n\nThese observations are purely descriptive and do not assert intent, motivation, or off-repository contribution. “Inactive” refers only to the absence of observable GitHub activity within a defined time window.\n\nThis issue does not propose:\nChanges to Bitcoin Core policy or consensus rules\nModifications to maintainership or decision authority\nNormative claims about how governance should function\n\nThe purpose is limited to:\n1. Assessing whether retention and participation metrics are useful additions to existing project-health observability.\n2. Determining if existing tooling already captures these signals adequately, or if gaps exist.\n3. Enabling reproducible discussion around contributor lifecycle dynamics that may affect review capacity, onboarding, and long-term maintenance load.\n\nIf this repository considers contributor retention metrics out of scope, that clarification would itself be useful for aligning expectations around which project-health signals are tracked here versus elsewhere.\n\nMethodology, assumptions, and raw aggregation logic can be shared or adjusted for comparison if helpful.\nThank you.",
+      "state": "open",
+      "user": "Conrad8910",
+      "created_at": "2026-01-18T10:41:47Z",
+      "updated_at": "2026-01-18T10:41:47Z",
+      "closed_at": null,
       "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33085",
-      "labels": [
-        "Docs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 936,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2272063945,
-      "number": 31642,
-      "title": "Comment coypright date update",
-      "body": "doc: updated comments in line 1 from: \r\n\r\n// Copyright (c) 2012-2022 The Bitcoin Core developers \r\nto \r\n// Copyright (c) 2012-2025 The Bitcoin Core developers\r\n\r\n\r\nPR was for comment update only so no testing was performed.",
-      "state": "closed",
-      "user": "satscoffee",
-      "created_at": "2025-01-11T14:29:04Z",
-      "updated_at": "2026-01-11T10:52:26Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31642",
+      "url": "https://github.com/bitcoin/bitcoin/issues/34330",
       "labels": [],
       "drama_signals": {
         "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 253,
+        "positive_keywords": 1,
+        "text_length": 2197,
         "has_nack": false,
-        "has_ack": false
+        "has_ack": true
       }
-    }
-  ],
-  "issues": [
+    },
     {
       "id": 3825454472,
       "number": 34326,
@@ -9798,9 +9926,9 @@
     }
   ],
   "summary": {
-    "total_prs": 282,
-    "total_issues": 85,
-    "total_comments": 73,
+    "total_prs": 283,
+    "total_issues": 88,
+    "total_comments": 76,
     "unique_participants": 114
   }
 }
