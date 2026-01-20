@@ -1,5 +1,11 @@
 # Bitcoin Dev Drama Detector 🔥
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![GitHub last commit](https://img.shields.io/github/last-commit/cbspears/bitcoin-dev-drama-detector)](https://github.com/cbspears/bitcoin-dev-drama-detector/commits/main)
+[![GitHub stars](https://img.shields.io/github/stars/cbspears/bitcoin-dev-drama-detector?style=social)](https://github.com/cbspears/bitcoin-dev-drama-detector/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/cbspears/bitcoin-dev-drama-detector)](https://github.com/cbspears/bitcoin-dev-drama-detector/issues)
+
 A dashboard that tracks controversy and debate intensity across Bitcoin developer communication channels.
 
 **Built by [Blockspace Media](https://blockspace.media)**
