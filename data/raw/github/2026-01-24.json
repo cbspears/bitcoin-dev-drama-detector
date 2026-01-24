@@ -1,12 +1,60 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-01-24T01:14:00.868143+00:00",
+  "fetched_at": "2026-01-24T08:20:30.826663+00:00",
   "date_range": {
-    "since": "2026-01-17T01:14:00.868086+00:00",
-    "until": "2026-01-24T01:14:00.868086+00:00"
+    "since": "2026-01-17T08:20:30.826596+00:00",
+    "until": "2026-01-24T08:20:30.826596+00:00"
   },
   "pull_requests": [
+    {
+      "id": 2641394506,
+      "number": 32876,
+      "title": "refactor: use options struct for signing and PSBT operations",
+      "body": "Replace the `sign`, `finalize` , `bip32derivs` and `sighash_type` arguments that are passed to `FillPSBT()` and `SignPSBTInput()` with a `PSBTFillOptions` struct.\r\n\r\n```cpp\r\nstruct PSBTFillOptions {\r\n    bool sign{true};\r\n    std::optional<int> sighash_type{std::nullopt};\r\n    bool finalize{true};\r\n    bool bip32_derivs{true};\r\n};\r\n```\r\n\r\nAdditionally this PR introduces:\r\n\r\n```cpp\r\nstruct SignOptions {\r\n    int sighash_type{SIGHASH_DEFAULT};\r\n};\r\n```\r\n\r\nThis is used by `SignTransaction` and the `MutableTransactionSignatureCreator` constructor.\r\n\r\nThese changes make it easier to add additional options later without large code churn, such as `avoid_script_path` proposed in #32857. It also makes the use of default boolean options safer compared to positional arguments that can easily get mixed up.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-07-04T12:40:44Z",
+      "updated_at": "2026-01-24T08:12:12Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32876",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 866,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2647773300,
+      "number": 32895,
+      "title": "wallet: Prepare for future upgrades by recording versions of last client to open and decrypt",
+      "body": "When a wallet is automatically upgraded, we always do so in a way that allows the user to load their wallet in an older version. When the user loads their wallet into an upgraded version again, the wallet may not perform the automatic upgrade and end up with upgraded and non-upgraded material in the wallet.\r\n\r\nIf we write some information about the last client to open the wallet, we would be able to detect these upgrade-downgrade-upgrade situations and perform another upgrade if so. However, in order for this to work, we need to have implemented writing such information into versions prior to the ones which introduce new automatic upgrades.\r\n\r\nWe are already writing the CLIENT_VERSION into all wallets in a \"version\" record, although this record is not updated in the same way across all previous versions. Since v24.0, we are always updating the record when the client version differs, but prior to that, the record would only be updated when the client version is newer. Even so, we can use this record to store the last client version.\r\n\r\nThe first commit decouples the written client version from the node version. This aids in development of new features. The version is entirely decoupled from previous versions by requiring all versions to have bit 30 set, and the initial version being `0 | (1 << 30)`. The versions just need to be at least 299900, and forcing bit 30 to be set was an easy way to achieve this.\r\n\r\nHowever, using version numbers is not as flexible as feature flags, so the second commit introduces the concept of Wallet Client Features. These flags are distinct from the existing Wallet Feature Flags since they are conceptually different. These are written in a separate record, and the wallet client version is incremented to `(1 << 0) | (1 << 30)`.\r\n\r\nLastly, since some upgrades may need private keys and can only occur after the wallet is decrypted, the third commit also adds a last decrypted features flags record to record the features of the last client to decrypt the wallet.\r\n\r\nThe result is that we will now be able to detect a downgrade down to v24.0 and be able to implement in parallel multiple features that require automatic upgrades.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-07-07T20:13:08Z",
+      "updated_at": "2026-01-24T07:46:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32895",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2277,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 2829858173,
       "number": 33392,
@@ -15,14 +63,13 @@
       "state": "open",
       "user": "musaHaruna",
       "created_at": "2025-09-15T16:17:12Z",
-      "updated_at": "2026-01-24T00:51:51Z",
+      "updated_at": "2026-01-24T07:39:47Z",
       "merged_at": null,
       "comments": 0,
       "review_comments": 0,
       "url": "https://github.com/bitcoin/bitcoin/pull/33392",
       "labels": [
-        "RPC/REST/ZMQ",
-        "CI failed"
+        "RPC/REST/ZMQ"
       ],
       "drama_signals": {
         "drama_keywords": 1,
@@ -30,6 +77,379 @@
         "text_length": 4366,
         "has_nack": false,
         "has_ack": true
+      }
+    },
+    {
+      "id": 3203363765,
+      "number": 34393,
+      "title": "rpc: Fix off-by-one error in getblockchaininfo help",
+      "body": "Correct the `headers` field description in `getblockchaininfo`.\r\n\r\nAnalogous to `blocks` (\"the height of the most-work fully-validated chain\"), `headers` reports the height of the best known header chain, not a count.\r\n\r\nI'm open to suggestions regarding the exact wording, I just want to make sure we fix the off-by-one error.\r\n\r\nSample output:\r\n```\r\n{\r\n  \"chain\": \"main\",\r\n  \"blocks\": 933527,\r\n  \"headers\": 933527,\r\n  ...\r\n}\r\n```",
+      "state": "open",
+      "user": "billymcbip",
+      "created_at": "2026-01-23T13:46:44Z",
+      "updated_at": "2026-01-24T07:30:43Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34393",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 483,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3163535277,
+      "number": 34254,
+      "title": "validation: Prevent duplicate logging and looping in invalid block handling",
+      "body": "`InvalidChainFound()` is called from 3 spots:\r\n1. from `InvalidBlockFound()`\r\n2. from `ActivateBestChain()`, with the highest connectable block of the chain\r\nas an arg (after having called `InvalidBlockFound()` already for the block that failed in `ConnectTip()`)\r\n3. from `InvalidateBlock()` (rpc-only)\r\n\r\nMost of the logic in `InvalidChainFound()` is not required for 2) and 3):\r\nIn `ActivateBestChain()`, the previous call to `InvalidChainFound()` before via `InvalidBlockFound` did the flag updates, best header calculation and logging, so only `m_best_invalid` could need additional updating.\r\nIn `InvalidateBlock()` (which doesn't call `InvalidBlockFound()`), we do most of the accounting manually.\r\n\r\nTherefore move of all logic but the `m_best_invalid` update into `InvalidBlockFound()`, avoiding duplicate logging and unnecessary work (the loops over the block index in `SetBlockFailureFlags()` and `RecalculateBestHeader()`\r\nwere done twice before).\r\n\r\nThe second commit renames `InvalidChainFound` to `UpdateBestInvalid` to adjust to its remaining role.\r\n\r\nThis addresses past discussions about repeated work in `InvalidateBlock()` (https://github.com/bitcoin/bitcoin/pull/31405#discussion_r2135717500) and `ActivateBestChain()` (https://github.com/bitcoin/bitcoin/pull/31533#discussion_r2607189790)",
+      "state": "open",
+      "user": "mzumsande",
+      "created_at": "2026-01-11T16:59:21Z",
+      "updated_at": "2026-01-24T07:30:05Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34254",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1386,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2677577590,
+      "number": 33008,
+      "title": "wallet: support bip388 policy with external signer",
+      "body": "External signers such as Ledger, BitBox02 and Jade, when used with multisig, use [BIP388](https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki) to display (and constrain) descriptor policies to their users.\r\n\r\nAt least in the case of Ledger (no others so far, see https://github.com/bitcoin/bitcoin/pull/33008#issuecomment-3165080503) this requires us to hold on to an hmac, which proves to the device that the user previously reviewed and approved it.\r\n\r\nThis PR adds a new RPC call `registerpolicy` which converts our descriptor(s) into a BIP388 policy (_partially implemented_), calls a new HWI method `register` (_implemented_) and stores the resulting HMAC (_implemented_).\r\n\r\nWhen signing a transaction using HWI's `signtx` it passes the HMAC along with the PSBT (_TODO_).\r\n\r\nFor convenience the HMAC can be retrieved via `getwalletinfo` (_implemented_). This is useful for scenario's where we can't (yet) complete a transaction via HWI calls.\r\n\r\nNote that the HMAC itself is not specified in BIP388 and may be different for different hardware vendors. So we'll store and echo any hex string the device gives us.\r\n\r\nAn alternative approach to directly supporting BIP388 policies would be to pass the involved descriptors to HWI and have it figure out how to derive a policy.\r\n\r\nTesting:\r\n- make a multisig wallet with a Ledger or other [supported device](https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki#reference-implementation)\r\n  - try https://github.com/Sjors/bitcoin/pull/91 if you're feeling adventurous, it includes this PR\r\n- install https://github.com/bitcoin-core/HWI/pull/791 HWI branch\r\n- call `bitcoin rpc registerpolicy`\r\n- call `bitcoin rpc getwalletinfo` to see the hmac\r\n\r\nTODO:\r\n- [ ] derive policy using `Descriptor` class instead regex madness, implement all constraints\r\n- [ ] pass hmac along when signing\r\n\r\nDepends on:\r\n- [ ] HWI `register` command: https://github.com/bitcoin-core/HWI/pull/791\r\n- [ ] HWI optional `--hmac` argument for `signtx` (if set, bypass the current auto-registration workaround)\r\n\r\nPotential followups:\r\n- pass hmac along when displaying an address. This provides some extra assurance to the user. See https://github.com/bitcoin-core/HWI/pull/647\r\n",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-07-18T15:31:45Z",
+      "updated_at": "2026-01-24T07:17:59Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33008",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2277,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2678738082,
+      "number": 33014,
+      "title": "rpc: Fix internal bug in descriptorprocesspsbt when encountering invalid signatures",
+      "body": "Fixes #32849\r\nThe descriptorprocesspsbt RPC was crashing with an internal bug assertion when processing PSBTs with invalid signatures (like invalid Schnorr signatures with SIGHASH_SINGLE | ANYONECANPAY flags). Instead of returning a helpful error message, it would just crash.\r\nThis change replaces the CHECK_NONFATAL call with proper error handling that catches the failure and returns a JSONRPCError with a clear message to the user.\r\nTested with Bitcoin Core v29.0.0 using the exact PSBT from the issue report. The fix now returns proper error messages instead of crashing.",
+      "state": "open",
+      "user": "b-l-u-e",
+      "created_at": "2025-07-19T05:15:00Z",
+      "updated_at": "2026-01-24T07:04:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33014",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 660,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2683340623,
+      "number": 33032,
+      "title": "wallet, test: Replace MockableDatabase with in-memory SQLiteDatabase",
+      "body": "`MockableDatabase` was introduced for the tests to avoid tying non-database tests to a particular database type. However, since the only database type now is sqlite, and because the mockable behavior is no longer used by the tests, we can replace usage of the `MockabeDatabase` with a SQLite database that lives only in memory.\r\n\r\nThis is particularly useful for future work that has the wallet make use of SQLite's capabilities more, which are less conducive to having a separate mock database implementation.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-07-21T22:36:32Z",
+      "updated_at": "2026-01-24T06:35:50Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33032",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 579,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2683376326,
+      "number": 33034,
+      "title": "wallet: Store transactions in a separate sqlite table",
+      "body": "The wallet uses SQLite as a key-value store even though SQLite is a powerful relational database engine. This causes us numerous headaches due to the need to serialize multiple fields together, and since record read from the database during loading can come in any order.\r\n\r\nNotably, for transactions, if we were able to load them in the transaction order assigned by the wallet, PRs like #27865 would be a bit simpler and easier to reason about.\r\n\r\nThis PR makes it possible for us to do that by storing transactions in a separate table. This table has a column for each field in `CWalletTx`, which lets us use a SQL statement like `SELECT * FROM transactions ORDER BY pos` which guarantees us the order in which the transactions are loaded into the wallet.\r\n\r\nThe eventual goal is to use SQLite as a relational database with tables that store our keys and other metadata that can reference each other so that the wallet doesn't just use the database as a storage mechanism. But that is still a work in progress.\r\n\r\nThis PR makes use of the last client opened features introduced in #32895 to determine when the old record style needs to be upgraded to the new transactions table. This should give us sufficient upgrade-downgrade-upgrade handling to not lose any funds.\r\n\r\nDepends on #32763, #32895, #32985, #33032, #33033",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-07-21T22:52:54Z",
+      "updated_at": "2026-01-24T06:08:15Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33034",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1377,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3205772064,
+      "number": 34398,
+      "title": "refactor: Include function info in runtime errors",
+      "body": "Some runtime errors in `wallet/scriptpubkeyman.cpp` include function information while others do not. Refactor the code to consistently include function info throughout the file.",
+      "state": "open",
+      "user": "Chand-ra",
+      "created_at": "2026-01-24T05:15:49Z",
+      "updated_at": "2026-01-24T05:16:05Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34398",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 228,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3136120149,
+      "number": 34179,
+      "title": "refactor: Enable transparent lookup for setBlockIndexCandidates to remove const_cast",
+      "body": "### Rationale\r\n\r\nThis PR improves code safety by removing a `const_cast` in `src/validation.cpp`.\r\n\r\nCurrently, `setBlockIndexCandidates` stores mutable `CBlockIndex*`. However, validation logic (like `CVerifyDB`) often holds `const CBlockIndex*`. Previously, checking for existence in the set required casting away constness. While currently benign, this bypasses compiler safety checks and could mask accidental modifications in future refactors.\r\n\r\n### Description\r\n\r\n1.  **Enable Heterogeneous Lookup:** Added `using is_transparent = void;` to `CBlockIndexWorkComparator` in `src/node/blockstorage.h`. This allows the `std::set` to natively accept `const CBlockIndex*` for lookup (utilizing C++14 heterogeneous lookup).\r\n2.  **Remove Cast:** Removed the now unnecessary `const_cast<CBlockIndex*>` in `src/validation.cpp`, allowing the compiler to strictly enforce const-correctness.\r\n\r\n### Notes\r\n\r\n- **Refactoring only:** No behavioral change.\r\n- **Verification:** `validation_tests` and `blockmanager_tests` pass.",
+      "state": "open",
+      "user": "joaonevess",
+      "created_at": "2025-12-30T07:40:16Z",
+      "updated_at": "2026-01-24T04:16:11Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34179",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1104,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2756065507,
+      "number": 33215,
+      "title": "Fix compatibility with `-debuglogfile` command-line option",
+      "body": "This PR avoids hardcoding the \"debug.log\" filename, ensuring compatibility with custom filenames provided via the `-debuglogfile` command-line option.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-08-19T10:59:57Z",
+      "updated_at": "2026-01-24T04:00:56Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33215",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 209,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3152436690,
+      "number": 34219,
+      "title": "psbt: validate pubkeys in MuSig2 pubnonce/partial sig deserialization",
+      "body": "The previous fix for invalid MuSig2 pubkeys (bitcoin/bitcoin#34010) only\r\naddressed the PSBT_IN_MUSIG2_PARTICIPANT_PUBKEYS field. However, the\r\nPSBT_IN_MUSIG2_PUB_NONCE and PSBT_IN_MUSIG2_PARTIAL_SIG fields also\r\ndeserialize pubkeys without validation, which could lead to crashes when\r\ninvalid pubkeys are processed.\r\n\r\nThis commit adds validation to the DeserializeMuSig2ParticipantDataIdentifier\r\nfunction to ensure all pubkeys in MuSig2 pubnonce and partial signature\r\nfields are fully valid elliptic curve points.\r\n\r\nThe fix:\r\n- Validates both aggregate and participant pubkeys in MuSig2 pubnonce and\r\n  partial signature deserialization\r\n- Throws std::ios_base::failure with descriptive error messages for invalid\r\n  pubkeys\r\n- Prevents potential crashes from invalid elliptic curve points\r\n- Maintains backward compatibility for valid PSBTs\r\n\r\nThis completes the fix for issues [#33999](https://github.com/bitcoin/bitcoin/issues/33999) and [#34201](https://github.com/bitcoin/bitcoin/issues/34201).",
+      "state": "open",
+      "user": "tboy1337",
+      "created_at": "2026-01-07T12:41:30Z",
+      "updated_at": "2026-01-24T03:13:59Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34219",
+      "labels": [
+        "PSBT"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1075,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3184483208,
+      "number": 34328,
+      "title": "rpc: make `uptime` monotonic across NTP jumps",
+      "body": "### Problem\r\n`bitcoin-cli uptime` was derived from wall-clock time, so it could jump by large amounts when the system clock is corrected after `bitcoind` starts (e.g. on RTC-less systems syncing NTP).\r\nThis breaks the expectation that uptime reflects process runtime.\r\n\r\n### Fix\r\nCompute uptime from a [monotonic clock](https://en.cppreference.com/w/cpp/chrono/steady_clock.html) so it is immune to wall-clock jumps, and use that monotonic uptime for the RPC.\r\nGUI startup time is derived from wall clock time minus monotonic uptime so it remains sensible after clock corrections.\r\n\r\n### Reproducer\r\nRevert the fix commit and run the `rpc_uptime` functional test (it should fail with `AssertionError: uptime should not jump with wall clock`):\r\n\r\nOr alternatively:\r\n\r\n```bash\r\ncmake -B build && cmake --build build --target bitcoind bitcoin-cli -j$(nproc)\r\nDATA_DIR=$(mktemp -d)\r\n./build/bin/bitcoind -regtest -datadir=\"$DATA_DIR\" -connect=0 -daemon\r\n./build/bin/bitcoin-cli -regtest -datadir=\"$DATA_DIR\" -rpcwait uptime\r\nsleep 1\r\n./build/bin/bitcoin-cli -regtest -datadir=\"$DATA_DIR\" setmocktime $(( $(date +%s) + 20000000 ))\r\n./build/bin/bitcoin-cli -regtest -datadir=\"$DATA_DIR\" uptime\r\n./build/bin/bitcoin-cli -regtest -datadir=\"$DATA_DIR\" stop\r\n```\r\n\r\n<details>\r\n<summary>Before (uptime jumps with wall clock)</summary>\r\n\r\n```bash\r\nBitcoin Core starting\r\n0\r\n20000001\r\nBitcoin Core stopping\r\n```\r\n\r\n</details>\r\n\r\n<details>\r\n<summary>After (uptime stays monotonic)</summary>\r\n\r\n```bash\r\nBitcoin Core starting\r\n0\r\n1\r\nBitcoin Core stopping\r\n```\r\n</details>\r\n\r\n----------\r\n\r\nIssue: https://github.com/bitcoin/bitcoin/issues/34326",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-17T20:01:46Z",
+      "updated_at": "2026-01-24T02:55:59Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34328",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1674,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2803909911,
+      "number": 33324,
+      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
+      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DENABLE_IPC=ON -DBUILD_GUI=ON\r\ncmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-09-05T23:51:29Z",
+      "updated_at": "2026-01-24T02:40:47Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3246,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2809021284,
+      "number": 33343,
+      "title": "help: enrich help text for `-loadblock`",
+      "body": "`-loadblock` doesn't support XOR-ed files, mention it in its help text to avoid troubles for users.",
+      "state": "open",
+      "user": "HowHsu",
+      "created_at": "2025-09-08T17:41:11Z",
+      "updated_at": "2026-01-24T02:31:57Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33343",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 139,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3199113515,
+      "number": 34379,
+      "title": "wallet: fix `gethdkeys` RPC for descriptors with partial xprvs",
+      "body": "Fixes #34378\r\n\r\nA non-watch-only wallet allows to import descriptors with partial private keys, eg: a multisig descriptor with one private key and one public key. In case an xpub is imported in any such descriptors whose private key the wallet doesn't have, then the `gethdkeys` RPC throws an unhandled error like below when the private keys are requested.\r\n\r\nThis fix ensures that such calls are properly handled by conditionally finding the corresponding xprv and the related functional test is accordingly updated.\r\n\r\n```\r\n➜ bitcoincli -named gethdkeys private=true\r\nerror code: -1\r\nerror message:\r\nmap::at:  key not found\r\n```\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "open",
+      "user": "rkrux",
+      "created_at": "2026-01-22T12:08:36Z",
+      "updated_at": "2026-01-24T02:21:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34379",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 2759,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2837615883,
+      "number": 33421,
+      "title": "node: add  `BlockTemplateCache`",
+      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify the maximum age in `MillisecondsDouble`:\r\n- If a matching template exists in the cache and hasn't exceeded the age limit, the cached version is returned (if multiple exist, the most recent one is returned).\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted. This is usually checked after each insertion.\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\nWhen `test_block_validity` is set to `true` in the block creation options, any cached template that hasn't been validated will be checked before being returned. We also then update the cached block validity to indicate it has been checked.\r\n\r\nThis PR also removes an unused `node/context.h` import from miner to prevent a potential circular dependency during exposing the block template cache to the node context.\r\n",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-09-17T18:47:09Z",
+      "updated_at": "2026-01-24T01:43:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1494,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2991771825,
+      "number": 33828,
+      "title": "Check required interfaces before generating manpages",
+      "body": "Guard manpage generation by reading bitcoin-build-config.h and exiting if HAVE_SYSTEM, ENABLE_WALLET, or WITH_ZMQ are off, and provide a short hint so contributors rebuild with the right flags instead of committing incomplete manpages.\n\nFixes #17506 \n\nOverride by using the SKIP_BUILD_OPTIONS_CHECK environment variable if you really need a custom-fit manpage (see bitcoin/bitcoin#29457 (comment)).",
+      "state": "open",
+      "user": "151henry151",
+      "created_at": "2025-11-08T20:50:34Z",
+      "updated_at": "2026-01-24T01:40:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33828",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 451,
+        "has_nack": false,
+        "has_ack": false
       }
     },
     {
@@ -581,28 +1001,6 @@
       }
     },
     {
-      "id": 2991771825,
-      "number": 33828,
-      "title": "Check required interfaces before generating manpages",
-      "body": "Guard manpage generation by reading CMakeCache.txt and exiting if HAVE_SYSTEM, ENABLE_WALLET, or WITH_ZMQ are off, and provide a short hint so contributors rebuild with the right flags instead of committing incomplete manpages.\n\nFixes #17506 \n\nOverride by using the SKIP_BUILD_OPTIONS_CHECK environment variable if you really need a custom-fit manpage (see bitcoin/bitcoin#29457 (comment)).",
-      "state": "open",
-      "user": "151henry151",
-      "created_at": "2025-11-08T20:50:34Z",
-      "updated_at": "2026-01-23T17:58:42Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33828",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 443,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 1940584116,
       "number": 30343,
       "title": "wallet, logging: Replace WalletLogPrintf() with LogInfo()",
@@ -624,52 +1022,6 @@
         "text_length": 1201,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2678738082,
-      "number": 33014,
-      "title": "rpc: Fix internal bug in descriptorprocesspsbt when encountering invalid signatures",
-      "body": "Fixes #32849\r\nThe descriptorprocesspsbt RPC was crashing with an internal bug assertion when processing PSBTs with invalid signatures (like invalid Schnorr signatures with SIGHASH_SINGLE | ANYONECANPAY flags). Instead of returning a helpful error message, it would just crash.\r\nThis change replaces the CHECK_NONFATAL call with proper error handling that catches the failure and returns a JSONRPCError with a clear message to the user.\r\nTested with Bitcoin Core v29.0.0 using the exact PSBT from the issue report. The fix now returns proper error messages instead of crashing.",
-      "state": "open",
-      "user": "b-l-u-e",
-      "created_at": "2025-07-19T05:15:00Z",
-      "updated_at": "2026-01-23T17:43:47Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33014",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 660,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2837615883,
-      "number": 33421,
-      "title": "node: add  `BlockTemplateCache`",
-      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify the maximum age in `MillisecondsDouble`:\r\n- If a matching template exists in the cache and hasn't exceeded the age limit, the cached version is returned (if multiple exist, the most recent one is returned).\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted. This is usually checked after each insertion.\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\nWhen `test_block_validity` is set to `true` in the block creation options, any cached template that hasn't been validated will be checked before being returned. We also then update the cached block validity to indicate it has been checked.\r\n\r\nThis PR also removes an unused `node/context.h` import from miner to prevent a potential circular dependency during exposing the block template cache to the node context.\r\n",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-09-17T18:47:09Z",
-      "updated_at": "2026-01-23T17:28:53Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1494,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -793,30 +1145,6 @@
         "text_length": 4513,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3184483208,
-      "number": 34328,
-      "title": "rpc: make `uptime` monotonic across NTP jumps",
-      "body": "### Problem\r\n`bitcoin-cli uptime` was derived from wall-clock time, so it could jump by large amounts when the system clock is corrected after `bitcoind` starts (e.g. on RTC-less systems syncing NTP).\r\nThis breaks the expectation that uptime reflects process runtime.\r\n\r\n### Fix\r\nCompute uptime from a [monotonic clock](https://en.cppreference.com/w/cpp/chrono/steady_clock.html) so it is immune to wall-clock jumps, and use that monotonic uptime for the RPC.\r\nGUI startup time is derived from wall clock time minus monotonic uptime so it remains sensible after clock corrections.\r\n\r\n### Reproducer\r\nRevert the fix commit and run the `rpc_uptime` functional test (it should fail with `AssertionError: uptime should not jump with wall clock`):\r\n\r\nOr alternatively:\r\n\r\n```bash\r\ncmake -B build && cmake --build build --target bitcoind bitcoin-cli -j$(nproc)\r\nDATA_DIR=$(mktemp -d)\r\n./build/bin/bitcoind -regtest -datadir=\"$DATA_DIR\" -connect=0 -daemon\r\n./build/bin/bitcoin-cli -regtest -datadir=\"$DATA_DIR\" -rpcwait uptime\r\nsleep 1\r\n./build/bin/bitcoin-cli -regtest -datadir=\"$DATA_DIR\" setmocktime $(( $(date +%s) + 20000000 ))\r\n./build/bin/bitcoin-cli -regtest -datadir=\"$DATA_DIR\" uptime\r\n./build/bin/bitcoin-cli -regtest -datadir=\"$DATA_DIR\" stop\r\n```\r\n\r\n<details>\r\n<summary>Before (uptime jumps with wall clock)</summary>\r\n\r\n```bash\r\nBitcoin Core starting\r\n0\r\n20000001\r\nBitcoin Core stopping\r\n```\r\n\r\n</details>\r\n\r\n<details>\r\n<summary>After (uptime stays monotonic)</summary>\r\n\r\n```bash\r\nBitcoin Core starting\r\n0\r\n1\r\nBitcoin Core stopping\r\n```\r\n</details>\r\n\r\n----------\r\n\r\nIssue: https://github.com/bitcoin/bitcoin/issues/34326",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-17T20:01:46Z",
-      "updated_at": "2026-01-23T16:10:45Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34328",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1674,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -1253,30 +1581,6 @@
       }
     },
     {
-      "id": 3203363765,
-      "number": 34393,
-      "title": "rpc: Fix off-by-one error in getblockchaininfo help",
-      "body": "Correct the `headers` field description in `getblockchaininfo`.\r\n\r\nAnalogous to `blocks` (\"the height of the most-work fully-validated chain\"), `headers` reports the height of the best known header chain, not a count.\r\n\r\nI'm open to suggestions regarding the exact wording, I just want to make sure we fix the off-by-one error.\r\n\r\nSample output:\r\n```\r\n{\r\n  \"chain\": \"main\",\r\n  \"blocks\": 933527,\r\n  \"headers\": 933527,\r\n  ...\r\n}\r\n```",
-      "state": "open",
-      "user": "billymcbip",
-      "created_at": "2026-01-23T13:46:44Z",
-      "updated_at": "2026-01-23T13:47:05Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34393",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 483,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3203351683,
       "number": 34392,
       "title": "test: Add test runner option --ignore-self-check-warnings",
@@ -1421,30 +1725,6 @@
       }
     },
     {
-      "id": 3163535277,
-      "number": 34254,
-      "title": "validation: Prevent duplicate logging and looping in invalid block handling",
-      "body": "`InvalidChainFound()` is called from 3 spots:\r\n1. from `InvalidBlockFound()`\r\n2. from `ActivateBestChain()`, with the highest connectable block of the chain\r\nas an arg (after having called `InvalidBlockFound()` already for the block that failed in `ConnectTip()`)\r\n3. from `InvalidateBlock()` (rpc-only)\r\n\r\nMost of the logic in `InvalidChainFound()` is not required for 2) and 3):\r\nIn `ActivateBestChain()`, the previous call to `InvalidChainFound()` before via `InvalidBlockFound` did the flag updates, best header calculation and logging, so only `m_best_invalid` could need additional updating.\r\nIn `InvalidateBlock()` (which doesn't call `InvalidBlockFound()`), we do most of the accounting manually.\r\n\r\nTherefore move of all logic but the `m_best_invalid` update into `InvalidBlockFound()`, avoiding duplicate logging and unnecessary work (the loops over the block index in `SetBlockFailureFlags()` and `RecalculateBestHeader()`\r\nwere done twice before).\r\n\r\nThe second commit renames `InvalidChainFound` to `UpdateBestInvalid` to adjust to its remaining role.\r\n\r\nThis addresses past discussions about repeated work in `InvalidateBlock()` (https://github.com/bitcoin/bitcoin/pull/31405#discussion_r2135717500) and `ActivateBestChain()` (https://github.com/bitcoin/bitcoin/pull/31533#discussion_r2607189790)",
-      "state": "open",
-      "user": "mzumsande",
-      "created_at": "2026-01-11T16:59:21Z",
-      "updated_at": "2026-01-23T12:46:34Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34254",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1386,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3102178109,
       "number": 34075,
       "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
@@ -1490,30 +1770,6 @@
         "text_length": 1475,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3199113515,
-      "number": 34379,
-      "title": "wallet: fix `gethdkeys` RPC for descriptors with partial xprvs",
-      "body": "Fixes #34378\r\n\r\nA non-watch-only wallet allows to import descriptors with partial private keys, eg: a multisig descriptor with one private key and one public key. In case an xpub is imported in any such descriptors whose private key the wallet doesn't have, then the `gethdkeys` RPC throws an unhandled error like below when the private keys are requested.\r\n\r\nThis fix ensures that such calls are properly handled by conditionally finding the corresponding xprv and the related functional test is accordingly updated.\r\n\r\n```\r\n➜ bitcoincli -named gethdkeys private=true\r\nerror code: -1\r\nerror message:\r\nmap::at:  key not found\r\n```\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
-      "state": "open",
-      "user": "rkrux",
-      "created_at": "2026-01-22T12:08:36Z",
-      "updated_at": "2026-01-23T12:29:27Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34379",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 2759,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -3238,30 +3494,6 @@
       }
     },
     {
-      "id": 2641394506,
-      "number": 32876,
-      "title": "refactor: use options struct for signing and PSBT operations",
-      "body": "Replace the `sign`, `finalize` , `bip32derivs` and `sighash_type` arguments that are passed to `FillPSBT()` and `SignPSBTInput()` with a `PSBTFillOptions` struct.\r\n\r\n```cpp\r\nstruct PSBTFillOptions {\r\n    bool sign{true};\r\n    std::optional<int> sighash_type{std::nullopt};\r\n    bool finalize{true};\r\n    bool bip32_derivs{true};\r\n};\r\n```\r\n\r\nAdditionally this PR introduces:\r\n\r\n```cpp\r\nstruct SignOptions {\r\n    int sighash_type{SIGHASH_DEFAULT};\r\n};\r\n```\r\n\r\nThis is used by `SignTransaction` and the `MutableTransactionSignatureCreator` constructor.\r\n\r\nThese changes make it easier to add additional options later without large code churn, such as `avoid_script_path` proposed in #32857. It also makes the use of default boolean options safer compared to positional arguments that can easily get mixed up.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-07-04T12:40:44Z",
-      "updated_at": "2026-01-22T15:16:09Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32876",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 866,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3193554767,
       "number": 34358,
       "title": "wallet: fix removeprunedfunds bug with conflicting transactions",
@@ -3407,30 +3639,6 @@
         "drama_keywords": 1,
         "positive_keywords": 0,
         "text_length": 111,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2677577590,
-      "number": 33008,
-      "title": "wallet: support bip388 policy with external signer",
-      "body": "External signers such as Ledger, BitBox02 and Jade, when used with multisig, use [BIP388](https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki) to display (and constrain) descriptor policies to their users.\r\n\r\nAt least in the case of Ledger (no others so far, see https://github.com/bitcoin/bitcoin/pull/33008#issuecomment-3165080503) this requires us to hold on to an hmac, which proves to the device that the user previously reviewed and approved it.\r\n\r\nThis PR adds a new RPC call `registerpolicy` which converts our descriptor(s) into a BIP388 policy (_partially implemented_), calls a new HWI method `register` (_implemented_) and stores the resulting HMAC (_implemented_).\r\n\r\nWhen signing a transaction using HWI's `signtx` it passes the HMAC along with the PSBT (_TODO_).\r\n\r\nFor convenience the HMAC can be retrieved via `getwalletinfo` (_implemented_). This is useful for scenario's where we can't (yet) complete a transaction via HWI calls.\r\n\r\nNote that the HMAC itself is not specified in BIP388 and may be different for different hardware vendors. So we'll store and echo any hex string the device gives us.\r\n\r\nAn alternative approach to directly supporting BIP388 policies would be to pass the involved descriptors to HWI and have it figure out how to derive a policy.\r\n\r\nTesting:\r\n- make a multisig wallet with a Ledger or other [supported device](https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki#reference-implementation)\r\n  - try https://github.com/Sjors/bitcoin/pull/91 if you're feeling adventurous, it includes this PR\r\n- install https://github.com/bitcoin-core/HWI/pull/791 HWI branch\r\n- call `bitcoin rpc registerpolicy`\r\n- call `bitcoin rpc getwalletinfo` to see the hmac\r\n\r\nTODO:\r\n- [ ] derive policy using `Descriptor` class instead regex madness, implement all constraints\r\n- [ ] pass hmac along when signing\r\n\r\nDepends on:\r\n- [ ] HWI `register` command: https://github.com/bitcoin-core/HWI/pull/791\r\n- [ ] HWI optional `--hmac` argument for `signtx` (if set, bypass the current auto-registration workaround)\r\n\r\nPotential followups:\r\n- pass hmac along when displaying an address. This provides some extra assurance to the user. See https://github.com/bitcoin-core/HWI/pull/647\r\n",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-07-18T15:31:45Z",
-      "updated_at": "2026-01-22T12:55:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33008",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 2277,
         "has_nack": false,
         "has_ack": false
       }
@@ -3841,30 +4049,6 @@
       }
     },
     {
-      "id": 2647773300,
-      "number": 32895,
-      "title": "wallet: Prepare for future upgrades by recording versions of last client to open and decrypt",
-      "body": "When a wallet is automatically upgraded, we always do so in a way that allows the user to load their wallet in an older version. When the user loads their wallet into an upgraded version again, the wallet may not perform the automatic upgrade and end up with upgraded and non-upgraded material in the wallet.\r\n\r\nIf we write some information about the last client to open the wallet, we would be able to detect these upgrade-downgrade-upgrade situations and perform another upgrade if so. However, in order for this to work, we need to have implemented writing such information into versions prior to the ones which introduce new automatic upgrades.\r\n\r\nWe are already writing the CLIENT_VERSION into all wallets in a \"version\" record, although this record is not updated in the same way across all previous versions. Since v24.0, we are always updating the record when the client version differs, but prior to that, the record would only be updated when the client version is newer. Even so, we can use this record to store the last client version.\r\n\r\nThe first commit decouples the written client version from the node version. This aids in development of new features. The version is entirely decoupled from previous versions by requiring all versions to have bit 30 set, and the initial version being `0 | (1 << 30)`. The versions just need to be at least 299900, and forcing bit 30 to be set was an easy way to achieve this.\r\n\r\nHowever, using version numbers is not as flexible as feature flags, so the second commit introduces the concept of Wallet Client Features. These flags are distinct from the existing Wallet Feature Flags since they are conceptually different. These are written in a separate record, and the wallet client version is incremented to `(1 << 0) | (1 << 30)`.\r\n\r\nLastly, since some upgrades may need private keys and can only occur after the wallet is decrypted, the third commit also adds a last decrypted features flags record to record the features of the last client to decrypt the wallet.\r\n\r\nThe result is that we will now be able to detect a downgrade down to v24.0 and be able to implement in parallel multiple features that require automatic upgrades.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2025-07-07T20:13:08Z",
-      "updated_at": "2026-01-22T08:53:51Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32895",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 2277,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2683353492,
       "number": 33033,
       "title": "wallet, sqlite: Encapsulate SQLite statements in a RAII class",
@@ -3907,31 +4091,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 375,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2683376326,
-      "number": 33034,
-      "title": "wallet: Store transactions in a separate sqlite table",
-      "body": "The wallet uses SQLite as a key-value store even though SQLite is a powerful relational database engine. This causes us numerous headaches due to the need to serialize multiple fields together, and since record read from the database during loading can come in any order.\r\n\r\nNotably, for transactions, if we were able to load them in the transaction order assigned by the wallet, PRs like #27865 would be a bit simpler and easier to reason about.\r\n\r\nThis PR makes it possible for us to do that by storing transactions in a separate table. This table has a column for each field in `CWalletTx`, which lets us use a SQL statement like `SELECT * FROM transactions ORDER BY pos` which guarantees us the order in which the transactions are loaded into the wallet.\r\n\r\nThe eventual goal is to use SQLite as a relational database with tables that store our keys and other metadata that can reference each other so that the wallet doesn't just use the database as a storage mechanism. But that is still a work in progress.\r\n\r\nThis PR makes use of the last client opened features introduced in #32895 to determine when the old record style needs to be upgraded to the new transactions table. This should give us sufficient upgrade-downgrade-upgrade handling to not lose any funds.\r\n\r\nDepends on #32763, #32895, #32985, #33032, #33033",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2025-07-21T22:52:54Z",
-      "updated_at": "2026-01-22T08:26:00Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33034",
-      "labels": [
-        "Wallet",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1377,
         "has_nack": false,
         "has_ack": false
       }
@@ -3982,28 +4141,6 @@
         "text_length": 822,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2803909911,
-      "number": 33324,
-      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
-      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DENABLE_IPC=ON -DBUILD_GUI=ON\r\ncmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-09-05T23:51:29Z",
-      "updated_at": "2026-01-22T05:44:13Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3246,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -5083,30 +5220,6 @@
         "text_length": 476,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3152436690,
-      "number": 34219,
-      "title": "psbt: validate pubkeys in MuSig2 pubnonce/partial sig deserialization",
-      "body": "The previous fix for invalid MuSig2 pubkeys (bitcoin/bitcoin#34010) only\r\naddressed the PSBT_IN_MUSIG2_PARTICIPANT_PUBKEYS field. However, the\r\nPSBT_IN_MUSIG2_PUB_NONCE and PSBT_IN_MUSIG2_PARTIAL_SIG fields also\r\ndeserialize pubkeys without validation, which could lead to crashes when\r\ninvalid pubkeys are processed.\r\n\r\nThis commit adds validation to the DeserializeMuSig2ParticipantDataIdentifier\r\nfunction to ensure all pubkeys in MuSig2 pubnonce and partial signature\r\nfields are fully valid elliptic curve points.\r\n\r\nThe fix:\r\n- Validates both aggregate and participant pubkeys in MuSig2 pubnonce and\r\n  partial signature deserialization\r\n- Throws std::ios_base::failure with descriptive error messages for invalid\r\n  pubkeys\r\n- Prevents potential crashes from invalid elliptic curve points\r\n- Maintains backward compatibility for valid PSBTs\r\n\r\nThis completes the fix for issues [#33999](https://github.com/bitcoin/bitcoin/issues/33999) and [#34201](https://github.com/bitcoin/bitcoin/issues/34201).",
-      "state": "open",
-      "user": "tboy1337",
-      "created_at": "2026-01-07T12:41:30Z",
-      "updated_at": "2026-01-20T17:41:28Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34219",
-      "labels": [
-        "PSBT"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1075,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -6304,28 +6417,6 @@
       }
     },
     {
-      "id": 2683340623,
-      "number": 33032,
-      "title": "wallet, test: Replace MockableDatabase with in-memory SQLiteDatabase",
-      "body": "`MockableDatabase` was introduced for the tests to avoid tying non-database tests to a particular database type. However, since the only database type now is sqlite, and because the mockable behavior is no longer used by the tests, we can replace usage of the `MockabeDatabase` with a SQLite database that lives only in memory.\r\n\r\nThis is particularly useful for future work that has the wallet make use of SQLite's capabilities more, which are less conducive to having a separate mock database implementation.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2025-07-21T22:36:32Z",
-      "updated_at": "2026-01-19T20:39:36Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33032",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 579,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2224317475,
       "number": 31449,
       "title": "coins,refactor: Reduce `getblockstats` RPC UTXO overhead estimation",
@@ -6345,30 +6436,6 @@
         "text_length": 901,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3136120149,
-      "number": 34179,
-      "title": "refactor: Enable transparent lookup for setBlockIndexCandidates to remove const_cast",
-      "body": "### Rationale\r\n\r\nThis PR improves code safety by removing a `const_cast` in `src/validation.cpp`.\r\n\r\nCurrently, `setBlockIndexCandidates` stores mutable `CBlockIndex*`. However, validation logic (like `CVerifyDB`) often holds `const CBlockIndex*`. Previously, checking for existence in the set required casting away constness. While currently benign, this bypasses compiler safety checks and could mask accidental modifications in future refactors.\r\n\r\n### Description\r\n\r\n1.  **Enable Heterogeneous Lookup:** Added `using is_transparent = void;` to `CBlockIndexWorkComparator` in `src/node/blockstorage.h`. This allows the `std::set` to natively accept `const CBlockIndex*` for lookup (utilizing C++14 heterogeneous lookup).\r\n2.  **Remove Cast:** Removed the now unnecessary `const_cast<CBlockIndex*>` in `src/validation.cpp`, allowing the compiler to strictly enforce const-correctness.\r\n\r\n### Notes\r\n\r\n- **Refactoring only:** No behavioral change.\r\n- **Verification:** `validation_tests` and `blockmanager_tests` pass.",
-      "state": "open",
-      "user": "joaonevess",
-      "created_at": "2025-12-30T07:40:16Z",
-      "updated_at": "2026-01-19T19:05:37Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34179",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1104,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -6653,28 +6720,6 @@
       }
     },
     {
-      "id": 2756065507,
-      "number": 33215,
-      "title": "Fix compatibility with `-debuglogfile` command-line option",
-      "body": "This PR avoids hardcoding the \"debug.log\" filename, ensuring compatibility with custom filenames provided via the `-debuglogfile` command-line option.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-08-19T10:59:57Z",
-      "updated_at": "2026-01-19T14:05:53Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33215",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 209,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 1276577083,
       "number": 27260,
       "title": "Enhanced error messages for invalid network prefix during address parsing.",
@@ -6719,28 +6764,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 800,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2809021284,
-      "number": 33343,
-      "title": "help: enrich help text for `-loadblock`",
-      "body": "`-loadblock` doesn't support XOR-ed files, mention it in its help text to avoid troubles for users.",
-      "state": "open",
-      "user": "HowHsu",
-      "created_at": "2025-09-08T17:41:11Z",
-      "updated_at": "2026-01-19T12:34:26Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33343",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 139,
         "has_nack": false,
         "has_ack": false
       }
@@ -7742,76 +7765,6 @@
         "text_length": 269,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3183402461,
-      "number": 34325,
-      "title": ".",
-      "body": ".",
-      "state": "closed",
-      "user": "maximtea64",
-      "created_at": "2026-01-17T06:06:31Z",
-      "updated_at": "2026-01-17T06:07:02Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34325",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 3,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2426922942,
-      "number": 32162,
-      "title": "depends: Switch from multilib to platform-specific toolchains",
-      "body": "Using the multilib GCC toolchain, as currently documented in [`depends/README.md`](https://github.com/bitcoin/bitcoin/blob/4c1906a500cacab385b09e780b54271b0addaf4b/depends/README.md), has several issues, such as:\r\n\r\n1. The [`g++-multilib`](https://packages.ubuntu.com/noble/g++-multilib) package conflicts with platform-specific cross-compiler packages. This means it is not possible to cross compile for `i686` and other platforms using the same set of installed packages.\r\n\r\n2. The [`g++-multilib`](https://packages.ubuntu.com/noble/g++-multilib) package is not available for `arm64`:\r\n```sh\r\n$ sudo apt install g++-multilib\r\nReading package lists... Done\r\nBuilding dependency tree... Done\r\nReading state information... Done\r\nE: Unable to locate package g++-multilib\r\n```\r\n\r\n3. Managing the multilib GCC toolchain requires additional code in both depends and Guix scripts.\r\n\r\nThis PR addresses all the issues mentioned above by switching from multilib to platform-specific toolchains.\r\n\r\nAlso see https://github.com/bitcoin/bitcoin/pull/22456.\r\n\r\n---\r\n\r\nHere are examples of building for different scenarions:\r\n\r\n- Linux, `x86_64` or `arm64`, building with depends natively:\r\n```sh\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build --toolchain depends/$(./depends/config.sub $(./depends/config.guess))/toolchain.cmake\r\n$ cmake --build build -j $(nproc)\r\n```\r\n\r\n- Linux, `x86_64` or `arm64`, cross compiling for `i686-pc-linux-gnu`:\r\n```sh\r\n$ sudo apt install g++-i686-linux-gnu binutils-i686-linux-gnu\r\n$ export HOST=i686-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n\r\n- Linux, `x86_64`, cross compiling for `arm64`:\r\n```sh\r\n$ sudo apt install g++-aarch64-linux-gnu binutils-aarch64-linux-gnu\r\n$ export HOST=aarch64-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n\r\n- Linux, `arm64`, cross compiling for `x86_64`:\r\n```sh\r\n$ sudo apt install g++-x86-64-linux-gnu binutils-x86-64-linux-gnu\r\n$ export HOST=x86_64-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-03-29T13:34:59Z",
-      "updated_at": "2026-01-17T03:35:16Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32162",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2364,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 2511642895,
-      "number": 32468,
-      "title": "rpc: generateblock to allow multiple outputs",
-      "body": "## Generatetomany\r\n\r\nFirst approach was to create a `generatetomany` rpc call. That approach can be seen here https://github.com/polespinasa/bitcoin/pull/3\r\n\r\n## Generateblock\r\nModifies `generateblock` to allow a user to set multiple outputs in the coinbase transaction. If an empty set is provided, the block will be empty. If no set of transactions is provided, the block will mine the mempool. If a set of transactions is provided only that set of txs will be mined.\r\n\r\n```\r\n$./bitcoin-cli -rpcport=18443 generateblock bcrt1qw6qkj8wtw5hraxwxjp08m4aymkntms3yhqyacj\r\n{\r\n  \"hash\": \"7359a3ed7af0f18f4016e6cb29193bd787a2452c584781135c585d5204b9ec5b\"\r\n}\r\n\r\n$ ./bitcoin-cli -rpcport=18443 generateblock '[\"bcrt1qal6p633hvwz2yp5mav0qy7u2az8gkn2xywnj6v\", \"bcrt1qvr3qgyhw6y0e0zj97v0j5yc40xtpea4wqj0g43\"]'\r\n{\r\n  \"hash\": \"6db028454b26d6667dd6df45be2772844121fb44f86433f6bbfbafa429974684\"\r\n}\r\n\r\n$ ./bitcoin-cli -rpcport=18443 generateblock '[\"bcrt1qal6p633hvwz2yp5mav0qy7u2az8gkn2xywnj6v\", \"bcrt1qvr3qgyhw6y0e0zj97v0j5yc40xtpea4wqj0g43\"]' []\r\n\r\n{\r\n  \"hash\": \"33e2ddc52546ddb0edf28bef5b295ee8fbd487b8aca19c97018467e2477877df\"\r\n}\r\n\r\n```\r\n\r\n### Motivation\r\nhttps://x.com/SuperTestnet/status/1921220086645342550\r\n\r\nCitating @supertestnet \r\n> When mining a block on regtest, the command \"generatetoaddress\" is available if you want to send the entire coinbase to 1 address. Let's add generatetomany in case you want to split up the coinbase among multiple addresses, similar to how the \"sendtoaddress\" and \"sendmany\" commands both exist and let you send money to (1) one address or (2) multiple addresses. The generatetomany command would be particularly useful for simulating protocols that send money to multiple recipients directly from a coinbase, as several pools do now, like ocean and braidpool.\r\n\r\n### Notes\r\n- ~Needs release note~\r\n- ~Changes on `generateblock` are not backwards compatible as now it takes an array of outputs instead a single output. This should not be critical as it is a test RPC.~ ",
-      "state": "open",
-      "user": "polespinasa",
-      "created_at": "2025-05-10T17:34:29Z",
-      "updated_at": "2026-01-17T01:18:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32468",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2041,
-        "has_nack": false,
-        "has_ack": true
       }
     }
   ],
@@ -9955,9 +9908,9 @@
     }
   ],
   "summary": {
-    "total_prs": 327,
+    "total_prs": 325,
     "total_issues": 49,
     "total_comments": 70,
-    "unique_participants": 113
+    "unique_participants": 112
   }
 }
