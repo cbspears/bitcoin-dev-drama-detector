@@ -1,12 +1,366 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-01-26T01:22:25.942722+00:00",
+  "fetched_at": "2026-01-26T08:25:26.073704+00:00",
   "date_range": {
-    "since": "2026-01-19T01:22:25.942651+00:00",
-    "until": "2026-01-26T01:22:25.942651+00:00"
+    "since": "2026-01-19T08:25:26.073623+00:00",
+    "until": "2026-01-26T08:25:26.073623+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3201053750,
+      "number": 34383,
+      "title": "ci: run unit + functional tests on all ancestor commits",
+      "body": "### Problem\r\n\r\nOther CI jobs fully test only the most recent 7 commits in a PR (the PR tip by most jobs + `test-each-commit` checking a limited number of ancestor commits), so failures introduced deeper in the commit stack might be missed.\r\n\r\n### Fix\r\n\r\nSplit per-commit testing into two jobs that cover **every non-head PR commit** (no max-count limit), while keeping the PR tip excluded because it is already covered by the normal CI jobs:\r\n\r\n- **Unit tests on all ancestor commits (Ubuntu)**: compile + run all unit tests (ctest) for each commit, skipping functional tests - this will fail fast on early commit failures for example.\r\n- **Functional tests on all ancestor commits (Cirrus, max timeout)**: compile + run functional tests for each commit, skipping unit tests, and pass `--failfast` to stop after the first failure.\r\n\r\nBoth jobs reuse the existing per-commit `git rebase --exec` approach and the existing `ci-test-each-commit-exec.py` - now configurable via flags.\r\n\r\n### Examples\r\n\r\n* Example failure 10 commits deep:\r\nhttps://github.com/l0rinc/bitcoin/actions/runs/21290002378/job/61280792972?pr=105 and https://github.com/l0rinc/bitcoin/actions/runs/21290002378/job/61284299949?pr=105\r\n\r\n* Example pass with >7 commits:\r\nhttps://github.com/l0rinc/bitcoin/actions/runs/21290024115/job/61280866773?pr=106#step:8:2800\r\n\r\n<details>\r\n<summary>Note</summary>\r\n\r\nThe failure above was generated with a few extra dummy commits, see:\r\nhttps://github.com/l0rinc/bitcoin/pull/105/commits and https://github.com/l0rinc/bitcoin/pull/106/commits\r\n\r\n</details>\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-22T21:38:21Z",
+      "updated_at": "2026-01-26T08:21:16Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34383",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1621,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2803909911,
+      "number": 33324,
+      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
+      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-09-05T23:51:29Z",
+      "updated_at": "2026-01-26T08:17:38Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3232,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3173345068,
+      "number": 34281,
+      "title": "build: Temporarily remove confusing and brittle `-fdebug-prefix-map`",
+      "body": "The compiler option `-fdebug-prefix-map` is unconditionally set by the build system. This is problematic for many reasons:\r\n\r\n* Users and devs have no easy way to disable it without modifying the build system source code\r\n* The mapping is broken since the cmake migration, and requires manual fixups such as https://github.com/bitcoin/bitcoin/issues/31204 or https://github.com/bitcoin/bitcoin/issues/31957\r\n\r\nFix all issues by temporarily removing it.\r\n\r\nThough, the option is kept for the guix build, so that no change in behavior is observed for the release binaries.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/31957\r\nFixes https://github.com/bitcoin/bitcoin/issues/31204\r\n\r\n\r\nThe option can be added back in the future, if there is any need to. Though, adding it back should ideally work out of the box, or at least provide easy workarounds for all commonly used tooling.",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-01-14T12:31:05Z",
+      "updated_at": "2026-01-26T08:05:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34281",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 952,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2991771825,
+      "number": 33828,
+      "title": "Check required interfaces before generating manpages",
+      "body": "Guard manpage generation by reading bitcoin-build-config.h and exiting if HAVE_SYSTEM, ENABLE_WALLET, or WITH_ZMQ are off, and provide a short hint so contributors rebuild with the right flags instead of committing incomplete manpages.\n\nFixes #17506 \n\nOverride by using the SKIP_BUILD_OPTIONS_CHECK environment variable if you really need a custom-fit manpage (see bitcoin/bitcoin#29457 (comment)).",
+      "state": "open",
+      "user": "151henry151",
+      "created_at": "2025-11-08T20:50:34Z",
+      "updated_at": "2026-01-26T08:02:34Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33828",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 451,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2902093523,
+      "number": 33593,
+      "title": "guix: Use UCRT runtime for Windows release binaries",
+      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-10-09T21:46:43Z",
+      "updated_at": "2026-01-26T07:17:12Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
+      "labels": [
+        "Windows",
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 213,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2919092278,
+      "number": 33637,
+      "title": "refactor: optimize block index comparisons (1.4-6.8x faster)",
+      "body": "### Context\r\nThe comparator is often called either directly or for the sorting of [setBlockIndexCandidates](https://github.com/bitcoin/bitcoin/blob/master/src/validation.h#L637), a red-black tree-set containing valid block headers where the comparator is invoked extensively.\r\nBesided the sorted set usages, the comparator is used directly in `Chainstate` in `FindMostWorkChain`, `PruneBlockIndexCandidates`, `ActivateBestChain` and `InvalidateBlock`; and in `ChainstateManager` in `LoadBlockIndex`, `CheckBlockIndex`, `ActivateSnapshot` and `PopulateAndValidateSnapshot`.\r\n\r\nIt was profiled during the investigation of https://github.com/bitcoin/bitcoin/issues/33618#issuecomment-3402229976. \r\n\r\n### Testing\r\nTo ensure the optimized implementations are both fast and correct, the first commit adds a dedicated benchmark to measure `CBlockIndexWorkComparator` performance, and the second commit adds randomized tests comparing the new implementation with the original one.\r\n\r\n### Results\r\n\r\n> GCC 15.0.1:\r\n\r\n* `CBlockIndexWorkComparator`: 100,772,511 cmp/s → 656,674,205 cmp/s = 6.51x faster\r\n* `CheckBlockIndex`: 9,091 ops/s → 14,765 ops/s = 1.62x faster\r\n\r\n> Clang 22.0.0:\r\n\r\n* `CBlockIndexWorkComparator`: 100,451,893 cmp/s → 683,414,234 cmp/s = 6.8x faster\r\n* `CheckBlockIndex`: 10,322 ops/s → 14,376 ops/s = 1.39x faster\r\n\r\nSee https://corecheck.dev/bitcoin/bitcoin/pulls/33637 for the CI's `CheckBlockIndex` performance.\r\n\r\n<details>\r\n<summary>gcc and clang measurements</summary>\r\n\r\n> Compiler: gcc 15.0.1\r\nb60450fae8 bench: add benchmark to measure `CBlockIndexWorkComparator` performance\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                9.92 |      100,772,511.62 |    0.0% |           63.98 |           35.64 |  1.795 |          14.17 |    1.9% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          109,996.46 |            9,091.20 |    0.2% |    1,014,421.11 |      394,979.29 |  2.568 |     313,025.11 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\ne2e02177ba refactor: inline `arith_uint256` comparison operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.48 |      154,439,491.66 |    0.0% |           31.01 |           23.25 |  1.334 |           7.16 |    3.8% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          105,754.86 |            9,455.83 |    0.1% |      913,130.11 |      379,588.20 |  2.406 |     276,692.11 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\n85b74b01de refactor: optimize `arith_uint256` comparison with spaceship operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.37 |      156,990,488.06 |    0.0% |           28.85 |           22.87 |  1.261 |           8.61 |    3.2% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           83,803.10 |           11,932.73 |    0.0% |      743,565.09 |      300,824.84 |  2.472 |     232,646.08 |    0.0% |      5.56 | `CheckBlockIndex`\r\n\r\ndeb58eea2f refactor: optimize `CBlockIndexWorkComparator` with std::tie\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                1.52 |      656,674,205.98 |    0.0% |           13.18 |            5.47 |  2.410 |           3.06 |    0.1% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           67,726.84 |           14,765.19 |    0.2% |      585,826.07 |      243,155.90 |  2.409 |     181,920.07 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\n> Compiler: clang 22.0.0\r\n\r\nb60450fae8 bench: add benchmark to measure `CBlockIndexWorkComparator` performance\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                9.96 |      100,451,893.46 |    0.0% |           61.28 |           35.75 |  1.714 |          13.62 |    2.1% |      5.52 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           96,878.70 |           10,322.19 |    0.1% |      802,827.10 |      347,679.01 |  2.309 |     234,823.10 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\ne2e02177ba refactor: inline `arith_uint256` comparison operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.13 |      163,183,693.10 |    0.0% |           25.74 |           22.01 |  1.170 |           6.10 |    4.6% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           86,307.94 |           11,586.42 |    1.2% |      646,229.09 |      309,785.33 |  2.086 |     195,119.09 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\n85b74b01de refactor: optimize `arith_uint256` comparison with spaceship operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.36 |      157,330,900.16 |    1.0% |           26.20 |           22.61 |  1.159 |           6.55 |    4.4% |      5.53 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           75,031.66 |           13,327.71 |    1.0% |      650,604.15 |      266,934.04 |  2.437 |     149,967.14 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\ndeb58eea2f refactor: optimize `CBlockIndexWorkComparator` with std::tie\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                1.46 |      683,414,234.14 |    0.0% |           16.12 |            5.25 |  3.067 |           4.02 |    0.1% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           69,559.70 |           14,376.14 |    0.1% |      559,208.07 |      249,654.28 |  2.240 |     132,342.07 |    0.0% |      5.51 | `CheckBlockIndex`\r\n\r\n</details>\r\n\r\n### Reproducer\r\n\r\nRun the equivalence tests with:\r\n```bash\r\ncmake -B build && cmake --build build && ./build/bin/test_bitcoin --run_test=arith_uint256_tests,blockchain_tests\r\n```\r\n\r\nEach commit shows how it changes the relevant benchmarks.\r\n\r\n<details>\r\n<summary>Benchmark script</summary>\r\n\r\n```bash\r\nfor compiler in gcc clang; do \\\r\n  if [ \"$compiler\" = \"gcc\" ]; then CC=gcc; CXX=g++; COMP_VER=$(gcc -dumpfullversion); \\\r\n  else CC=clang; CXX=clang++; COMP_VER=$(clang -dumpversion); fi && \\\r\n  echo \"> Compiler: $compiler $COMP_VER\" && \\\r\n  for commit in b60450fae83970daa9dc2da0706bf126a2f41515 e2e02177ba6f7fac34eda9696dad2e8ecd44e6cd 85b74b01de7e914d07630138eaa78f09a083b85b deb58eea2fdd2712a28aa6b81417087426b19f5b; do \\\r\n    git fetch origin $commit >/dev/null 2>&1 && git checkout $commit >/dev/null 2>&1 && git log -1 --pretty='%h %s' && \\\r\n    rm -rf build && \\\r\n    cmake -B build -DBUILD_BENCH=ON -DENABLE_IPC=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX >/dev/null 2>&1 && \\\r\n    cmake --build build -j$(nproc) >/dev/null 2>&1 && \\\r\n    for i in 1; do \\\r\n      build/bin/bench_bitcoin -filter='CBlockIndexWorkComparator|CheckBlockIndex' -min-time=5000; \\\r\n    done; \\\r\n  done; \\\r\ndone\r\n```\r\n\r\n</details>\r\n\r\nNote: something similar was already started in https://github.com/bitcoin/bitcoin/pull/33334, but this is a broader optimization that doesn't use the same technique: added as coauthor regardless.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-10-16T01:54:31Z",
+      "updated_at": "2026-01-26T07:04:15Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33637",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 11203,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2999254279,
+      "number": 33854,
+      "title": "fix assumevalid is ignored during reindex",
+      "body": "During a reindex, the assumevalid setting may be ignored if the chainwork of the best header is below `minimumchainwork`. This happens when the previous IBD was stopped before connecting enough blocks to reach the required `minimumchainwork`. The assumevalid block will also be missing from the block index because the assumevalid block is set to match the `minimumchainwork`. See [Issue #31494](https://github.com/bitcoin/bitcoin/issues/31494).\r\n\r\nAs a result, `reindex` can take significantly longer to complete than necessary.\r\n\r\nThis PR addresses the issue by modifying reindex behaviour: if the chainwork of the `best_header` is below `minimumchainwork`, the node skips the `ActivateBestChain()` step and proceeds directly to synchronisation.\r\n\r\nThis PR takes a different approach from [PR #31615](https://github.com/bitcoin/bitcoin/pull/31615) to keep the validation path for `reindex` the same as the regular IBD validation path.\r\n\r\nDevelopers benchmarking IBD with `-reindex` may find this behaviour undesirable. In such cases, it’s recommended to use `-reindex-chainstate` instead or ensure that the available blocks have sufficient chainwork.\r\n\r\n`libbitcoinkernel` exposes the `ImportBlocks` function and expects `reindex` to connect blocks, so an attempt was made to preserve the existing behaviour for `libbitcoinkernel`.",
+      "state": "open",
+      "user": "Eunovo",
+      "created_at": "2025-11-11T14:21:14Z",
+      "updated_at": "2026-01-26T06:13:14Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33854",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1375,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3209325275,
+      "number": 34405,
+      "title": "wallet: skip APS when no partial spend exists",
+      "body": "Fixes #25150\n\nAPS (Avoid Partial Spends) runs a second coin selection pass to fully spend\nUTXOs sharing a scriptPubKey. This currently runs unconditionally, even when\nthe first selection has no partial spend. Running APS unnecessarily wastes\ncomputation and can produce a worse result when there was nothing to fix.\n\nDetect partial spends by comparing selected vs available UTXO counts per\nscriptPubKey, reusing available_coins. Skip APS if none found.\n\nTest updated to create partial spend scenarios so tracepoints fire.\n\n---\n\n*Supersedes #34362 which was corrupted by a shallow clone force-push.*",
+      "state": "open",
+      "user": "8144225309",
+      "created_at": "2026-01-26T04:36:55Z",
+      "updated_at": "2026-01-26T04:37:25Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34405",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 644,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3193751838,
+      "number": 34362,
+      "title": "wallet: skip APS when no partial spend exists",
+      "body": "Fixes #25150\n\nAPS (Avoid Partial Spends) runs a second coin selection pass to fully spend\nUTXOs sharing a scriptPubKey. This currently runs unconditionally, even when\nthe first selection has no partial spend. Running APS unnecessarily wastes\ncomputation and can produce a worse result when there was nothing to fix.\n\nDetect partial spends by comparing selected vs available UTXO counts per\nscriptPubKey, reusing available_coins. Skip APS if none found.\n\nTest updated to create partial spend scenarios so tracepoints fire.",
+      "state": "closed",
+      "user": "8144225309",
+      "created_at": "2026-01-21T04:38:49Z",
+      "updated_at": "2026-01-26T04:37:14Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34362",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 567,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3193557787,
+      "number": 34359,
+      "title": "test: add test for rebroadcast of transaction received via p2p",
+      "body": "The wallet doesn't only rebroadcast transactions it created, but also relevant transactions received via p2p. \r\nSince this is not self-evident, add test coverage for it.\r\n\r\nWill keep this in draft for now, because the added test fails intermittently on master. After debugging this I think it is due to a wallet bug, which is fixed in the separate PR #34358. I rebased this PR on #34358.",
+      "state": "open",
+      "user": "mzumsande",
+      "created_at": "2026-01-21T02:42:05Z",
+      "updated_at": "2026-01-26T04:11:10Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34359",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 450,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 837470043,
+      "number": 24230,
+      "title": "indexes: Stop using node internal types and locking cs_main, improve sync logic",
+      "body": "This PR lets indexing code mostly run outside of the node process. It also improves indexing sync logic, which is moved out of indexing code to a new [`node::SyncChain()`](https://github.com/ryanofsky/bitcoin/blob/cf6d99bed842361fb06986780097fb80c9e879e4/src/node/chain.h#L21-L36) function.\r\n\r\nAlmost all the commits in this PR are small refactoring changes that move code from `src/index/` to `src/node/`, or replace references to node types like `CBlockIndex`, `CChain`, `CChainState` in index code. There are only two commits affecting indexing sync logic which make complicated or substantive changes:\r\n\r\n- [`8862eddeb68b` indexes: Rewrite chain sync logic, simplify index sync code](https://github.com/bitcoin/bitcoin/pull/24230/commits/8862eddeb68b8871421e8aa4e69c7fa567df4da5)\r\n- [`f458cf8a4ce1` indexes: Initialize indexes without holding cs_main](https://github.com/bitcoin/bitcoin/pull/24230/commits/f458cf8a4ce1c9a21633439122df929dbee53946)\r\n\r\nThe commit messages have more details about these and other changes. Followups to this PR will reuse indexing sync code for wallets (#15719, #11756) and let indexes run in separate processes (#10102)",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2022-02-01T16:56:28Z",
+      "updated_at": "2026-01-26T04:03:39Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/24230",
+      "labels": [
+        "UTXO Db and Indexes",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1234,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3169361001,
+      "number": 34271,
+      "title": "net_processing: make m_tx_for_private_broadcast optional",
+      "body": "Make `PeerManagerImpl::m_tx_for_private_broadcast` optional because it is needed for in private broadcast mode (`-privatebroadcast=1`).\r\n\r\nA followup to #29415, requested in:\r\nhttps://github.com/bitcoin/bitcoin/pull/29415#discussion_r2620864832\r\nhttps://github.com/bitcoin/bitcoin/pull/29415/files#r2620864832",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-01-13T11:32:27Z",
+      "updated_at": "2026-01-26T02:23:35Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34271",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 366,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3193554767,
+      "number": 34358,
+      "title": "wallet: fix removeprunedfunds bug with conflicting transactions",
+      "body": "`removeprunedfunds` removes all entries from `mapTxSpends` for the inputs of the pruned tx. However, this is incorrect, because there could be multiple entries from conflicting transactions (that shouldn't be removed as well). This could lead to the wallet creating invalid transactions, trying to double spend utxos.\r\nThe bug persists when the conflicting tx was mined, because the wallet trusts its internal accounting instead of calling `AddToSpends` again.\r\n\r\nThe added test should fail on master.",
+      "state": "open",
+      "user": "mzumsande",
+      "created_at": "2026-01-21T02:40:34Z",
+      "updated_at": "2026-01-26T02:22:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34358",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 565,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3195808515,
+      "number": 34371,
+      "title": "wallet: allow importprunedfunds for spending transactions",
+      "body": "Fixes #21647\n\n`importprunedfunds` only allowed importing transactions that credit the wallet\n(checked via `IsMine`), rejecting transactions that spend from it. This could\nleave a pruned wallet showing an incorrect balance. If a spending transaction\nwas removed with `removeprunedfunds`, it couldn't be re-imported and would\nfail with \"No addresses in wallet correspond to included transaction\"\n\nThe fix adds `IsFromMe()` alongside `IsMine()`, matching the pattern used\nelsewhere in wallet code.\n\nA functional test imports a transaction that spends from the wallet but has\nno outputs to it (entire UTXO sent externally), verifying the new code path.",
+      "state": "open",
+      "user": "8144225309",
+      "created_at": "2026-01-21T15:54:39Z",
+      "updated_at": "2026-01-26T02:20:34Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34371",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 706,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3184839812,
+      "number": 34329,
+      "title": "rpc,net: Add private broadcast RPCs",
+      "body": "Follow up from #29415 \r\n\r\nSending a transaction via private broadcast does not have any way for a user to track the status of the transaction before it gets returned by another peer. The default logs will likely be removed as well in #34267. Nor is there any way to abort a transaction once it has been added to the private broadcast queue.\r\n\r\nThis adds two new RPCs:\r\n- `getprivatebroadastinfo` returns information about what transactions are in the private broadcast queue, including all the peers' addresses we have chosen and timestamps for sending and reception acknowledgement.\r\n- `abortprivatebroadcast` removes a transaction from the private broadcast queue.",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2026-01-18T01:46:20Z",
+      "updated_at": "2026-01-26T01:30:32Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34329",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 702,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
     {
       "id": 3133212525,
       "number": 34165,
@@ -101,28 +455,6 @@
         "text_length": 147,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2803909911,
-      "number": 33324,
-      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
-      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-09-05T23:51:29Z",
-      "updated_at": "2026-01-25T21:30:43Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3232,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -417,28 +749,6 @@
         "text_length": 4045,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3184839812,
-      "number": 34329,
-      "title": "rpc,net: Add private broadcast RPCs",
-      "body": "Follow up from #29415 \r\n\r\nSending a transaction via private broadcast does not have any way for a user to track the status of the transaction before it gets returned by another peer. The default logs will likely be removed as well in #34267. Nor is there any way to abort a transaction once it has been added to the private broadcast queue.\r\n\r\nThis adds two new RPCs:\r\n- `getprivatebroadastinfo` returns information about what transactions are in the private broadcast queue, including all the peers' addresses we have chosen and timestamps for sending and reception acknowledgement.\r\n- `abortprivatebroadcast` removes a transaction from the private broadcast queue.",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2026-01-18T01:46:20Z",
-      "updated_at": "2026-01-25T20:18:07Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34329",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 702,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -981,28 +1291,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 2460,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2991771825,
-      "number": 33828,
-      "title": "Check required interfaces before generating manpages",
-      "body": "Guard manpage generation by reading bitcoin-build-config.h and exiting if HAVE_SYSTEM, ENABLE_WALLET, or WITH_ZMQ are off, and provide a short hint so contributors rebuild with the right flags instead of committing incomplete manpages.\n\nFixes #17506 \n\nOverride by using the SKIP_BUILD_OPTIONS_CHECK environment variable if you really need a custom-fit manpage (see bitcoin/bitcoin#29457 (comment)).",
-      "state": "open",
-      "user": "151henry151",
-      "created_at": "2025-11-08T20:50:34Z",
-      "updated_at": "2026-01-25T17:48:34Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33828",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 451,
         "has_nack": false,
         "has_ack": false
       }
@@ -1562,30 +1850,6 @@
       }
     },
     {
-      "id": 3173345068,
-      "number": 34281,
-      "title": "build: Temporarily remove confusing and brittle `-fdebug-prefix-map`",
-      "body": "The compiler option `-fdebug-prefix-map` is unconditionally set by the build system. This is problematic for many reasons:\r\n\r\n* Users and devs have no easy way to disable it without modifying the build system source code\r\n* The mapping is broken since the cmake migration, and requires manual fixups such as https://github.com/bitcoin/bitcoin/issues/31204 or https://github.com/bitcoin/bitcoin/issues/31957\r\n\r\nFix all issues by temporarily removing it.\r\n\r\nThough, the option is kept for the guix build, so that no change in behavior is observed for the release binaries.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/31957\r\nFixes https://github.com/bitcoin/bitcoin/issues/31204\r\n\r\n\r\nThe option can be added back in the future, if there is any need to. Though, adding it back should ideally work out of the box, or at least provide easy workarounds for all commonly used tooling.",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-01-14T12:31:05Z",
-      "updated_at": "2026-01-25T14:34:10Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34281",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 952,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2748998057,
       "number": 33199,
       "title": "fees: enable `CBlockPolicyEstimator` return sub 1 sat/vb fee rate estimates",
@@ -1909,30 +2173,6 @@
         "text_length": 683,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 2999254279,
-      "number": 33854,
-      "title": "fix assumevalid is ignored during reindex",
-      "body": "During a reindex, the assumevalid setting may be ignored if the chainwork of the best header is below `minimumchainwork`. This happens when the previous IBD was stopped before connecting enough blocks to reach the required `minimumchainwork`. The assumevalid block will also be missing from the block index because the assumevalid block is set to match the `minimumchainwork`. See [Issue #31494](https://github.com/bitcoin/bitcoin/issues/31494).\r\n\r\nAs a result, `reindex` can take significantly longer to complete than necessary.\r\n\r\nThis PR addresses the issue by modifying reindex behaviour: if the chainwork of the `best_header` is below `minimumchainwork`, the node skips the `ActivateBestChain()` step and proceeds directly to synchronisation.\r\n\r\nThis PR takes a different approach from [PR #31615](https://github.com/bitcoin/bitcoin/pull/31615) to keep the validation path for `reindex` the same as the regular IBD validation path.\r\n\r\nDevelopers benchmarking IBD with `-reindex` may find this behaviour undesirable. In such cases, it’s recommended to use `-reindex-chainstate` instead or ensure that the available blocks have sufficient chainwork.\r\n\r\n`libbitcoinkernel` exposes the `ImportBlocks` function and expects `reindex` to connect blocks, so an attempt was made to preserve the existing behaviour for `libbitcoinkernel`.",
-      "state": "open",
-      "user": "Eunovo",
-      "created_at": "2025-11-11T14:21:14Z",
-      "updated_at": "2026-01-25T11:44:36Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33854",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1375,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -2483,28 +2723,6 @@
       }
     },
     {
-      "id": 3169361001,
-      "number": 34271,
-      "title": "net_processing: make m_tx_for_private_broadcast optional",
-      "body": "Make `PeerManagerImpl::m_tx_for_private_broadcast` optional because it is needed for in private broadcast mode (`-privatebroadcast=1`).\r\n\r\nA followup to #29415, requested in:\r\nhttps://github.com/bitcoin/bitcoin/pull/29415#discussion_r2620864832\r\nhttps://github.com/bitcoin/bitcoin/pull/29415/files#r2620864832",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-01-13T11:32:27Z",
-      "updated_at": "2026-01-25T08:02:03Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34271",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 366,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3174053537,
       "number": 34286,
       "title": "test: verify node state after restart in assumeutxo",
@@ -2716,30 +2934,6 @@
         "text_length": 472,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3201053750,
-      "number": 34383,
-      "title": "ci: run unit + functional tests on all ancestor commits",
-      "body": "### Problem\r\n\r\nOther CI jobs fully test only the most recent 7 commits in a PR (the PR tip by most jobs + `test-each-commit` checking a limited number of ancestor commits), so failures introduced deeper in the commit stack might be missed.\r\n\r\n### Fix\r\n\r\nSplit per-commit testing into two jobs that cover **every non-head PR commit** (no max-count limit), while keeping the PR tip excluded because it is already covered by the normal CI jobs:\r\n\r\n- **Unit tests on all ancestor commits (Ubuntu)**: compile + run all unit tests (ctest) for each commit, skipping functional tests - this will fail fast on early commit failures for example.\r\n- **Functional tests on all ancestor commits (Cirrus, max timeout)**: compile + run functional tests for each commit, skipping unit tests, and pass `--failfast` to stop after the first failure.\r\n\r\nBoth jobs reuse the existing per-commit `git rebase --exec` approach and the existing `ci-test-each-commit-exec.py` - now configurable via flags.\r\n\r\n### Examples\r\n\r\n* Example failure 10 commits deep:\r\nhttps://github.com/l0rinc/bitcoin/actions/runs/21290002378/job/61280792972?pr=105 and https://github.com/l0rinc/bitcoin/actions/runs/21290002378/job/61284299949?pr=105\r\n\r\n* Example pass with >7 commits:\r\nhttps://github.com/l0rinc/bitcoin/actions/runs/21290024115/job/61280866773?pr=106#step:8:2800\r\n\r\n<details>\r\n<summary>Note</summary>\r\n\r\nThe failure above was generated with a few extra dummy commits, see:\r\nhttps://github.com/l0rinc/bitcoin/pull/105/commits and https://github.com/l0rinc/bitcoin/pull/106/commits\r\n\r\n</details>\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-22T21:38:21Z",
-      "updated_at": "2026-01-25T06:02:07Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34383",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1621,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -4897,30 +5091,6 @@
       }
     },
     {
-      "id": 3193751838,
-      "number": 34362,
-      "title": "wallet: skip APS when no partial spend exists",
-      "body": "Skip the APS coin selection pass when the initial selection contains no partial\r\nspend—APS cannot improve privacy in this case.\r\n\r\nDetection compares selected vs available UTXO counts per scriptPubKey, reusing\r\n`available_coins`. Test updated to create an actual partial spend scenario.\r\n\r\nFixes #25150",
-      "state": "open",
-      "user": "8144225309",
-      "created_at": "2026-01-21T04:38:49Z",
-      "updated_at": "2026-01-22T21:19:54Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34362",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 348,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3196490786,
       "number": 34373,
       "title": "refactor: Remove remaining std::bind, check via clang-tidy",
@@ -5161,30 +5331,6 @@
       }
     },
     {
-      "id": 3193554767,
-      "number": 34358,
-      "title": "wallet: fix removeprunedfunds bug with conflicting transactions",
-      "body": "`removeprunedfunds` removes all entries from `mapTxSpends` for the inputs of the pruned tx. However, this is incorrect, because there could be multiple entries from conflicting transactions (that shouldn't be removed as well). This could lead to the wallet creating invalid transactions, trying to double spend utxos.\r\nThe bug persists when the conflicting tx was mined, because the wallet trusts its internal accounting instead of calling `AddToSpends` again.\r\n\r\nThe added test should fail on master.",
-      "state": "open",
-      "user": "mzumsande",
-      "created_at": "2026-01-21T02:40:34Z",
-      "updated_at": "2026-01-22T15:04:58Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34358",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 565,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3196671528,
       "number": 34375,
       "title": "doc: mempool: fix  `removeUnchecked` incorrect comment",
@@ -5280,31 +5426,6 @@
         "drama_keywords": 1,
         "positive_keywords": 0,
         "text_length": 111,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3193557787,
-      "number": 34359,
-      "title": "test: add test for rebroadcast of transaction received via p2p",
-      "body": "The wallet doesn't only rebroadcast transactions it created, but also relevant transactions received via p2p. \r\nSince this is not self-evident, add test coverage for it.\r\n\r\nWill keep this in draft for now, because the added test fails intermittently on master. After debugging this I think it is due to a wallet bug, which is fixed in the separate PR #34358.",
-      "state": "open",
-      "user": "mzumsande",
-      "created_at": "2026-01-21T02:42:05Z",
-      "updated_at": "2026-01-22T12:03:38Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34359",
-      "labels": [
-        "Tests",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 421,
         "has_nack": false,
         "has_ack": false
       }
@@ -5809,30 +5930,6 @@
       }
     },
     {
-      "id": 3195808515,
-      "number": 34371,
-      "title": "wallet: allow importprunedfunds for spending transactions",
-      "body": "`importprunedfunds` only accepted receiving transactions (via `IsMine`).\r\nAdd `IsFromMe` to also accept spending transactions.\r\n\r\nTest covers a transaction with wallet inputs but no wallet outputs.\r\n\r\nFixes #21647",
-      "state": "open",
-      "user": "8144225309",
-      "created_at": "2026-01-21T15:54:39Z",
-      "updated_at": "2026-01-21T15:55:23Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34371",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 271,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2797425845,
       "number": 33300,
       "title": "fuzz: compact block harness",
@@ -5997,31 +6094,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 585,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 837470043,
-      "number": 24230,
-      "title": "indexes: Stop using node internal types and locking cs_main, improve sync logic",
-      "body": "This PR lets indexing code mostly run outside of the node process. It also improves indexing sync logic, which is moved out of indexing code to a new [`node::SyncChain()`](https://github.com/ryanofsky/bitcoin/blob/cf6d99bed842361fb06986780097fb80c9e879e4/src/node/chain.h#L21-L36) function.\r\n\r\nAlmost all the commits in this PR are small refactoring changes that move code from `src/index/` to `src/node/`, or replace references to node types like `CBlockIndex`, `CChain`, `CChainState` in index code. There are only two commits affecting indexing sync logic which make complicated or substantive changes:\r\n\r\n- [`8862eddeb68b` indexes: Rewrite chain sync logic, simplify index sync code](https://github.com/bitcoin/bitcoin/pull/24230/commits/8862eddeb68b8871421e8aa4e69c7fa567df4da5)\r\n- [`f458cf8a4ce1` indexes: Initialize indexes without holding cs_main](https://github.com/bitcoin/bitcoin/pull/24230/commits/f458cf8a4ce1c9a21633439122df929dbee53946)\r\n\r\nThe commit messages have more details about these and other changes. Followups to this PR will reuse indexing sync code for wallets (#15719, #11756) and let indexes run in separate processes (#10102)",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2022-02-01T16:56:28Z",
-      "updated_at": "2026-01-21T12:11:18Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/24230",
-      "labels": [
-        "UTXO Db and Indexes",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1234,
         "has_nack": false,
         "has_ack": false
       }
@@ -7618,33 +7690,48 @@
         "has_nack": false,
         "has_ack": true
       }
-    },
+    }
+  ],
+  "issues": [
     {
-      "id": 3139411374,
-      "number": 34186,
-      "title": "test: use dynamic port allocation in proxy tests",
-      "body": "Use `port=0` for dynamic port allocation in test framework components to avoid intermittent \"address already in use\" errors when running tests concurrently or when ports are stuck in TIME_WAIT state. Example: https://github.com/bitcoin/bitcoin/pull/29415#discussion_r2634509304\r\n\r\nChanges:\r\n\r\n  - Update `socks5.py` and `p2p.py` to support dynamic port allocation\r\n  - Convert `feature_proxy.py` and `feature_anchors.py` to use `port=0`",
-      "state": "closed",
-      "user": "w0xlt",
-      "created_at": "2025-12-31T17:03:39Z",
-      "updated_at": "2026-01-19T08:18:02Z",
-      "merged_at": "2026-01-14T22:40:20Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34186",
+      "id": 97306228,
+      "number": 6476,
+      "title": "Does not use bind to local address for outgoing connections",
+      "body": "I have several IPv4 / IPv6 addresses on a host and I wish to use a specific one. So I set up the bind so it would use that.  It seems to be using that for the bind() in the listen socket but not for the outgoing connections.\n\nI've tried settings externalip.  That only seems to change the \"localaddresses\" returned by getnetworkinfo. I'm guessing that's mostly useful for NAT.\n",
+      "state": "open",
+      "user": "kroeckx",
+      "created_at": "2015-07-26T10:38:32Z",
+      "updated_at": "2026-01-26T04:30:37Z",
+      "closed_at": null,
+      "comments": 14,
+      "url": "https://github.com/bitcoin/bitcoin/issues/6476",
       "labels": [
-        "Tests"
+        "Feature",
+        "P2P"
+      ],
+      "comment_data": [
+        {
+          "id": 3797857241,
+          "user": "8144225309",
+          "body": "I'm running 3 node implementations: Core, Knots, and Libre on one VPS with symlinked blocks, so I would benefit from this feature directly.  I'm going to do some reviews then take a crack at this unless someone else is still interested, or if anyone wants to share ideas for this.",
+          "created_at": "2026-01-26T04:30:37Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 1,
+            "text_length": 280,
+            "has_nack": false,
+            "has_ack": true
+          }
+        }
       ],
       "drama_signals": {
         "drama_keywords": 0,
         "positive_keywords": 0,
-        "text_length": 485,
+        "text_length": 437,
         "has_nack": false,
         "has_ack": false
       }
-    }
-  ],
-  "issues": [
+    },
     {
       "id": 2802353222,
       "number": 31702,
@@ -8982,19 +9069,6 @@
       "labels": [],
       "comment_data": [
         {
-          "id": 3766997226,
-          "user": "maflcko",
-          "body": "Usually the issue tracker is used to track technical issues related to the Bitcoin Core code base.\n\nMeta tracking of meta metrics seems ideal to do elsewhere.\n\n\nThere is https://groups.google.com/g/bitcoindev, or https://delvingbitcoin.org/, or any other place that you feel is well suited.\n",
-          "created_at": "2026-01-19T08:09:14Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 291,
-            "has_nack": false,
-            "has_ack": true
-          }
-        },
-        {
           "id": 3767744433,
           "user": "maflcko",
           "body": "<img width=\"767\" height=\"805\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/c9ab4538-59df-495c-ad22-cfe55d36d2d2\" />\n\nAlso, looking at the LFX retention metric, it seems mostly stable over the last decade, and at least this (highly volatile) metric did not seem to worsen over the timespan.",
@@ -9263,19 +9337,6 @@
       ],
       "comment_data": [
         {
-          "id": 3767024448,
-          "user": "maflcko",
-          "body": "From the netinet/in.h:\n\n\n```\n/*\n * Local port number conventions:\n *\n * When a user does a bind(2) or connect(2) with a port number of zero,\n * a non-conflicting local port address is chosen.\n * The default range is IPPORT_HIFIRSTAUTO through\n * IPPORT_HILASTAUTO, although that is settable by sysctl.\n *\n * A user may set the IPPROTO_IP option IP_PORTRANGE to change this\n * default assignment range.\n *\n * The value IP_PORTRANGE_DEFAULT causes the default behavior.\n *\n * The value IP_PORTRANGE_HIGH changes the range of candidate port numbers\n * into the \"high\" range.  These are reserved for client outbound connections\n * which do not want to be filtered by any firewalls.\n *\n * The value IP_PORTRANGE_LOW changes the range to the \"low\" are\n * that is (by convention) restricted to privileged processes.  This\n * convention is based on \"vouchsafe\" principles only.  It is only secure\n * if you trust the remote host to restrict these ports.\n *\n * The default range of ports and the high range can be changed by\n * sysctl(3).  (net.inet.ip.portrange.{hi,low,}{first,last})\n *\n * Changing those values has bad security implications if you are\n * using a stateless firewall that is allowing packets outside of that\n * range in order to allow transparent outgoing connections.\n *\n * Such a firewall configuration will generally depend on the use of these\n * default values.  If you change them, you may find your Security\n * Administrator looking for you with a heavy object.\n *\n * For a slightly more orthodox text view on this:\n *\n *            ftp://ftp.isi.edu/in-notes/iana/assignments/port-numbers\n *\n *    port numbers are divided into three ranges:\n *\n *                0 -  1023 Well Known Ports\n *             1024 - 49151 Registered Ports\n *            49152 - 65535 Dynamic and/or Private Ports\n *\n */\n\n/*\n * Ports < IPPORT_RESERVED are reserved for\n * privileged processes (e.g. root).         (IP_PORTRANGE_LOW)\n */\n#define\tIPPORT_RESERVED\t\t1024\n\n/*\n * Default local port range, used by IP_PORTRANGE_DEFAULT\n */\n#define IPPORT_EPHEMERALFIRST\t10000\n#define IPPORT_EPHEMERALLAST\t65535\n\n/*\n * Dynamic port range, used by IP_PORTRANGE_HIGH.\n */\n#define\tIPPORT_HIFIRSTAUTO\t49152\n#define\tIPPORT_HILASTAUTO\t65535\n```\n\n\nSo I guess this may have been broken after https://github.com/bitcoin/bitcoin/pull/34186?",
-          "created_at": "2026-01-19T08:17:19Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 2316,
-            "has_nack": false,
-            "has_ack": true
-          }
-        },
-        {
           "id": 3767119641,
           "user": "w0xlt",
           "body": "Yes, possibly. FreeBSD’s ephemeral port range (10000–65535) overlaps with the test framework’s static port range (11000–26000).\nSetting `TEST_RUNNER_PORT_MIN=2000` in the external bitcoin-core-nightly FreeBSD CI workflow should mitigate this.",
@@ -9425,19 +9486,6 @@
       "url": "https://github.com/bitcoin/bitcoin/issues/34332",
       "labels": [],
       "comment_data": [
-        {
-          "id": 3766038703,
-          "user": "MattDHill",
-          "body": "This can only be a hardware issue, either extremely slow disk or not enought RAM. There are no known issues related to Bitcoin sync on StartOS. To confirm you can flash the hardware with another other Linux distro and sync.",
-          "created_at": "2026-01-19T01:35:13Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 223,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
         {
           "id": 3768153373,
           "user": "yancyribbens",
@@ -9613,9 +9661,9 @@
     }
   ],
   "summary": {
-    "total_prs": 320,
-    "total_issues": 49,
-    "total_comments": 57,
+    "total_prs": 322,
+    "total_issues": 50,
+    "total_comments": 55,
     "unique_participants": 114
   }
 }
