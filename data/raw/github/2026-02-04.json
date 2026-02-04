@@ -1,12 +1,469 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-02-04T01:27:03.689048+00:00",
+  "fetched_at": "2026-02-04T08:33:55.770268+00:00",
   "date_range": {
-    "since": "2026-01-28T01:27:03.688973+00:00",
-    "until": "2026-02-04T01:27:03.688973+00:00"
+    "since": "2026-01-28T08:33:55.770197+00:00",
+    "until": "2026-02-04T08:33:55.770197+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3239243501,
+      "number": 34489,
+      "title": "index: batch db writes during initial sync",
+      "body": "Decouples part of #26966.\r\n\r\nRight now, index initial sync writes to disk for every block, which is not the best for HDD. This change batches those, so disk writes are less frequent during initial sync. This also cuts down `cs_main` contention by reducing the number of `NextBlockSync` calls (instead of calling it for every block, we will call it once per block window), making the node more responsive (IBD and validation) while indexes sync up. On top of that, it lays the groundwork for the bigger speedups, since part of the parallelization pre-work is already in place.\r\n\r\nJust as a small summary:\r\n\r\n* Batch DB writes instead of flushing per block, which improves sync time on HDD due to the reduced number of disk write operations.\r\n* Reduce `cs_main` lock contention, which improves the overall node responsiveness (and primarily IBD) while the indexes threads are syncing.\r\n* Lays the groundwork for the real speedups, since part of #26966 parallelization pre-work is introduced here as well.\r\n\r\nNote:\r\nPending initial sync benchmark and further testing. I have only focused on decoupling and simplifying what was in #26966 first. Commits should be simple to diggest.",
+      "state": "open",
+      "user": "furszy",
+      "created_at": "2026-02-03T04:06:34Z",
+      "updated_at": "2026-02-04T08:33:44Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34489",
+      "labels": [
+        "UTXO Db and Indexes",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1220,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3244762665,
+      "number": 34498,
+      "title": "iwyu: Fix patch to prefer `<cstdint>`",
+      "body": "The goal of the [patch](https://github.com/bitcoin/bitcoin/blob/master/ci/test/01_iwyu.patch) is to suggest C++ headers rather than their C counterparts. However, for fixed width integer types, the patched IWYU currently suggests `<cinttypes>` where `<cstdint>` is sufficient.\r\n\r\nThis PR fixes this behavior.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2026-02-04T08:31:42Z",
+      "updated_at": "2026-02-04T08:32:00Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34498",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 346,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3181854676,
+      "number": 34320,
+      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
+      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the db.\r\nOne tries to deserialize, the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin` which delegates to `GetCoin`) and simplify `CCoinsViewCache::HaveCoin` to use `AccessCoin`.\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the database's `::GetCoin` (not `::HaveCoin`) on cache miss and checks cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: the latest version of the change keeps most `HaveCoin` calls for convenience, a previous version removed all of them.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-16T16:17:29Z",
+      "updated_at": "2026-02-04T08:27:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
+      "labels": [
+        "UTXO Db and Indexes",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1238,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3228775708,
+      "number": 34465,
+      "title": "refactor: separate log generation from log handling",
+      "body": "This is a mostly move-only change. It's a small refactoring that allows logging macros to be used by including a simple `util/log.h` header instead of the full `logging.h` logging implementation.\r\n\r\nOriginal motivation for this change was to reduce the size and complexity of #34374 (kernel structured logging PR) and reduce the number of conflicts it causes with other PRs. But this should also make sense as a standalone change to have a clearer separation of concerns between log generation and log handling, and avoid needing to depend on the whole logging framework in call sites that only emit log messages.\r\n\r\nRecommended to review with `--color-moved=dimmed-zebra --color-moved-ws=ignore-all-space`",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2026-01-30T17:59:41Z",
+      "updated_at": "2026-02-04T08:23:07Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34465",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 758,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2929620815,
+      "number": 33661,
+      "title": "test: Add test on skip heights in CBlockIndex",
+      "body": "The skip height values, used by `CBlockIndex::BuildSkip()` and `GetSkipHeight` are not tested and not well documented. (noticed while reviewing #33515, recently merged).\r\n\r\nThe motivation is to document the skip value computation through a test.\r\n\r\nThe first commit adds a test for the properties of the distribution of skip values, namely that they have non-uniform distribution: most values are small but there are some large ones as well.\r\n\r\nThe second commit adds low-level tests to the `GetSkipHeight()` internal method. The tests are low level, thus of limited value, and the commit also touches the non-test code minimally (to make the method accessible). Therefore this commit has lower priority.\r\n",
+      "state": "open",
+      "user": "optout21",
+      "created_at": "2025-10-20T12:08:37Z",
+      "updated_at": "2026-02-04T08:19:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33661",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 752,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3229673183,
+      "number": 34467,
+      "title": "net: don't perform network activity when networkactive=0",
+      "body": "## Problem\r\nWhen starting bitcoind with `-networkactive=0`, the node still performs various network activities despite the user explicitly requesting that the P2P network be inactive. This results in unnecessary log messages and network overhead:\r\n\r\n- `[addrman] Selected IP:PORT from tried` - Address manager selections\r\n- `[net:error] Could not get best interface for default route` - Gateway detection attempts\r\n- `[tor] Error connecting to Tor control socket` - Tor control connection attempts\r\n- `[tor] Not connected to Tor control port` - Tor reconnection attempts\r\n- `[net] portmap: Could not determine IPv4/IPv6 default gateway` - UPnP/NAT-PMP attempts\r\n\r\nThis defeats the purpose of the `-networkactive` flag, which is documented as \"Enable all P2P network activity (default: 1)\".\r\n\r\n### Steps to Reproduce\r\n1. Start bitcoind with `bitcoind.exe -networkactive=0`\r\n2. Observe logs - despite the flag being set to disable network activity, addrman selections and network-related errors are logged\r\n\r\n### Expected Behavior\r\nNo network activity should occur when `-networkactive=0` is set at startup. The node should remain idle until network is activated via RPC command `setnetworkactive true`.\r\n\r\n## Solution\r\nThis PR ensures that when `networkactive=0`, no network initialization or activity occurs by:\r\n\r\n### 1. **ThreadOpenConnections (src/net.cpp)**\r\nAdded a check at the beginning of the main while loop to pause all outbound connection logic when `fNetworkActive` is false. This prevents:\r\n- Address selection from addrman\r\n- Connection attempts to peers\r\n- Feeler connections\r\n- Block relay connection attempts\r\n\r\nThis check follows the existing pattern used for DNS seed querying (lines 2345-2349) and uses the same synchronization mechanism (`fNetworkActive` atomic flag and `sleep_for` with interruption support).\r\n\r\n### 2. **StartMapPort (src/init.cpp)**\r\nMade NAT-PMP port mapping startup conditional on `-networkactive` being true. This prevents:\r\n- Port mapping initialization\r\n- Gateway detection attempts\r\n- Related network errors and log spam\r\n\r\n### 3. **StartTorControl (src/init.cpp)**\r\nMade Tor control thread startup conditional on `-networkactive` being true. This prevents:\r\n- Tor control socket connection attempts\r\n- Tor-related error logs\r\n- Unnecessary event loop setup\r\n\r\n## Testing\r\nThe fix has been verified to:\r\n- Compile without errors or warnings\r\n- Follow existing code patterns and conventions used in the same functions\r\n- Use the same argument parsing method as existing code (`args.GetBoolArg(\"-networkactive\", true)`)\r\n- Respect the interruption mechanism used throughout the codebase\r\n\r\n### Manual Testing\r\n```bash\r\n# Start with networkactive=0 - should see no network activity logs\r\nbitcoind -networkactive=0\r\n\r\n# Start with networkactive=1 (default) - normal behavior\r\nbitcoind\r\n```\r\n\r\nAffected Code Paths\r\n`src/net.cpp: CConnman::ThreadOpenConnections()` - Main connection management loop\r\n`src/init.cpp` Bitcoin Core initialization - MapPort and TorControl startup\r\n\r\nNotes\r\nThis change is backward compatible - default behavior (networkactive=1) is unchanged\r\nDynamic network activation via setnetworkactive true RPC will resume ThreadOpenConnections activity\r\nMapPort and TorControl remain stopped if started with networkactive=0 (can be addressed in follow-up if needed for dynamic activation)\r\n\r\nFixes #34190",
+      "state": "open",
+      "user": "saksham-1304",
+      "created_at": "2026-01-30T23:44:08Z",
+      "updated_at": "2026-02-04T08:10:28Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34467",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 3421,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2972930823,
+      "number": 33772,
+      "title": "prevector: simplify implementation of comparison operators and match behavior of `std::vector`",
+      "body": "The reduced amount of code reduces maintenance. Providing `prevector::operator<=>` allows classes that are implemented in terms of `prevector` to use the compiler provided `operator<=>`.\r\n\r\nHowever, **there is a breaking change**!\r\n\r\nThe old implementation claims to be a drop-in replacement for `std::vector`. However, the implementation for `operator<` is different when comparing two vectors of different length, as can be presented with the following code:\r\n\r\n```cpp\r\nint main()\r\n{\r\n    auto const v12 = std::vector{1, 2};\r\n    auto const v3 = std::vector{3};\r\n\r\n    auto const pv12 = prevector<4, int>(v12.begin(), v12.end());\r\n    auto const pv3 = prevector<4, int>(v3.begin(), v3.end());\r\n\r\n    assert((v12 < v3) == (pv12 < pv3));\r\n}\r\n```\r\n\r\nWith the old implementation of `prevector`, the assertion fails. With my change, it passes.\r\nI ask the reviewers to confirm whether this change in behavior is acceptable or not.",
+      "state": "open",
+      "user": "purpleKarrot",
+      "created_at": "2025-11-03T14:23:43Z",
+      "updated_at": "2026-02-04T08:00:30Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33772",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 1021,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3210348402,
+      "number": 34410,
+      "title": "test: let connections happen in any order in p2p_private_broadcast.py",
+      "body": "If the following two events happen:\r\n\r\n* (likely) the automatic 10 initial connections are not made to all \r\n  networks\r\n* (unlikely) the network-specific logic kicks in almost immediately.\r\n  It is using exponential distribution with a mean of 5 minutes\r\n  (`rng.rand_exp_duration(EXTRA_NETWORK_PEER_INTERVAL)`).\r\n\r\nSo if both happen, then the 11th connection may not be the expected\r\nprivate broadcast, but a network-specific connection.\r\n\r\nFix this by retrieving the connection type from\r\n`destinations_factory()`. This is more flexible because it allows\r\nconnections to happen in any order and does not break if e.g. the 11th\r\nconnection is not the expected first private broadcast.\r\n\r\nThis also makes the test run faster:\r\nbefore: 19-44 sec \r\nnow: 10-25 sec \r\nbecause for example there is no need to wait for the initial 10\r\nautomatic outbound connections to be made in order to proceed.\r\n\r\nFixes: https://github.com/bitcoin/bitcoin/issues/34387\r\n",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-01-26T12:05:26Z",
+      "updated_at": "2026-02-04T07:52:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34410",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1022,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2550873429,
+      "number": 32636,
+      "title": "Split `CWallet::Create()` into `CreateNew` and `LoadExisting`",
+      "body": "This PR is mostly a refactor which splits out logic used for creating wallets and for loading wallets, both of which are presently contained in `CWallet::Create()` into `CWallet::CreateNew()` and `CWallet::LoadExisting()`\r\n\r\nThe real win of this PR is that `CWallet::Create()` uses a very bad heuristic for trying to guess whether or not it is supposed to be creating a new wallet or loading an existing wallet:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/370c59261269fd9043674e0f4fd782a89e724473/src/wallet/wallet.cpp#L2882-L2885\r\n\r\nThis heuristic assumes that wallets with no `ScriptPubKeyMans` are being created, which sounds reasonable, but as demonstrated in #32112 and #32111, this can happen when the user tries to load a wallet file that is corrupted, both issues are fixed by this PR and any other misbehavior for wallet files which succeeded the broken heuristic's sniff test for new wallets.\r\n\r\nIt was already the case that every caller of `CWallet::Create()` knows whether it is creating a wallet or loading one, so we can avoid replacing this bad heuristic with another one, and just shift the burden to the caller.",
+      "state": "open",
+      "user": "davidgumberg",
+      "created_at": "2025-05-29T00:37:09Z",
+      "updated_at": "2026-02-04T07:48:04Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32636",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1189,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3224701572,
+      "number": 34451,
+      "title": "rpc: fix race condition in gettxoutsetinfo",
+      "body": "Fixes #34263\r\n\r\nA `CHECK_NONFATAL` assertion failure could occur in `gettxoutsetinfo` when a new block was connected between capturing `pindex` and validating it in `GetUTXOStats()`.\r\n\r\nThe fix removes the early `pindex` capture since `ComputeUTXOStats()` independently fetches the current best block under lock. The response now uses `stats.hashBlock` and `stats.nHeight` (the actual computed values) instead of the potentially stale `pindex`.",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2026-01-29T18:57:02Z",
+      "updated_at": "2026-02-04T07:47:14Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34451",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 487,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3176535463,
+      "number": 34299,
+      "title": "wallet: remove PreSelectedInputs and re-activate \"AmountWithFeeExceedsBalance\" error",
+      "body": "picks up https://github.com/bitcoin/bitcoin/pull/25269.\r\n\r\nThis PR re-implements the code path so that an error message is thrown when a transaction's total amount (including fees) exceeds the available balance. It also refactors the wallet's coin selection code.\r\n\r\n1. the first 3 commits are unrelated to the code but few small bug fixes which are nice to fix. but also kind of impacts the remaining logic. (could PR separately if reviewers wish)\r\n\t1. c467325aaf187d7f056bb1ea1cec6b7c4250af2e: make `total_effective_amount` optional actually optional\r\n\t2. 2202ab597596c84fc49f8784e823372b7a9efcbe: ensure `set<shared_ptr<COutput>>` has unique COutput\r\n\t3. a5ffbbf122d66fc4ad9b2e7c6d7d1dfa1816388e: Correctly reserve size when flattening `CoinsResult.coins` map to vector\r\n\r\n3. the next 3 commits from 4745d5480ca5c3809edd51140e4d2c0433582844 replace the `PreSelectedInputs` struct with `CoinsResult` and removes `PreSelectedInputs`.\r\n\r\n4. the last commit (e664484a6d34c1795ebb0925ab31faea5d64ab00) deals with the error message - `AmountWithFeeExceedsBalance` error inside `WalletModel::prepareTransaction` is never thrown and remains an unused code path. This is because `createTransaction` does not retrieve the fee when the process fails. The fee return arg is set only at the end of the process, when the transaction is successfully created. Therefore, if the transaction creation fails, the fee is not available inside `WalletModel::prepareTransaction` to trigger the `AmountWithFeeExceedsBalance` error.\r\n\r\nThis PR re-implements the feature inside `CreateTransactionInternal` and adds test coverage for it.\r\n\r\n| on master | on PR |\r\n|-----------|-------|\r\n| <img src=\"https://github.com/user-attachments/assets/a903e687-2466-42c7-b898-5dec24bfe515\" width=\"750\" alt=\"Insufficient funds\" /> | <img src=\"https://github.com/user-attachments/assets/74bb3c83-6132-4c09-91f0-0a446618b3c8\" width=\"750\" alt=\"AmountWithFeeExceedsBalance\" /> |\r\n\r\nthe unreachable code path is removed in https://github.com/bitcoin-core/gui/pull/807 which requires this PR.\r\n",
+      "state": "open",
+      "user": "stratospher",
+      "created_at": "2026-01-15T09:06:21Z",
+      "updated_at": "2026-02-04T07:17:59Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34299",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2138,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3236363653,
+      "number": 34479,
+      "title": "fuzz: Add and use NodeClockContext",
+      "body": "Iterating over fuzz inputs will usually be done in the same process. As the mocktime is global, it can theoretically leak from one fuzz input run into the next run, making it less deterministic.\r\n\r\nFix this issue, by adding and using a context manager to handle the mocktime and reset it before the end.\r\n\r\nThis refactor should not change any behavior.",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-02-02T12:36:06Z",
+      "updated_at": "2026-02-04T07:05:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34479",
+      "labels": [
+        "Fuzzing"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 387,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3237226837,
+      "number": 34483,
+      "title": "refactor: Use SpanReader over DataStream",
+      "body": "This changes all places, where possible, to use SpanReader over DataStream. This makes the code easier to read and reason about, because `SpanReader` can never write data. Also, the code should be minimally faster, because it avoids a full redundant copy of the whole vector of bytes.",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-02-02T15:54:28Z",
+      "updated_at": "2026-02-04T07:01:34Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34483",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 325,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3241050380,
+      "number": 34491,
+      "title": "ci: add FreeBSD Clang cross job",
+      "body": "Alternative to #33562, which was adding a native FreeBSD job; however that had issues with permissions/caching, as well as potential determinism issues. This adds a FreeBSD cross job using Linux and Clang.\r\n\r\nThis is using FreeBSD 14,3, which avoids the issue in #34093.\r\n\r\nWould close #33438. The same changes here could also be used to produce FreeBSD binaries out of Guix.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-02-03T12:28:36Z",
+      "updated_at": "2026-02-04T06:56:40Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34491",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 407,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3096470479,
+      "number": 34057,
+      "title": "test: add tests for cluster chunks",
+      "body": "Add tests for cluster chunks, including:\r\n    - GetWorstMainChunk() tests, which picks the worst chunk from txgraph.\r\n    - GetCurrentChunk(), which returns chunks in linearization order after calling it iteratively.\r\n",
+      "state": "open",
+      "user": "HowHsu",
+      "created_at": "2025-12-12T13:04:16Z",
+      "updated_at": "2026-02-04T06:49:39Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34057",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 253,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3237671040,
+      "number": 34486,
+      "title": "net: Reduce local network activity when networkactive=0",
+      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/34190\r\n\r\nWhen `networkactive=0` is set, NAT-PMP port mapping and Tor **control connections**\r\nstill run in the background, mapping ports and logging retry attempts despite\r\nthe node being \"inactive.\"\r\n\r\nThis wires both subsystems to CConnman::SetNetworkActive so they start and stop\r\nwith the network state:\r\n\r\n- mapport: EnableMapPort is injected as a callback via CConnman::Options.\r\n  SetNetworkActive and SetMapPortEnabled both gate on network state.\r\n\r\n- torcontrol: is injected similarly. The callback dispatches onto the tor event loop via \r\n  event_base_once to respect thread ownership. `EVLOOP_NO_EXIT_ON_EMPTY` is \r\n  used to keep the event loop alive without keepalive timers, so the controller starts disconnected and waits for CConnman::Start() to signal.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2026-02-02T17:46:47Z",
+      "updated_at": "2026-02-04T06:48:38Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34486",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 873,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3238039267,
+      "number": 34488,
+      "title": "refactor: Small style and test fixups for bitcoinkernel",
+      "body": "Just some small style and test fixups after https://github.com/bitcoin/bitcoin/pull/30595#pullrequestreview-3420542946",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-02-02T19:53:48Z",
+      "updated_at": "2026-02-04T06:35:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34488",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 174,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3239542097,
+      "number": 34490,
+      "title": "wallet: Follow-ups to create/load split (#32636)",
+      "body": "This adds documentation for `PopulateWalletFromDB()` and improves documentation for `LoadExisting()` and `CreateNew()`, addressing issues reviewers pointed in #32636.",
+      "state": "open",
+      "user": "davidgumberg",
+      "created_at": "2026-02-03T06:02:55Z",
+      "updated_at": "2026-02-04T06:08:53Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34490",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 215,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3243034362,
+      "number": 34495,
+      "title": "Replace boost signals with minimal compatible implementation",
+      "body": "This drops our dependency on `boost::signals2`, leaving `boost::multi_index` as the only remaining boost dependency for bitcoind.\r\n\r\n`boost::signals2` is a complex beast, but we only use a small portion of it. Namely: it's a way for multiple subscribers to connect to the same event, and the ability to later disconnect individual subscribers from that event.\r\n\r\n`btcsignals` adheres to the subset of the `boost::signals2` API that we currently use, and thus is a drop-in replacement. Rather than implementing a complex `slot` tracking class that we never used anyway (and which was much more useful in the days before std::function existed), callbacks are simply wrapped directly in `std::function`s.\r\n\r\nThe new tests work with either `boost::signals2` or the new `btcsignals` implementation. Reviewers can verify\r\nfunctional equivalency by running the tests in the commit that introduces them against `boost::signals2`, then again with `btcsignals`.\r\n\r\nThe majority of the commits in this PR are preparation and cleanup. Once `boost::signals2` is no longer needed, it is removed from depends. Additionally, a few CMake targets no longer need boost includes as they were previously only required for signals.\r\n\r\nI think this is actually pretty straightforward to review. I kept things simple, including keeping types unmovable/uncopyable where possible rather than trying to define those semantics. In doing so, the new implementation has even fewer type requirements than boost, which I believe is due to a boost bug. I've opened a PR upstream for that to attempt to maintain parity between the implementations.\r\n\r\nSee individual commits for more details.",
+      "state": "open",
+      "user": "theuni",
+      "created_at": "2026-02-03T21:27:43Z",
+      "updated_at": "2026-02-04T05:05:31Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34495",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1718,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
     {
       "id": 344943058,
       "number": 17580,
@@ -29,30 +486,6 @@
         "text_length": 1763,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3181854676,
-      "number": 34320,
-      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
-      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the db.\r\nOne tries to deserialize, the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin` which delegates to `GetCoin`) and simplify `CCoinsViewCache::HaveCoin` to use `AccessCoin`.\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the database's `::GetCoin` (not `::HaveCoin`) on cache miss and checks cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: the latest version of the change keeps most `HaveCoin` calls for convenience, a previous version removed all of them.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-16T16:17:29Z",
-      "updated_at": "2026-02-04T01:06:32Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1238,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -80,55 +513,6 @@
       }
     },
     {
-      "id": 3236363653,
-      "number": 34479,
-      "title": "fuzz: Add and use NodeClockContext",
-      "body": "Iterating over fuzz inputs will usually be done in the same process. As the mocktime is global, it can theoretically leak from one fuzz input run into the next run, making it less deterministic.\r\n\r\nFix this issue, by adding and using a context manager to handle the mocktime and reset it before the end.\r\n\r\nThis refactor should not change any behavior.",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-02-02T12:36:06Z",
-      "updated_at": "2026-02-03T23:52:58Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34479",
-      "labels": [
-        "Fuzzing"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 387,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3224701572,
-      "number": 34451,
-      "title": "rpc: fix race condition in gettxoutsetinfo",
-      "body": "Fixes #34263\r\n\r\nA `CHECK_NONFATAL` assertion failure could occur in `gettxoutsetinfo` when a new block was connected between capturing `pindex` and validating it in `GetUTXOStats()`.\r\n\r\nThe fix removes the early `pindex` capture since `ComputeUTXOStats()` independently fetches the current best block under lock. The response now uses `stats.hashBlock` and `stats.nHeight` (the actual computed values) instead of the potentially stale `pindex`.",
-      "state": "open",
-      "user": "w0xlt",
-      "created_at": "2026-01-29T18:57:02Z",
-      "updated_at": "2026-02-03T23:39:27Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34451",
-      "labels": [
-        "RPC/REST/ZMQ",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 487,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3184839812,
       "number": 34329,
       "title": "rpc,net: Add private broadcast RPCs",
@@ -151,31 +535,6 @@
       }
     },
     {
-      "id": 2972930823,
-      "number": 33772,
-      "title": "prevector: simplify implementation of comparison operators and match behavior of `std::vector`",
-      "body": "The reduced amount of code reduces maintenance. Providing `prevector::operator<=>` allows classes that are implemented in terms of `prevector` to use the compiler provided `operator<=>`.\r\n\r\nHowever, **there is a breaking change**!\r\n\r\nThe old implementation claims to be a drop-in replacement for `std::vector`. However, the implementation for `operator<` is different when comparing two vectors of different length, as can be presented with the following code:\r\n\r\n```cpp\r\nint main()\r\n{\r\n    auto const v12 = std::vector{1, 2};\r\n    auto const v3 = std::vector{3};\r\n\r\n    auto const pv12 = prevector<4, int>(v12.begin(), v12.end());\r\n    auto const pv3 = prevector<4, int>(v3.begin(), v3.end());\r\n\r\n    assert((v12 < v3) == (pv12 < pv3));\r\n}\r\n```\r\n\r\nWith the old implementation of `prevector`, the assertion fails. With my change, it passes.\r\nI ask the reviewers to confirm whether this change in behavior is acceptable or not.",
-      "state": "open",
-      "user": "purpleKarrot",
-      "created_at": "2025-11-03T14:23:43Z",
-      "updated_at": "2026-02-03T23:26:07Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33772",
-      "labels": [
-        "Utils/log/libs",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 1021,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 1940576733,
       "number": 30342,
       "title": "kernel, logging: Pass Logger instances to kernel objects",
@@ -195,30 +554,6 @@
         "text_length": 1357,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3243034362,
-      "number": 34495,
-      "title": "Replace boost signals with minimal compatible implementation",
-      "body": "This drops our dependency on `boost::signals2`, leaving `boost::multi_index` as the only remaining boost dependency for bitcoind.\r\n\r\n`boost::signals2` is a complex beast, but we only use a small portion of it. Namely: it's a way for multiple subscribers to connect to the same event, and the ability to later disconnect individual subscribers from that event.\r\n\r\n`btcsignals` adheres to the subset of the `boost::signals2` API that we currently use, and thus is a drop-in replacement. Rather than implementing a complex `slot` tracking class that we never used anyway (and which was much more useful in the days before std::function existed), callbacks are simply wrapped directly in `std::function`s.\r\n\r\nThe new tests work with either `boost::signals2` or the new `btcsignals` implementation. Reviewers can verify\r\nfunctional equivalency by running the tests in the commit that introduces them against `boost::signals2`, then again with `btcsignals`.\r\n\r\nThe majority of the commits in this PR are preparation and cleanup. Once `boost::signals2` is no longer needed, it is removed from depends. Additionally, a few CMake targets no longer need boost includes as they were previously only required for signals.\r\n\r\nI think this is actually pretty straightforward to review. I kept things simple, including keeping types unmovable/uncopyable where possible rather than trying to define those semantics. In doing so, the new implementation has even fewer type requirements than boost, which I believe is due to a boost bug. I've opened a PR upstream for that to attempt to maintain parity between the implementations.\r\n\r\nSee individual commits for more details.",
-      "state": "open",
-      "user": "theuni",
-      "created_at": "2026-02-03T21:27:43Z",
-      "updated_at": "2026-02-03T23:06:09Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34495",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1718,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -270,55 +605,6 @@
       }
     },
     {
-      "id": 3176535463,
-      "number": 34299,
-      "title": "wallet: remove PreSelectedInputs and re-activate \"AmountWithFeeExceedsBalance\" error",
-      "body": "picks up https://github.com/bitcoin/bitcoin/pull/25269.\r\n\r\nThis PR re-implements the code path so that an error message is thrown when a transaction's total amount (including fees) exceeds the available balance. It also refactors the wallet's coin selection code.\r\n\r\n1. the first 3 commits are unrelated to the code but few small bug fixes which are nice to fix. but also kind of impacts the remaining logic. (could PR separately if reviewers wish)\r\n\t1. c467325aaf187d7f056bb1ea1cec6b7c4250af2e: make `total_effective_amount` optional actually optional\r\n\t2. 2202ab597596c84fc49f8784e823372b7a9efcbe: ensure `set<shared_ptr<COutput>>` has unique COutput\r\n\t3. a5ffbbf122d66fc4ad9b2e7c6d7d1dfa1816388e: Correctly reserve size when flattening `CoinsResult.coins` map to vector\r\n\r\n3. the next 3 commits from 4745d5480ca5c3809edd51140e4d2c0433582844 replace the `PreSelectedInputs` struct with `CoinsResult` and removes `PreSelectedInputs`.\r\n\r\n4. the last commit (e664484a6d34c1795ebb0925ab31faea5d64ab00) deals with the error message - `AmountWithFeeExceedsBalance` error inside `WalletModel::prepareTransaction` is never thrown and remains an unused code path. This is because `createTransaction` does not retrieve the fee when the process fails. The fee return arg is set only at the end of the process, when the transaction is successfully created. Therefore, if the transaction creation fails, the fee is not available inside `WalletModel::prepareTransaction` to trigger the `AmountWithFeeExceedsBalance` error.\r\n\r\nThis PR re-implements the feature inside `CreateTransactionInternal` and adds test coverage for it.\r\n\r\n| on master | on PR |\r\n|-----------|-------|\r\n| <img src=\"https://github.com/user-attachments/assets/a903e687-2466-42c7-b898-5dec24bfe515\" width=\"750\" alt=\"Insufficient funds\" /> | <img src=\"https://github.com/user-attachments/assets/74bb3c83-6132-4c09-91f0-0a446618b3c8\" width=\"750\" alt=\"AmountWithFeeExceedsBalance\" /> |\r\n\r\nthe unreachable code path is removed in https://github.com/bitcoin-core/gui/pull/807 which requires this PR.\r\n",
-      "state": "open",
-      "user": "stratospher",
-      "created_at": "2026-01-15T09:06:21Z",
-      "updated_at": "2026-02-03T22:18:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34299",
-      "labels": [
-        "Wallet",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 2138,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3237226837,
-      "number": 34483,
-      "title": "refactor: Use SpanReader over DataStream",
-      "body": "This changes all places, where possible, to use SpanReader over DataStream. This makes the code easier to read and reason about, because `SpanReader` can never write data. Also, the code should be minimally faster, because it avoids a full redundant copy of the whole vector of bytes.",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-02-02T15:54:28Z",
-      "updated_at": "2026-02-03T22:17:10Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34483",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 325,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2170572223,
       "number": 31260,
       "title": "scripted-diff: Type-safe settings retrieval",
@@ -362,30 +648,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1407,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3228775708,
-      "number": 34465,
-      "title": "refactor: separate log generation from log handling",
-      "body": "This is a mostly move-only change. It's a small refactoring that allows logging macros to be used by including a simple `util/log.h` header instead of the full `logging.h` logging implementation.\r\n\r\nOriginal motivation for this change was to reduce the size and complexity of #34374 (kernel structured logging PR) and reduce the number of conflicts it causes with other PRs. But this should also make sense as a standalone change to have a clearer separation of concerns between log generation and log handling, and avoid needing to depend on the whole logging framework in call sites that only emit log messages.\r\n\r\nRecommended to review with `--color-moved=dimmed-zebra --color-moved-ws=ignore-all-space`",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2026-01-30T17:59:41Z",
-      "updated_at": "2026-02-03T22:04:39Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34465",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 758,
         "has_nack": false,
         "has_ack": false
       }
@@ -559,31 +821,6 @@
       }
     },
     {
-      "id": 3239243501,
-      "number": 34489,
-      "title": "index: batch db writes during initial sync",
-      "body": "Decouples part of #26966.\r\n\r\nRight now, index initial sync writes to disk for every block, which is not the best for HDD. This change batches those, so disk writes are less frequent during initial sync. This also cuts down `cs_main` contention by reducing the number of `NextBlockSync` calls (instead of calling it for every block, we will call it once per block window), making the node more responsive (IBD and validation) while indexes sync up. On top of that, it lays the groundwork for the bigger speedups, since part of the parallelization pre-work is already in place.\r\n\r\nJust as a small summary:\r\n\r\n* Batch DB writes instead of flushing per block, which improves sync time on HDD due to the reduced number of disk write operations.\r\n* Reduce `cs_main` lock contention, which improves the overall node responsiveness (and primarily IBD) while the indexes threads are syncing.\r\n* Lays the groundwork for the real speedups, since part of #26966 parallelization pre-work is introduced here as well.\r\n\r\nNote:\r\nPending initial sync benchmark and further testing. I have only focused on decoupling and simplifying what was in #26966 first. Commits should be simple to diggest.",
-      "state": "open",
-      "user": "furszy",
-      "created_at": "2026-02-03T04:06:34Z",
-      "updated_at": "2026-02-03T20:38:31Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34489",
-      "labels": [
-        "UTXO Db and Indexes",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1220,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3138438378,
       "number": 34184,
       "title": "mining: add cooldown to createNewBlock() immediately after IBD",
@@ -603,30 +840,6 @@
         "drama_keywords": 1,
         "positive_keywords": 0,
         "text_length": 906,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3238039267,
-      "number": 34488,
-      "title": "refactor: Small style and test fixups for bitcoinkernel",
-      "body": "Just some small style and test fixups after https://github.com/bitcoin/bitcoin/pull/30595#pullrequestreview-3420542946",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-02-02T19:53:48Z",
-      "updated_at": "2026-02-03T20:28:53Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34488",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 174,
         "has_nack": false,
         "has_ack": false
       }
@@ -767,30 +980,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1218,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3096470479,
-      "number": 34057,
-      "title": "test: add tests for cluster chunks",
-      "body": "Add tests for cluster chunks, including:\r\n    - GetWorstMainChunk() tests, which picks the worst chunk from txgraph.\r\n    - GetCurrentChunk(), which returns chunks in linearization order after calling it iteratively.\r\n",
-      "state": "open",
-      "user": "HowHsu",
-      "created_at": "2025-12-12T13:04:16Z",
-      "updated_at": "2026-02-03T18:13:31Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34057",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 253,
         "has_nack": false,
         "has_ack": false
       }
@@ -1012,30 +1201,6 @@
       }
     },
     {
-      "id": 3241050380,
-      "number": 34491,
-      "title": "ci: add FreeBSD Clang cross job",
-      "body": "Alternative to #33562, which was adding a native FreeBSD job; however that had issues with permissions/caching, as well as potential determinism issues. This adds a FreeBSD cross job using Linux and Clang.\r\n\r\nThis is using FreeBSD 14,3, which avoids the issue in #34093.\r\n\r\nWould close #33438. The same changes here could also be used to produce FreeBSD binaries out of Guix.",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2026-02-03T12:28:36Z",
-      "updated_at": "2026-02-03T16:37:51Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34491",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 407,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2138649533,
       "number": 31132,
       "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
@@ -1150,30 +1315,6 @@
         "text_length": 474,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 2929620815,
-      "number": 33661,
-      "title": "test: Add test on skip heights in CBlockIndex",
-      "body": "The skip height values, used by `CBlockIndex::BuildSkip()` and `GetSkipHeight` are not tested and not well documented. (noticed while reviewing #33515, recently merged).\r\n\r\nThe motivation is to document the skip value computation through a test.\r\n\r\nThe first commit adds a test for the properties of the distribution of skip values, namely that they have non-uniform distribution: most values are small but there are some large ones as well.\r\n\r\nThe second commit adds low-level tests to the `GetSkipHeight()` internal method. The tests are low level, thus of limited value, and the commit also touches the non-test code minimally (to make the method accessible). Therefore this commit has lower priority.\r\n",
-      "state": "open",
-      "user": "optout21",
-      "created_at": "2025-10-20T12:08:37Z",
-      "updated_at": "2026-02-03T14:33:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33661",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 752,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -1744,30 +1885,6 @@
       }
     },
     {
-      "id": 3237671040,
-      "number": 34486,
-      "title": "net: Reduce local network activity when networkactive=0",
-      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/34190\r\n\r\nWhen `networkactive=0` is set, NAT-PMP port mapping and Tor **control connections**\r\nstill run in the background, mapping ports and logging retry attempts despite\r\nthe node being \"inactive.\"\r\n\r\nThis wires both subsystems to CConnman::SetNetworkActive so they start and stop\r\nwith the network state:\r\n\r\n- mapport: EnableMapPort is injected as a callback via CConnman::Options.\r\n  SetNetworkActive and SetMapPortEnabled both gate on network state.\r\n\r\n- torcontrol: is injected similarly. The callback dispatches onto the tor event loop via \r\n  event_base_once to respect thread ownership. `EVLOOP_NO_EXIT_ON_EMPTY` is \r\n  used to keep the event loop alive without keepalive timers, so the controller starts disconnected and waits for CConnman::Start() to signal.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2026-02-02T17:46:47Z",
-      "updated_at": "2026-02-03T10:25:08Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34486",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 873,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2471245988,
       "number": 32317,
       "title": "kernel: Separate UTXO set access from validation functions",
@@ -1813,78 +1930,6 @@
         "text_length": 2759,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 2550873429,
-      "number": 32636,
-      "title": "Split `CWallet::Create()` into `CreateNew` and `LoadExisting`",
-      "body": "This PR is mostly a refactor which splits out logic used for creating wallets and for loading wallets, both of which are presently contained in `CWallet::Create()` into `CWallet::CreateNew()` and `CWallet::LoadExisting()`\r\n\r\nThe real win of this PR is that `CWallet::Create()` uses a very bad heuristic for trying to guess whether or not it is supposed to be creating a new wallet or loading an existing wallet:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/370c59261269fd9043674e0f4fd782a89e724473/src/wallet/wallet.cpp#L2882-L2885\r\n\r\nThis heuristic assumes that wallets with no `ScriptPubKeyMans` are being created, which sounds reasonable, but as demonstrated in #32112 and #32111, this can happen when the user tries to load a wallet file that is corrupted, both issues are fixed by this PR and any other misbehavior for wallet files which succeeded the broken heuristic's sniff test for new wallets.\r\n\r\nIt was already the case that every caller of `CWallet::Create()` knows whether it is creating a wallet or loading one, so we can avoid replacing this bad heuristic with another one, and just shift the burden to the caller.",
-      "state": "open",
-      "user": "davidgumberg",
-      "created_at": "2025-05-29T00:37:09Z",
-      "updated_at": "2026-02-03T07:36:53Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32636",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1189,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3239542097,
-      "number": 34490,
-      "title": "wallet: Follow-ups to create/load split (#32636)",
-      "body": "This adds documentation for `PopulateWalletFromDB()` and improves documentation for `LoadExisting()` and `CreateNew()`, addressing issues reviewers pointed in #32636.",
-      "state": "open",
-      "user": "davidgumberg",
-      "created_at": "2026-02-03T06:02:55Z",
-      "updated_at": "2026-02-03T07:35:58Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34490",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 215,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3210348402,
-      "number": 34410,
-      "title": "test: let connections happen in any order in p2p_private_broadcast.py",
-      "body": "If the following two events happen:\r\n\r\n* (likely) the automatic 10 initial connections are not made to all \r\n  networks\r\n* (unlikely) the network-specific logic kicks in almost immediately.\r\n  It is using exponential distribution with a mean of 5 minutes\r\n  (`rng.rand_exp_duration(EXTRA_NETWORK_PEER_INTERVAL)`).\r\n\r\nSo if both happen, then the 11th connection may not be the expected\r\nprivate broadcast, but a network-specific connection.\r\n\r\nFix this by retrieving the connection type from\r\n`destinations_factory()`. This is more flexible because it allows\r\nconnections to happen in any order and does not break if e.g. the 11th\r\nconnection is not the expected first private broadcast.\r\n\r\nThis also makes the test run faster:\r\nbefore: 19-44 sec \r\nnow: 10-25 sec \r\nbecause for example there is no need to wait for the initial 10\r\nautomatic outbound connections to be made in order to proceed.\r\n\r\nFixes: https://github.com/bitcoin/bitcoin/issues/34387\r\n",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-01-26T12:05:26Z",
-      "updated_at": "2026-02-03T04:36:57Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34410",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1022,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -2291,30 +2336,6 @@
         "text_length": 1346,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3229673183,
-      "number": 34467,
-      "title": "net: don't perform network activity when networkactive=0",
-      "body": "## Problem\r\nWhen starting bitcoind with `-networkactive=0`, the node still performs various network activities despite the user explicitly requesting that the P2P network be inactive. This results in unnecessary log messages and network overhead:\r\n\r\n- `[addrman] Selected IP:PORT from tried` - Address manager selections\r\n- `[net:error] Could not get best interface for default route` - Gateway detection attempts\r\n- `[tor] Error connecting to Tor control socket` - Tor control connection attempts\r\n- `[tor] Not connected to Tor control port` - Tor reconnection attempts\r\n- `[net] portmap: Could not determine IPv4/IPv6 default gateway` - UPnP/NAT-PMP attempts\r\n\r\nThis defeats the purpose of the `-networkactive` flag, which is documented as \"Enable all P2P network activity (default: 1)\".\r\n\r\n### Steps to Reproduce\r\n1. Start bitcoind with `bitcoind.exe -networkactive=0`\r\n2. Observe logs - despite the flag being set to disable network activity, addrman selections and network-related errors are logged\r\n\r\n### Expected Behavior\r\nNo network activity should occur when `-networkactive=0` is set at startup. The node should remain idle until network is activated via RPC command `setnetworkactive true`.\r\n\r\n## Solution\r\nThis PR ensures that when `networkactive=0`, no network initialization or activity occurs by:\r\n\r\n### 1. **ThreadOpenConnections (src/net.cpp)**\r\nAdded a check at the beginning of the main while loop to pause all outbound connection logic when `fNetworkActive` is false. This prevents:\r\n- Address selection from addrman\r\n- Connection attempts to peers\r\n- Feeler connections\r\n- Block relay connection attempts\r\n\r\nThis check follows the existing pattern used for DNS seed querying (lines 2345-2349) and uses the same synchronization mechanism (`fNetworkActive` atomic flag and `sleep_for` with interruption support).\r\n\r\n### 2. **StartMapPort (src/init.cpp)**\r\nMade NAT-PMP port mapping startup conditional on `-networkactive` being true. This prevents:\r\n- Port mapping initialization\r\n- Gateway detection attempts\r\n- Related network errors and log spam\r\n\r\n### 3. **StartTorControl (src/init.cpp)**\r\nMade Tor control thread startup conditional on `-networkactive` being true. This prevents:\r\n- Tor control socket connection attempts\r\n- Tor-related error logs\r\n- Unnecessary event loop setup\r\n\r\n## Testing\r\nThe fix has been verified to:\r\n- Compile without errors or warnings\r\n- Follow existing code patterns and conventions used in the same functions\r\n- Use the same argument parsing method as existing code (`args.GetBoolArg(\"-networkactive\", true)`)\r\n- Respect the interruption mechanism used throughout the codebase\r\n\r\n### Manual Testing\r\n```bash\r\n# Start with networkactive=0 - should see no network activity logs\r\nbitcoind -networkactive=0\r\n\r\n# Start with networkactive=1 (default) - normal behavior\r\nbitcoind\r\n```\r\n\r\nAffected Code Paths\r\n`src/net.cpp: CConnman::ThreadOpenConnections()` - Main connection management loop\r\n`src/init.cpp` Bitcoin Core initialization - MapPort and TorControl startup\r\n\r\nNotes\r\nThis change is backward compatible - default behavior (networkactive=1) is unchanged\r\nDynamic network activation via setnetworkactive true RPC will resume ThreadOpenConnections activity\r\nMapPort and TorControl remain stopped if started with networkactive=0 (can be addressed in follow-up if needed for dynamic activation)\r\n\r\nFixes #34190",
-      "state": "open",
-      "user": "saksham-1304",
-      "created_at": "2026-01-30T23:44:08Z",
-      "updated_at": "2026-02-02T16:19:44Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34467",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 3421,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -6472,78 +6493,6 @@
         "has_nack": false,
         "has_ack": true
       }
-    },
-    {
-      "id": 3217429368,
-      "number": 34426,
-      "title": "refactor: avoid unreachable throw in `inline_check_non_fatal`",
-      "body": "In builds where `G_ABORT_ON_FAILED_ASSUME` is true, `inline_check_non_fatal` called `assertion_fail()` and then had a throw `NonFatalCheckError` that was never reachable, because `assertion_fail()` either aborts or throws and never returns.\r\nRefactored `inline_check_non_fatal` to use `if constexpr (G_ABORT_ON_FAILED_ASSUME) { assertion_fail(...) } else { throw NonFatalCheckError(...) }` branch, removing the unreachable `throw`",
-      "state": "closed",
-      "user": "lisenokdonbassenok",
-      "created_at": "2026-01-28T06:49:17Z",
-      "updated_at": "2026-01-28T06:55:12Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34426",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 492,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3056547139,
-      "number": 33974,
-      "title": "cmake: Check dependencies after build option interaction",
-      "body": "At present, `CMakeLists.txt` interleaves configuration-option handling with dependency discovery. As a result, unnecessary checks may be performed. For example:\r\n```\r\n$ cmake -B build --preset dev-mode -DBUILD_FOR_FUZZING=ON\r\n<snip>\r\n-- Found PkgConfig: /usr/bin/pkg-config (found version \"2.3.0\")\r\n-- Found ZeroMQ: /usr/lib64 (found suitable version \"4.3.5\", minimum required is \"4.0.0\")\r\n-- Performing Test HAVE_USDT_H\r\n-- Performing Test HAVE_USDT_H - Success\r\n-- Found USDT: /usr/include\r\n-- Found QRencode: /usr/lib64/libqrencode.so (found version \"4.1.1\")\r\n-- Performing Test CMAKE_HAVE_LIBC_PTHREAD\r\n-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success\r\n-- Found Threads: TRUE\r\n-- Performing Test HAVE_STDATOMIC\r\n-- Performing Test HAVE_STDATOMIC - Success\r\n-- Found WrapAtomic: TRUE\r\n-- Found OpenGL: /usr/lib64/libOpenGL.so\r\n-- Found WrapOpenGL: TRUE\r\n-- Found WrapVulkanHeaders: /usr/include\r\n-- Found Qt: /usr/lib64/cmake/Qt6 (found suitable version \"6.10.1\", minimum required is \"6.2\")\r\nCMake Warning at CMakeLists.txt:206 (message):\r\n  BUILD_FOR_FUZZING=ON will disable all other targets and force\r\n  BUILD_FUZZ_BINARY=ON.\r\n\r\n<snip>\r\n```\r\n\r\nThis PR restructures the code to ensure that all dependencies are checked only after the final build option interaction.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-11-30T15:50:06Z",
-      "updated_at": "2026-01-28T03:13:56Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33974",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1331,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3178153988,
-      "number": 34311,
-      "title": "test: add unit tests for wallet interface getter basic method",
-      "body": "This PR adds a unit test for basic wallet interface getter methods in `src/wallet/interfaces.cpp`  test verifies that `WalletImpl` correctly returns wallet properties and configuration values.\r\n\r\nAdded test case `wallet_interface_getters_basic` in `src/wallet/test/wallet_tests.cpp` that tests the following methods:\r\n\r\n1. **`getWalletName()`** \r\n2. **`isCrypted()`** \r\n3. **`isLocked()`**\r\n4. **`getDefaultAddressType()`**\r\n5. **`getDefaultMaxTxFee()`** \r\n6. **`getConfirmTarget()`**\r\n\r\ngetter methods are  untested. regressions in these methods could go undetected. The test catches the following types of bugs:\r\n\r\n```\r\n./bin/test_bitcoin --run_test=wallet_tests/wallet_interface_getters_basic\r\nRunning 1 test case...\r\n./wallet/test/wallet_tests.cpp(745): error: in \"wallet_tests/wallet_interface_getters_basic\": check wallet_name == \"test_wallet\" has failed [default != test_wallet]\r\n./wallet/test/wallet_tests.cpp(747): error: in \"wallet_tests/wallet_interface_getters_basic\": check wallet_interface->isCrypted() == false has failed [true != false]\r\n./wallet/test/wallet_tests.cpp(749): error: in \"wallet_tests/wallet_interface_getters_basic\": check wallet_interface->isLocked() == false has failed [true != false]\r\n./wallet/test/wallet_tests.cpp(752): error: in \"wallet_tests/wallet_interface_getters_basic\": check default_type == OutputType::BECH32 || default_type == OutputType::LEGACY || default_type == OutputType::P2SH_SEGWIT || default_type == OutputType::BECH32M has failed\r\n./wallet/test/wallet_tests.cpp(756): error: in \"wallet_tests/wallet_interface_getters_basic\": check max_fee > 0 has failed\r\n./wallet/test/wallet_tests.cpp(759): error: in \"wallet_tests/wallet_interface_getters_basic\": check confirm_target > 0 has failed\r\n\r\n*** 6 failures are detected in the test module \"Bitcoin Core Test Suite\"\r\n```\r\n",
-      "state": "closed",
-      "user": "b-l-u-e",
-      "created_at": "2026-01-15T17:30:22Z",
-      "updated_at": "2026-01-28T01:38:34Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34311",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 1885,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "issues": [
@@ -8016,9 +7965,9 @@
     }
   ],
   "summary": {
-    "total_prs": 274,
+    "total_prs": 272,
     "total_issues": 36,
     "total_comments": 43,
-    "unique_participants": 93
+    "unique_participants": 92
   }
 }
