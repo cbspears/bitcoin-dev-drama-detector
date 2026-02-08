@@ -1,12 +1,856 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-02-08T02:02:58.968886+00:00",
+  "fetched_at": "2026-02-08T08:26:14.500636+00:00",
   "date_range": {
-    "since": "2026-02-01T02:02:58.968825+00:00",
-    "until": "2026-02-08T02:02:58.968825+00:00"
+    "since": "2026-02-01T08:26:14.500576+00:00",
+    "until": "2026-02-08T08:26:14.500576+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3249198695,
+      "number": 34511,
+      "title": "test: fully reset the state of CConnman in tests",
+      "body": "Member variables of `CConnman::m_private_broadcast` (introduced in\r\nhttps://github.com/bitcoin/bitcoin/pull/29415) could influence the tests\r\nwhich creates non-determinism if the same instance of `CConnman` is used\r\nfor repeated test iterations.\r\n\r\nSo, reset the state of `CConnman::m_private_broadcast` from\r\n`ConnmanTestMsg::Reset()`. Currently this affects the fuzz tests\r\n`process_message` and `process_messages`.\r\n\r\nReported in https://github.com/bitcoin/bitcoin/issues/34476#issuecomment-3849088794",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-02-05T08:52:48Z",
+      "updated_at": "2026-02-08T08:24:28Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34511",
+      "labels": [
+        "Tests",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 553,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2837615883,
+      "number": 33421,
+      "title": "node: add  `BlockTemplateCache`",
+      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify an optional template age limit in `MillisecondsDouble`:\r\n\r\n- If template age limit is `nullopt`, we create a new template and return it without adding it to the cache.\r\n- If a matching template (block template with identical block creation options) exists in the cache and hasn't exceeded the age limit, the cached version is returned.\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned. When evicting stale templates, we assume no duplicates exist since templates are evicted as soon as their age limit is reached or exceeded.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted after each insertion.\r\n\r\n\r\nCache lookup requires an exact match on ALL `BlockAssembler::Options` fields. While some fields (e.g., `test_block_validity`, `print_modified_fee`, `coinbase_output_script`) could be ignored for cache reuse, they mainly differ in tests and benchmarks. We keep the logic simple and accept cache misses in those cases.\r\n\r\n\r\nThe cache enforces at most one template per set of options. When searching for a match in `getCachedTemplate()`, if a template with matching options is found but has exceeded the age limit, it's immediately evicted before returning `nullptr`. This ensures no duplicate options exist in the cache. A `SanityCheck()` method verifies this invariant in tests by checking all cached entries for duplicates.\r\n\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\n`GetBlockTemplate()` uses double-checked locking: it first checks the cache with only `m_mutex` held, then if there's a miss, acquires both `cs_main` and `m_mutex` to create the template. Before creating, it checks again since another thread might have added a template while locks were released. \r\n\r\nThis PR removes an unused `node/context.h` import from miner to prevent a circular dependency when exposing the block template cache to the node context.",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-09-17T18:47:09Z",
+      "updated_at": "2026-02-08T08:22:32Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2508,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3250214855,
+      "number": 34514,
+      "title": "refactor: remove unnecessary std::move for trivially copyable types",
+      "body": "Inspired by https://github.com/bitcoin/bitcoin/pull/34320#discussion_r2751764873.\r\n\r\n### Problem\r\nA few function signatures in the codebase use rvalue references for trivially copyable types, forcing callers to `std::move()` values where there is no benefit - for trivially copyable types, moving is semantically identical to copying (see https://godbolt.org/z/hdrn17v9b).\r\n\r\nAdditionally, some call sites use `std::move()` on plain enums and primitive types where it is basically just noise.\r\n\r\nNote: `CheckTriviallyCopyableMove` remains `false` - `std::move()` on trivially copyable types is still permitted where it serves as intent documentation (e.g. signaling that a value should not be reused after a call).\r\n\r\n### Fix\r\n* Document why `CheckTriviallyCopyableMove` is kept disabled (to preserve `bugprone-use-after-move` coverage on trivially copyable types where `std::move` signals intent), cherry-picked from #34523\r\n* Change `EmplaceCoinInternalDANGER` to take `const COutPoint&` instead of `COutPoint&&`\r\n* Change logging functions to take `const SourceLocation&` instead of `SourceLocation&&`\r\n* Remove `std::move()` on enum types in RPC constructors and on `bool`/`int` members in `txgraph.cpp`",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-02-05T13:27:48Z",
+      "updated_at": "2026-02-08T08:08:20Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34514",
+      "labels": [
+        "Refactoring",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1275,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2902093523,
+      "number": 33593,
+      "title": "guix: Use UCRT runtime for Windows release binaries",
+      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-10-09T21:46:43Z",
+      "updated_at": "2026-02-08T07:49:13Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
+      "labels": [
+        "Windows",
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 213,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2919092278,
+      "number": 33637,
+      "title": "refactor: optimize block index comparisons (1.4-6.8x faster)",
+      "body": "### Context\r\nThe comparator is often called either directly or for the sorting of [setBlockIndexCandidates](https://github.com/bitcoin/bitcoin/blob/master/src/validation.h#L637), a red-black tree-set containing valid block headers where the comparator is invoked extensively.\r\nBesided the sorted set usages, the comparator is used directly in `Chainstate` in `FindMostWorkChain`, `PruneBlockIndexCandidates`, `ActivateBestChain` and `InvalidateBlock`; and in `ChainstateManager` in `LoadBlockIndex`, `CheckBlockIndex`, `ActivateSnapshot` and `PopulateAndValidateSnapshot`.\r\n\r\nIt was profiled during the investigation of https://github.com/bitcoin/bitcoin/issues/33618#issuecomment-3402229976. \r\n\r\n### Testing\r\nTo ensure the optimized implementations are both fast and correct, the first commit adds a dedicated benchmark to measure `CBlockIndexWorkComparator` performance, and the second commit adds randomized tests comparing the new implementation with the original one.\r\n\r\n### Results\r\n\r\n> GCC 15.0.1:\r\n\r\n* `CBlockIndexWorkComparator`: 100,772,511 cmp/s → 656,674,205 cmp/s = 6.51x faster\r\n* `CheckBlockIndex`: 9,091 ops/s → 14,765 ops/s = 1.62x faster\r\n\r\n> Clang 22.0.0:\r\n\r\n* `CBlockIndexWorkComparator`: 100,451,893 cmp/s → 683,414,234 cmp/s = 6.8x faster\r\n* `CheckBlockIndex`: 10,322 ops/s → 14,376 ops/s = 1.39x faster\r\n\r\nSee https://corecheck.dev/bitcoin/bitcoin/pulls/33637 for the CI's `CheckBlockIndex` performance.\r\n\r\n<details>\r\n<summary>gcc and clang measurements</summary>\r\n\r\n> Compiler: gcc 15.0.1\r\nb60450fae8 bench: add benchmark to measure `CBlockIndexWorkComparator` performance\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                9.92 |      100,772,511.62 |    0.0% |           63.98 |           35.64 |  1.795 |          14.17 |    1.9% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          109,996.46 |            9,091.20 |    0.2% |    1,014,421.11 |      394,979.29 |  2.568 |     313,025.11 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\ne2e02177ba refactor: inline `arith_uint256` comparison operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.48 |      154,439,491.66 |    0.0% |           31.01 |           23.25 |  1.334 |           7.16 |    3.8% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          105,754.86 |            9,455.83 |    0.1% |      913,130.11 |      379,588.20 |  2.406 |     276,692.11 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\n85b74b01de refactor: optimize `arith_uint256` comparison with spaceship operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.37 |      156,990,488.06 |    0.0% |           28.85 |           22.87 |  1.261 |           8.61 |    3.2% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           83,803.10 |           11,932.73 |    0.0% |      743,565.09 |      300,824.84 |  2.472 |     232,646.08 |    0.0% |      5.56 | `CheckBlockIndex`\r\n\r\ndeb58eea2f refactor: optimize `CBlockIndexWorkComparator` with std::tie\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                1.52 |      656,674,205.98 |    0.0% |           13.18 |            5.47 |  2.410 |           3.06 |    0.1% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           67,726.84 |           14,765.19 |    0.2% |      585,826.07 |      243,155.90 |  2.409 |     181,920.07 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\n> Compiler: clang 22.0.0\r\n\r\nb60450fae8 bench: add benchmark to measure `CBlockIndexWorkComparator` performance\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                9.96 |      100,451,893.46 |    0.0% |           61.28 |           35.75 |  1.714 |          13.62 |    2.1% |      5.52 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           96,878.70 |           10,322.19 |    0.1% |      802,827.10 |      347,679.01 |  2.309 |     234,823.10 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\ne2e02177ba refactor: inline `arith_uint256` comparison operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.13 |      163,183,693.10 |    0.0% |           25.74 |           22.01 |  1.170 |           6.10 |    4.6% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           86,307.94 |           11,586.42 |    1.2% |      646,229.09 |      309,785.33 |  2.086 |     195,119.09 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\n85b74b01de refactor: optimize `arith_uint256` comparison with spaceship operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.36 |      157,330,900.16 |    1.0% |           26.20 |           22.61 |  1.159 |           6.55 |    4.4% |      5.53 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           75,031.66 |           13,327.71 |    1.0% |      650,604.15 |      266,934.04 |  2.437 |     149,967.14 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\ndeb58eea2f refactor: optimize `CBlockIndexWorkComparator` with std::tie\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                1.46 |      683,414,234.14 |    0.0% |           16.12 |            5.25 |  3.067 |           4.02 |    0.1% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           69,559.70 |           14,376.14 |    0.1% |      559,208.07 |      249,654.28 |  2.240 |     132,342.07 |    0.0% |      5.51 | `CheckBlockIndex`\r\n\r\n</details>\r\n\r\n### Reproducer\r\n\r\nRun the equivalence tests with:\r\n```bash\r\ncmake -B build && cmake --build build && ./build/bin/test_bitcoin --run_test=arith_uint256_tests,blockchain_tests\r\n```\r\n\r\nEach commit shows how it changes the relevant benchmarks.\r\n\r\n<details>\r\n<summary>Benchmark script</summary>\r\n\r\n```bash\r\nfor compiler in gcc clang; do \\\r\n  if [ \"$compiler\" = \"gcc\" ]; then CC=gcc; CXX=g++; COMP_VER=$(gcc -dumpfullversion); \\\r\n  else CC=clang; CXX=clang++; COMP_VER=$(clang -dumpversion); fi && \\\r\n  echo \"> Compiler: $compiler $COMP_VER\" && \\\r\n  for commit in 70c6244b709fcf6a853ea44b91b9ed219609ac90 516e05cd7d8dbb61b05854c59f5393367e502284 d053b27c06d06cccbc6395b0aa7dc1c4193a6fc3 8ef4ce2cb3ac80cbe58b8cf76e183f9eca6fafe4 703165e6d3b9fbd58b9c31ddce0e961047fc5e71; do \\\r\n    git fetch origin $commit >/dev/null 2>&1 && git checkout $commit >/dev/null 2>&1 && git log -1 --pretty='%h %s' && \\\r\n    rm -rf build && \\\r\n    cmake -B build -DBUILD_BENCH=ON -DENABLE_IPC=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX >/dev/null 2>&1 && \\\r\n    cmake --build build -j$(nproc) >/dev/null 2>&1 && \\\r\n    for i in 1; do \\\r\n      build/bin/bench_bitcoin -filter='CBlockIndexWorkComparator|CheckBlockIndex' -min-time=5000; \\\r\n    done; \\\r\n  done; \\\r\ndone\r\n```\r\n\r\n</details>\r\n\r\nNote: something similar was already started in https://github.com/bitcoin/bitcoin/pull/33334, but this is a broader optimization that doesn't use the same technique.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-10-16T01:54:31Z",
+      "updated_at": "2026-02-08T07:42:43Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33637",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 11214,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2925411752,
+      "number": 33646,
+      "title": "log: check fclose() results and report safely in logging.cpp",
+      "body": "`fclose()` can report write errors (for example if the disk is full or the filesystem has a problem). Right now, some `fclose()` calls in `src/logging.cpp` ignore the return value. This means errors might go unnoticed and log lines could be lost without warning.\r\n\r\n## What this PR does:\r\n- Add a small helper that prints `fclose()` errors to `stderr` (with path and errno).\r\n- In shutdown: close `m_fileout` safely and report errors.\r\n- In reopen: open the new file, swap it in, close the old one, and report errors if closing fails.\r\n- In shrink/rotate: check all `fclose(file)` calls and report failures.\r\n\r\nNo other behavior changes. Normal logging, rotation, and console output remain unchanged.",
+      "state": "open",
+      "user": "cedwies",
+      "created_at": "2025-10-17T19:06:08Z",
+      "updated_at": "2026-02-08T07:35:58Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33646",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 761,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2876629729,
+      "number": 33512,
+      "title": "coins: use number of dirty cache entries in flush warnings/logs",
+      "body": "Revival of https://github.com/bitcoin/bitcoin/pull/31703 with all outstanding review feedback addressed.\r\n\r\n<details>\r\n<summary>A few changes compared to the original</summary>\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/34207 resolved part of dirty counting in `SanityCheck`\r\n* `EmplaceCoinInternalDANGER` is also fuzz tested now\r\n* Warning and logging moved from `FlushStateToDisk` to `CCoinsViewDB::BatchWrite`, ensuring `AssumeUTXO` snapshot writes also display progress warnings\r\n* Removed the redundant changed counter in `BatchWrite` since we now track `dirty_count` directly\r\n* All instances use `dirty_count` (not `num_dirty`) and parameter alignment is corrected\r\n\r\n</details>\r\n\r\n----\r\n\r\n> Since #28280 and #28233, the percentage of dirty entries in the cache when a flush happens may in practice be far from 100%. The log output, the decision to warn about a large flush (#31534), and the disk-full detection, however always use the entire size of the cache.\r\n>\r\n> Fix this by keeping track of the number of dirty entries in `CCoinsViewCache`, and using that number. We've dropped the usage of `DynamicMemoryUsage` as it's the wrong metric, even before the non-wiping flushes were introduced (if everything is dirty, memory usage is correlated with, but not the same as, the amount of disk space written or used). They could be improved by keeping track of proper write size estimates in a follow-up, but here we're just using a fixed 48 bytes per entry estimate.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-10-01T02:24:51Z",
+      "updated_at": "2026-02-08T07:24:27Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33512",
+      "labels": [
+        "UTXO Db and Indexes",
+        "Needs rebase",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 2,
+        "text_length": 1539,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2272618048,
+      "number": 31644,
+      "title": "leveldb: show non-default options during init",
+      "body": "To help with to debugging and traceability (in alignment with displaying other non-default args such as `Command-line arg: dbcache=\"10000\"`) we can extend the LevelDB opening log with an additional debug message for the used non-default settings.\r\n\r\nTo avoid showing booleans as e.g. `create_if_missing=1`, I've added a local `ToString` lambda for `bool`.\r\nI wanted to use `util::Join` at the end, but couldn't find any way that I liked.\r\n\r\nExample output after the change:\r\n```bash\r\n2025-10-15T02:39:45Z Opened LevelDB successfully\r\n2025-10-15T02:39:45Z [leveldb] startup options: options.compression=NoCompression, options.create_if_missing=true, options.max_file_size=33554432, options.paranoid_checks=true, options.write_buffer_size=524288, readoptions.fill_cache=false, readoptions.verify_checksums=true, writeoptions.sync=true\r\n```",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-01-12T17:30:54Z",
+      "updated_at": "2026-02-08T07:02:05Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31644",
+      "labels": [
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 883,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2224317475,
+      "number": 31449,
+      "title": "coins,refactor: Reduce `getblockstats` RPC UTXO overhead estimation",
+      "body": "The [`getblockstats` RPC](https://github.com/bitcoin/bitcoin/pull/10757) currently overestimates UTXO overhead by treating the `fCoinBase` bitfield as an additional `bool` in `PER_UTXO_OVERHEAD`.\r\nHowever, `fCoinBase` and `nHeight` are stored as bitfields and effectively packed into a single 32-bit value; counting an extra bool in the overhead calculation is unnecessary.\r\n\r\nThis PR introduces the following changes across three commits:\r\n* Store `fCoinBase` as a bool bitfield to reduce implicit conversions at call sites.\r\n* Use a consistent height/coinbase packing style across Coin serialization, undo serialization, and coinstats hashing (casting `nHeight` to `uint32_t` before shifting to avoid signed-promotion UB).\r\n* Adjust UTXO overhead estimation to match the actual Coin layout and update the related tests accordingly.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2024-12-09T17:36:50Z",
+      "updated_at": "2026-02-08T06:59:43Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31449",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 901,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2803909911,
+      "number": 33324,
+      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
+      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-09-05T23:51:29Z",
+      "updated_at": "2026-02-08T06:59:05Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
+      "labels": [
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3232,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3220617054,
+      "number": 34435,
+      "title": "refactor: use `_MiB`/`_GiB` consistently for byte conversions",
+      "body": "### Problem\r\nByte-size conversions in the codebase currently show up in many equivalent formats (multiplication/division chains, shifts, hex/binary literals), which creates a maintenance burden and makes review error-prone - especially considering the architectural differences of `size_t`.\r\nInspired by https://github.com/bitcoin/bitcoin/pull/34305#discussion_r2734720002, it seemed appropriate to unify `Mebibyte` usage across the codebase and add `Gibibyte` support with 32/64 bit `size_t` validation.\r\n\r\n### Fix\r\nThis PR refactors those call sites to use `\"\"_MiB` (existing) and `\"\"_GiB` (new), and adds the encountered value/pattern replacements to unit tests to make review straightforward, and to ensure the conversions remain valid.\r\nThe literals are overflow-checked when converting to `size_t`, and unit tests cover the 32-bit boundary cases.\r\n\r\nConcretely, it replaces patterns such as:\r\n* `1024*1024`, `1<<20`, `0x100000`, `1048576`, `/ 1024 / 1024`, `* (1.0 / 1024 / 1024)` → `1_MiB` or `double(1_MiB)`\r\n* `1024*1024*1024`, `1<<30`, `0x40000000`, `1024_MiB`, `>> 30` → `1_GiB`\r\n\r\n### Note\r\nIn the few places where arithmetic involves signed values, the result is identical to the previous code assuming those quantities never become negative.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-28T21:26:10Z",
+      "updated_at": "2026-02-08T06:56:21Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34435",
+      "labels": [
+        "Refactoring",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1317,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3220693682,
+      "number": 34436,
+      "title": "refactor + log: use new `CeilDiv` helper in UTXO `Flushing` warning",
+      "body": "### Problem\r\nThe `Flushing large (... GiB) UTXO set...` warning was rounding the target value down (e.g. `1643.7MiB` was printed as `1 GiB`) which downplayed the warning that is meant to set the user's expectations.\r\n\r\n### Fixes\r\nThis PR starts with introducing a small overflow-safe integer `CeilDiv()` helper and replaces existing ceiling-division expressions across the codebase as a pure refactor.\r\nIn the second commit, this method is applied to change the flushing message slightly by rounding the batch size up, amending https://github.com/bitcoin/bitcoin/pull/31534 which introduced the warning.\r\n\r\n### Reproducer:\r\n> killall bitcoind; rm -rfd build demo; mkdir demo && cmake -B build >/dev/null 2>&1 && cmake --build build -j$(nproc) --target bitcoind >/dev/null 2>&1 && build/bin/bitcoind -datadir=demo-dbcache=2000 -stopatheight=300000 | egrep 'height=300000|Flushing large'\r\n\r\nBefore:\r\n```bash\r\nUpdateTip: new best=000000000000000082ccf8f1557c5d40b21edabb18d2d691cfbf87118bac7254 height=300000 version=0x00000002 log2_work=78.499549 tx=38463789 date='2014-05-10T06:32:34Z'\r\nprogress=0.029457 cache=1643.7MiB(11822004txo)\r\n[warning] Flushing large (1 GiB) UTXO set to disk, it may take several minutes\r\n```\r\n\r\nAfter:\r\n```bash\r\nUpdateTip: new best=000000000000000082ccf8f1557c5d40b21edabb18d2d691cfbf87118bac7254 height=300000 version=0x00000002 log2_work=78.499549 tx=38463789 date='2014-05-10T06:32:34Z'\r\nprogress=0.029457 cache=1643.7MiB(11822004txo)\r\n[warning] Flushing large (2 GiB) UTXO set to disk, it may take several minutes\r\n```\r\n\r\nThe cache line shows `1643.7MiB`, which now rounds up to `2 GiB` instead of down to `1 GiB`.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-28T21:47:06Z",
+      "updated_at": "2026-02-08T06:51:51Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34436",
+      "labels": [
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1712,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2997112498,
+      "number": 33847,
+      "title": "kernel: Improve logging API",
+      "body": "Simplify kernel logging API and try to connect it to the rest of the kernel API by letting log options be set on `Logger` objects directly and `Logger` objects to be associated with `Context` objects directly. Also drop `logging_disable()` function and avoid having library accumulate log messages in a 1MB buffer by default.\r\n\r\nChanges are intended to make the API a little less surprising and more future proof. Rationale is described in some more detail the commit message.\r\n\r\nThis change is not backwards compatible but I'd expect it to port over pretty smoothly to the language bindings, and offer the same benefits for them as for C/C++ callers.\r\n\r\n",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2025-11-10T23:30:46Z",
+      "updated_at": "2026-02-08T06:51:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33847",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 683,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3054115118,
+      "number": 33965,
+      "title": "mining: fix -blockreservedweight shadows IPC option",
+      "body": "Also enforce `MINIMUM_BLOCK_RESERVED_WEIGHT` for IPC clients.\r\n\r\nThe `-blockreservedweight` startup option should only affect RPC code, because IPC clients (currently) do not have a way to signal their intent to use the node default (the `BlockCreateOptions` struct defaults merely document a recommendation for client software).\r\n\r\nBefore this PR however, if the user set `-blockreservedweight` then `ApplyArgsManOptions` would cause the `block_reserved_weight` option passed by IPC clients to be ignored. _Users who don't set this value were not affected._\r\n\r\nFix this by making BlockCreateOptions::block_reserved_weight an std::optional.\r\n\r\nInternal interface users, such as the RPC call sites, don't set a value so -blockreservedweight is used. Whereas IPC clients do set a value which is no longer ignored.\r\n\r\nTest coverage is added, with a preliminary commit that refactors the `create_block_template` and `wait_next_template` helpers.\r\n\r\n`mining_basic.py` already ensured `-blockreservedweight` is enforced by mining RPC methods. The second commit adds coverage for Mining interface IPC clients. It also verifies that `-blockreservedweight` has no effect on them.\r\n\r\nThe third commit enforces `MINIMUM_BLOCK_RESERVED_WEIGHT` for IPC clients. Previously lower values were quietly clamped.\r\n\r\n---\r\n\r\nMerge order preference: #34452 should ideally go first.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-28T13:38:33Z",
+      "updated_at": "2026-02-08T06:21:37Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33965",
+      "labels": [
+        "Mining"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1412,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3054407979,
+      "number": 33966,
+      "title": "refactor: disentangle miner startup defaults from runtime options",
+      "body": "The interaction between node startup options like `-blockreservedweight` and runtime options, especially those passed via IPC, is confusing.\r\n\r\nThey're combined in `BlockAssembler::Options`, which this PR gets rid of in favour of two distinct structs:\r\n\r\n1. `BlockCreateOptions`: used by interface clients. As before, IPC clients have access to a safe / sane subset, whereas RPC and test code can use all fields.\r\n2. `MiningArgs`: these are set once during node startup\r\n\r\nBoth structs have a member for the maximum block height, which is not a problem since they're different structs. The one on `MiningArgs` (`block_max_weight`) matches `-maxblockheight` and is left alone. The one on `BlockCreateOptions` (`block_max_weight`) is an optional, it's set by `ApplyMiningDefaults` only if empty. \r\n\r\nThis all happens in the last commit and requires some preparation to keep things easy to review.\r\n\r\nWe get rid of `BlockAssembler::Options` but this is used in many tests. Since large churn is inevitable, we might as well switch all tests, bench and fuzzers over to the Mining interface. The first (non-base) commit does that, dramatically reducing direct use of `BlockAssembler`. Two exceptions are documented in the commit message. Because `test_block_validity` wasn't available via the interface and the block_assemble benchmark needs it, it's moved from `BlockAssembler::Options` to `BlockCreateOptions` (still not exposed via IPC).\r\n\r\nWe need access to mining related defaults and structs from both the miner and node initialization code. To avoid having to pull in all of `BlockAssembler` for the latter, the second commit introduces `node/mining.h` and moves constants and structs there from `src/node/types.h` (`BlockCreateOptions`, `BlockWaitOptions`, `BlockCheckOptions`) and `src/node/miner.h` (`DEFAULT_PRINT_MODIFIED_FEE`).\r\n\r\nI considered also moving `DEFAULT_BLOCK_MAX_WEIGHT`, `DEFAULT_BLOCK_RESERVED_WEIGHT`, `MINIMUM_BLOCK_RESERVED_WEIGHT` and `DEFAULT_BLOCK_MIN_TX_FEE` there from `policy.h`, since they are distinct from relay policy and not needed by the kernel. But this seems more appropriate for a follow-up and requires additional discussion.\r\n\r\nThe meat and potatoes of this PR is split between the three last commits for easier review:\r\n\r\n1. Adds `node/mining_args.{h,cpp}` and move the options checking out of `init.cpp`, without adding storage\r\n2. Add `block_max_weight` to `BlockCreateOptions` as explained above\r\n3. Introduce the `MiningArgs` struct, add it to the `NodeContext`, expand `mining_args.cpp` to store it, pass it to `BlockAssembler`, etc.\r\n\r\nI kept variable renaming and other formatting changes to a minimum to ease review with `--color-moved=dimmed-zebra`.\r\n\r\nThis PR builds on the bug fix in:\r\n- [ ] #33965\r\n\r\nOnce that is merged, this PR should not change behaviour.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-28T15:42:31Z",
+      "updated_at": "2026-02-08T06:18:17Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33966",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2878,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2640910930,
+      "number": 32875,
+      "title": "index: handle case where pindex_prev equals chain tip in NextSyncBlock()",
+      "body": "# Background\r\nNextSyncBlock() is used in BaseIndex::Sync() to get the next block index to be synced, so that BaseIndex::Sync() can build the index for that block.\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/index/base.cpp#L150-L151\r\n\r\nIt normally calls chain.Next(pindex_prev) to get the next block index on the active chain. If that fails, pindex_prev is on a fork. In that case, chain.FindFork(pindex_prev) is called to return the fork point, and then chain.Next(fork point) is returned for the caller to handle.\r\nThe latter logic is referred to as the fork code below.\r\n\r\n# Issue:\r\nThe current master implementation of NextSyncBlock() handles a specific case implicitly in the fork code.\r\n\r\nThe special case is pindex_prev == chain tip (simplified as the special case below). This means the input block is already the tip of the active chain, and there is no next block to be indexed anymore. Thus, NextSyncBlock() should return nullptr. This expectation is also implied in BaseIndex::Sync():\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/index/base.cpp#L220-L221\r\n\r\nAlthough NextSyncBlock() does return nullptr in this case, it is handled in a confusing code flow:\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/index/base.cpp#L150-L166\r\n\r\ncalls line 158: chain.Next(pindex_prev) returns nullptr because the below code flow:\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/chain.h#L417-L423\r\n\r\ncalls line 419: chain.Contains():\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/chain.h#L411-L414\r\n\r\ncalls line 405:\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/chain.h#L403-L408\r\n\r\nThus in `NextSyncBlock` line 159, because pindex is nullptr, it finally falls into the fork code.\r\nit is handled only coincidentally by the fork code:\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/index/base.cpp#L163-L165\r\n\r\nin this code, FindFork() is called,\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/chain.cpp#L50-L59\r\nand because pindex is the active chain tip, the `while` loop on line 56 is not iterated. It finally returns pindex itself.\r\nSo at last `chain.Next(pindex_prev)` is called again to return nullptr.\r\n\r\nHowever, the fork code is designed to handle reorgs, not this special case. This seems to be an oversight rather than something by design.\r\n\r\n# How to test it\r\n\r\nBecause `NextSyncBlock()` returns nullptr in the special case anyway, some debug code like `assert()` or `std::cout` or log sematics has to be added into this method to see the code flow in this method. The caller can be this unit test:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/test/txindex_tests.cpp#L16-L33\r\n\r\nLine 32 calls `Sync()` and it calls `NextSyncBlock()` \r\n\r\n# Solution:\r\nRather than modifying the comments on lines 163–164 to make them consistent with the fork code behavior, it would be better to handle this special case explicitly and early in NextSyncBlock().\r\n",
+      "state": "open",
+      "user": "HowHsu",
+      "created_at": "2025-07-04T10:03:17Z",
+      "updated_at": "2026-02-08T06:00:03Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32875",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3285,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3102178109,
+      "number": 34075,
+      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
+      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-12-15T11:53:35Z",
+      "updated_at": "2026-02-08T05:34:20Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 1,
+        "text_length": 8927,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1444867984,
+      "number": 28122,
+      "title": "Silent Payments: Implement BIP352",
+      "body": "This PR is part of integrating silent payments into Bitcoin Core. The project is tracked in https://github.com/bitcoin/bitcoin/issues/28536\r\n\r\nBased on https://github.com/bitcoin-core/secp256k1/pull/1698\r\n\r\n## BIP352\r\n\r\nThis PR focuses strictly on the BIP logic and attempts to separate it from the wallet and transaction implementation details. This is accomplished by working directly with public and private keys, instead of needing a wallet backend and transactions for testing. Labels for the receiver are optional and thus deferred for a later PR.\r\n\r\nTest vectors from the BIP are included as unit tests.\r\n",
+      "state": "open",
+      "user": "josibake",
+      "created_at": "2023-07-21T18:36:37Z",
+      "updated_at": "2026-02-08T05:20:35Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/28122",
+      "labels": [
+        "Wallet",
+        "Privacy",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 646,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3119599294,
+      "number": 34124,
+      "title": "refactor: make `CCoinsView` a pure virtual interface",
+      "body": "### Problem\r\n`CCoinsView` serves as the interface for the coins database layer, but historically had a dual nature that caused confusion:\r\n\r\n* It provided default noop implementations (returning `std::nullopt`, `uint256()`, `false`, `nullptr`) instead of being pure virtual\r\n* Callers could instantiate a bare `CCoinsView` and get silent no-op behavior\r\n* Mixing the interface definition with a built-in dummy implementation blurred the abstraction boundary\r\n\r\n### Context\r\nThis is part of ongoing coins caching cleanup efforts, see https://github.com/bitcoin/bitcoin/issues/34280.\r\n\r\n### Fix\r\nThis PR separates interface and noop behavior, and makes `CCoinsView` pure virtual in incremental steps:\r\n* Add `CCoinsViewEmpty` as an explicit noop coins view for tests, benchmarks, and temporary backends\r\n* Replace direct bare-`CCoinsView` test/dummy instantiations with `CCoinsViewEmpty`\r\n* Incrementally make `CCoinsView` methods pure virtual (`GetCoin`, `GetBestBlock`, `BatchWrite`, `EstimateSize`, `Cursor`, `GetHeadBlocks`)\r\n* Keep default `HaveCoin(outpoint)` behavior (`GetCoin(outpoint).has_value()`)\r\n* Remove moved legacy default implementations from `coins.cpp`\r\n* Update the coins view fuzzer to switch between a real db-backed view and `CCoinsViewEmpty`\r\n* In `MemPoolAccept::PreChecks`, cache `best_block` before switching backend to `CCoinsViewEmpty` to avoid relying on empty-backend `GetBestBlock()`",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-12-20T08:47:33Z",
+      "updated_at": "2026-02-08T05:17:06Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34124",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1467,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3257065528,
+      "number": 34533,
+      "title": "wallet: resubmit transactions with private broadcast if enabled",
+      "body": "The wallet keeps track of transactions related to it and periodically rebroadcasts them every 12-36 hours if they are not mined.\r\n\r\nIf `-privatebroadcast=1` and a transaction is submitted locally with the `sendrawtransaction` RPC and it is related to the wallet, then the rebroadcasts would use the send-to-all method. Change that to use the private broadcast method.\r\n",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-02-07T05:35:17Z",
+      "updated_at": "2026-02-08T04:55:39Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34533",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 433,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3133212525,
+      "number": 34165,
+      "title": "coins: don't mutate main cache when connecting block",
+      "body": "This is a slightly modified version of the first few commits of #31132, which can be merged as an independent change. It has a small benefit on its own, but will help in moving the parent PR forward.\r\n\r\nWhen accessing coins via the `CCoinsViewCache`, methods like `GetCoin` can call `FetchCoin` which actually mutate `cacheCoins` internally to cache entries when they are pulled from the backing db. This is generally a performance improvement for single threaded access patterns, but it precludes us from accessing entries in a `CCoinsViewCache` from multiple threads without a lock.\r\n\r\nAnother aspect is that when we use the resettable `CCoinsViewCache` view backed by the main cache for use in `ConnectBlock()`, we will insert entries into the main cache even if the block is determined to be invalid. This is not the biggest concern, since an invalid block requires proof-of-work. But, an attacker could craft multiple invalid blocks to fill the main cache. This would make us `Flush` the cache more often than necessary. Obviously this would be very expensive to do on mainnet.\r\n\r\nIntroduce `CoinsViewOverlay`, a `CCoinsViewCache` subclass that reads coins without mutating the underlying cache via `FetchCoin()`.\r\n\r\nAdd `PeekCoin()` to look up a Coin through a stack of `CCoinsViewCache` layers without populating parent caches. This prevents the main cache from caching inputs pulled from disk for a block that has not yet been fully validated. Once `Flush()` is called on the view, these inputs will be added as spent to `coinsCache` in the main cache via `BatchWrite()`.\r\n\r\nThis is the foundation for async input fetching, where worker threads must not mutate shared state.\r\n",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2025-12-28T20:32:34Z",
+      "updated_at": "2026-02-08T04:53:40Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34165",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 1737,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3138438378,
+      "number": 34184,
+      "title": "mining: add cooldown to createNewBlock() immediately after IBD",
+      "body": "_This PR makes a breaking change to the Mining interface._\r\n\r\nAs reported in #33994, connected mining clients will receive a flood of new templates if the node is still going through IBD or catching up on the last 24 hours. This PR fixes that using an _optional_ cooldown mechanism, only applied to `createNewBlock()`.\r\n\r\nFirst, cooldown waits for IBD. Then, as the tip keeps moving forward, it waits a few seconds to see if the tip updated. If so, it restarts the timer and waits again. The trade-offs for this mechanism are explained below.\r\n\r\nBecause this PR changes `createNewBlock()` from a method that returns quickly to one that can block for minutes, the first commit fixes a bug in our `.capnp` definition, adding the missing `context` to `createNewBlock` (and `checkBlock`). It's an improved version of #33936.\r\n\r\nThis is a breaking API change, so it bumps the `makeMining` version and throws a nice error for older clients. That's tested in the functional test, and I also saw it with the sv2 Rust client. It may be possible to instead work around the existing bug and avoid the breaking change, but I don't think that's worth the efort and potential confusion at this point.\r\n\r\nThe second commit introduces the actual cooldown mechanism.\r\n\r\nThe third then adds an `interrupt()` method so that clients can cleanly disconnect.\r\n\r\n---\r\n\r\n## Rationale\r\n\r\nThe cooldown argument is optional, and not used by internal non-IPC code, for two reasons:\r\n\r\n1. The mechanism wreaks havoc on the functional test suite, which would require very careful mock time handling to work around. But that's pointless, because only IPC clients need it.\r\n2. It needs to be optional for IPC clients too, because in some situations, like a signet with only one miner, waiting for IBD can mean being stuck forever.\r\n\r\nThe reason it's only applied to `createNewBlock()` is that this is the first method called by clients; `waitNext()` is a method on the interface returned by `createNewBlock()`, at which point the cooldown is done.\r\n\r\nAfter IBD, we wait N seconds if the header is N blocks ahead of the tip, with a minimum of 3 and a maximum of 20 seconds. The minimum waiting time is short enough that it shouldn't be annoying or confusing for someone manually starting up a client. While the maximum should be harmless if it happens spuriously (which it shouldn't).\r\n\r\nIf the minimum wait is too short, clients get a burst of templates, as observed in the original issue. We can't entirely rule this out without a lot of additional complexity (like scanning our own log file for heuristics). This PR should make it a lot less likely, and thanks to the IBD wait also limit it to one day worth of blocks (`-maxtipage`).\r\n\r\nSome test runs on an M4 MacBook Pro, where I had a node catch up on the last few days worth of blocks:\r\n\r\n<img width=\"872\" height=\"972\" alt=\"Scherm­afbeelding 2026-02-04 om 18 21 17\" src=\"https://github.com/user-attachments/assets/7902a0f2-0e0b-4604-9688-cec2da073261\" />\r\n\r\nAs the chart shows, sometimes it takes longer than 3 seconds. But it turns out that in all those cases there were quite a few headers ahead of the tip. It also demonstrates that it's important to first wait for IBD, because it's less likely a random tip update takes longer than 20 seconds.\r\n\r\n- modified sv2-apps: https://github.com/Sjors/sv2-apps/tree/2026/02/cooldown\r\n- test script: https://gist.github.com/Sjors/feb6122c97acc2b9e6d66b168614609c#file-run_mainnet_pool_loop-zsh\r\n- chart script: https://gist.github.com/Sjors/feb6122c97acc2b9e6d66b168614609c#file-tip_interval_charts-py",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-12-31T05:17:32Z",
+      "updated_at": "2026-02-08T04:47:13Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34184",
+      "labels": [
+        "Mining"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 3633,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3149207404,
+      "number": 34208,
+      "title": "bench: add fluent API for untimed `setup` steps in nanobench",
+      "body": "### Context\r\nAs described in https://github.com/martinus/nanobench/issues/130, we have a few benchmarks where we have to reset the state between runs, otherwise the repetitions will do something else than the first iteration.\r\n\r\n### Upstream\r\nI have opened a PR to `nanobench` to introduce an untimed setup phase, see: https://github.com/martinus/nanobench/pull/136\r\nUnfortunately the author has health issues and couldn't contribute to it in the past 2 years.\r\n\r\n### Tests\r\n\r\nTests were only added upstream, would be a bit awkward to wire in `nanobench.h` outside the benchmarking setup:\r\nhttps://github.com/martinus/nanobench/pull/136/changes/58350cfe5912d7e0533ccfcd759eea5d62eb55bb#diff-88160f647ce57661afe7d755fa70a5fa342a2b79d72d3511596878e69ed5cdc3\r\n\r\n### Fix\r\nI have moved the changes here as well and applied it to a few simple benchmarks as demonstration.\r\nWe can revert ones that are controversial and add other ones in follow-ups, this PR is mostly meant to add the `setup` feature.\r\n\r\n### Benchmarks\r\nMost benchmarks show a modest \"speedup\", others a \"slowdown\" - but it's only the effect of the setup that's not measured anymore - and a `run` phase which does the same operation in each epoch iteration (wallet benchmark changes were reverted since for simplicity):\r\n<img width=\"1496\" height=\"882\" alt=\"image\" src=\"https://github.com/user-attachments/assets/34c14565-f3df-41e5-9a86-95b2ca21703a\" />\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-06T11:45:35Z",
+      "updated_at": "2026-02-08T04:37:17Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34208",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1475,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3163535277,
+      "number": 34254,
+      "title": "validation: Prevent duplicate logging and looping in invalid block handling",
+      "body": "`InvalidChainFound()` is called from 3 spots:\r\n1. from `InvalidBlockFound()`\r\n2. from `ActivateBestChain()`, with the highest connectable block of the chain\r\nas an arg (after having called `InvalidBlockFound()` already for the block that failed in `ConnectTip()`)\r\n3. from `InvalidateBlock()` (rpc-only)\r\n\r\nMost of the logic in `InvalidChainFound()` is not required for 2) and 3):\r\nIn `ActivateBestChain()`, the previous call to `InvalidChainFound()` before via `InvalidBlockFound` did the flag updates, best header calculation and logging, so only `m_best_invalid` could need additional updating.\r\nIn `InvalidateBlock()` (which doesn't call `InvalidBlockFound()`), we do most of the accounting manually.\r\n\r\nTherefore move of all logic but the `m_best_invalid` update into `InvalidBlockFound()`, avoiding duplicate logging and unnecessary work (the loops over the block index in `SetBlockFailureFlags()` and `RecalculateBestHeader()`\r\nwere done twice before).\r\n\r\nThe second commit renames `InvalidChainFound` to `UpdateBestInvalid` to adjust to its remaining role.\r\n\r\nThis addresses past discussions about repeated work in `InvalidateBlock()` (https://github.com/bitcoin/bitcoin/pull/31405#discussion_r2135717500) and `ActivateBestChain()` (https://github.com/bitcoin/bitcoin/pull/31533#discussion_r2607189790)",
+      "state": "open",
+      "user": "mzumsande",
+      "created_at": "2026-01-11T16:59:21Z",
+      "updated_at": "2026-02-08T04:16:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34254",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1386,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3256881734,
+      "number": 34532,
+      "title": "doc: discourage Tor-only node operation in tor.md",
+      "body": "Adds a section to `doc/tor.md` warning against running `-onlynet=onion`. Covers eclipse attack risk, Tor centralization, on-chain privacy misconceptions, and documents the `dnsseed`/`dns` gotchas for anyone who proceeds anyway.\n\nReworked based on feedback from luke-jr and pinheadmz. Originally started as a how-to guide after hitting the undocumented `dnsseed` incompatibility on a Pi 5 setup.\n\nDocumentation only, no code changes.",
+      "state": "open",
+      "user": "Jhackman2019",
+      "created_at": "2026-02-07T03:28:14Z",
+      "updated_at": "2026-02-08T04:10:54Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34532",
+      "labels": [
+        "Docs",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 482,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3169361001,
+      "number": 34271,
+      "title": "net_processing: make m_tx_for_private_broadcast optional",
+      "body": "Make `PeerManagerImpl::m_tx_for_private_broadcast` optional because it is needed for in private broadcast mode (`-privatebroadcast=1`).\r\n\r\nA followup to #29415, requested in:\r\nhttps://github.com/bitcoin/bitcoin/pull/29415#discussion_r2620864832\r\nhttps://github.com/bitcoin/bitcoin/pull/29415/files#r2620864832",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-01-13T11:32:27Z",
+      "updated_at": "2026-02-08T04:02:31Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34271",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 366,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3181854676,
+      "number": 34320,
+      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
+      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the db.\r\nOne tries to deserialize, the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin` which delegates to `GetCoin`) and simplify `CCoinsViewCache::HaveCoin` to use `AccessCoin`.\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the database's `::GetCoin` (not `::HaveCoin`) on cache miss and checks cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: the latest version of the change keeps most `HaveCoin` calls for convenience, a previous version removed all of them.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-16T16:17:29Z",
+      "updated_at": "2026-02-08T03:49:03Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1238,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3187823761,
+      "number": 34342,
+      "title": "cli: Replace libevent usage with simple http client",
+      "body": "Part of the effort to remove the libevent dependency altogether, see #31194\r\n\r\nThis takes the [`HTTPHeaders` class](https://github.com/bitcoin/bitcoin/pull/32061/commits/d549f01caab659f1c431ccabf0f5ff1800debcfe) from #32061 and puts it into [`common/http.h|cpp`](https://github.com/bitcoin/bitcoin/pull/34342/commits/634d4dcfa428f17f0a12c2e2742c2c08e2345033). While it would not be strictly required for that PR to go in first, it might be better to review it first or simultaneously.\r\n\r\nOtherwise the change itself replaces the libevent-based HTTP client with a simple synchronous implementation which uses the `Sock` class directly.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2026-01-19T13:27:54Z",
+      "updated_at": "2026-02-08T03:32:29Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34342",
+      "labels": [
+        "Scripts and tools"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 686,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3193557787,
+      "number": 34359,
+      "title": "test: add test for rebroadcast of transaction received via p2p",
+      "body": "The wallet doesn't only rebroadcast transactions it created, but also relevant transactions received via p2p. \r\nSince this is not self-evident, add test coverage for it.",
+      "state": "open",
+      "user": "mzumsande",
+      "created_at": "2026-01-21T02:42:05Z",
+      "updated_at": "2026-02-08T03:25:13Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34359",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 232,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3239243501,
+      "number": 34489,
+      "title": "index: batch db writes during initial sync",
+      "body": "Decouples part of #26966.\r\n\r\nRight now, index initial sync writes to disk for every block, which is not the best for HDD. This change batches those, so disk writes are less frequent during initial sync. This also cuts down `cs_main` contention by reducing the number of `NextBlockSync` calls (instead of calling it for every block, we will call it once per block window), making the node more responsive (IBD and validation) while indexes sync up. On top of that, it lays the groundwork for the bigger speedups, since part of the parallelization pre-work is already in place.\r\n\r\nJust as a small summary:\r\n\r\n* Batch DB writes instead of flushing per block, which improves sync time on HDD due to the reduced number of disk write operations.\r\n* Reduce `cs_main` lock contention, which improves the overall node responsiveness (and primarily IBD) while the indexes threads are syncing.\r\n* Lays the groundwork for the real speedups, since part of #26966 parallelization pre-work is introduced here as well.\r\n\r\nNote:\r\nPending initial sync benchmark and further testing. I have only focused on decoupling and simplifying what was in #26966 first. Commits should be simple to diggest.",
+      "state": "open",
+      "user": "furszy",
+      "created_at": "2026-02-03T04:06:34Z",
+      "updated_at": "2026-02-08T02:54:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34489",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1220,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3203071670,
+      "number": 34389,
+      "title": "net/log: standardize peer+addr log formatting via `LogPeer`",
+      "body": "This is an alternative to #34293, but aims to address the remaining logging inconsistencies more broadly.\r\nIt extends the example fixed there to every instance, restores the original separator behavior, applies it consistently via a single helper, and adds tests for `logips` (covering both current and new behavior).\r\n\r\n### Problem\r\nAfter #28521 centralized peer address logging into `CNode::LogIP()`, the original comma separator before `peeraddr=` was lost, resulting in inconsistent formatting across net (and recent private broadcast) logs.\r\nSome lines also had double spaces, empty fields, or mismatched format specifiers.\r\n\r\n### Fix\r\nIntroduces `CNode::LogPeer(bool)` which always emits `peer=<id>` and, when `-logips=1`, appends `, peeraddr=<addr>`. This eliminates hand-rolled separators and makes peer identification predictable.\r\nMinor issues (double spaces, empty placeholders, format specifiers) are fixed along the way in separate commits.\r\n\r\n### Reproducer\r\nRun with `-debug=net -logips=1` and observe peer log lines now show `peer=<id>, peeraddr=<addr>` (comma-separated). The new assertion in `feature_logging.py` automates this check.\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-23T12:09:26Z",
+      "updated_at": "2026-02-08T02:53:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34389",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1214,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3210441228,
+      "number": 34411,
+      "title": "[POC] Full Libevent removal",
+      "body": "This builds on all the work being done by pinheadmz and fjahr (#32061, #34342, #34158), to demo a libevent-less bitcoind.\r\n\r\nOne thing we could decide to change, or not, is the `libevent` logging catergory. Other than that, any remaining references to libevent, should be in documentation/code comments.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-01-26T12:35:26Z",
+      "updated_at": "2026-02-08T02:37:31Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34411",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 331,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3135104327,
+      "number": 34176,
+      "title": "wallet: crash fix, handle non-writable db directories",
+      "body": "Make wallet creation and load fail with a clear error when the db directory isn’t writable.\r\n\r\n#### 1) For Wallet Creation\r\n\r\nBefore: creating a wallet would return a generic error:\r\n\"SQLiteDatabase: Failed to open database: unable to open database file\"\r\n\r\nAfter: creating a wallet returns:\r\n\"SQLiteDatabase: Failed to open database in directory <dir_path>: directory is not writable\"\r\n\r\n#### 2) For Wallet Loading\r\n\r\nWe currently allow loading wallets located on non-writable directories. This is problematic\r\nbecause the node crashes on any subsequent write; generating a block is enough to trigger it.\r\nCan be verified just by running the following test on master: https://github.com/furszy/bitcoin-core/commit/85fa4e2910f0a8f43d4ee5a1322cbb69656d85e9 \r\n\r\nAlso, to check directory writability, this creates a tmp file rather than relying on the\r\n`permissions()` functions, since perms bits alone may not reliably reflect actual writability\r\nin some systems.\r\n\r\nTesting Note:\r\nPushed the tests in separate commits so they can be cherry-picked on master for comparison.",
+      "state": "open",
+      "user": "furszy",
+      "created_at": "2025-12-29T19:44:56Z",
+      "updated_at": "2026-02-08T02:18:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34176",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1125,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3221659481,
+      "number": 34439,
+      "title": "qa: Drop recursive deletes from test code, add lint checks.",
+      "body": "Both `fs::remove_all` and `shutil::rmtree()` are a bit dangerous, and most of their uses are not necessary, this PR removes most instances of both.\r\n\r\n`remove_all()` is still used in in `src/test/util/setup_common.cpp` as part of `BasicTestingSetup::BasicTestingSetup`'s constructor and destructor, and it is used in the kernel test code's [`TestDirectory`](https://github.com/bitcoin/bitcoin/blob/4ae00e9a7183cb15877c3014bf46f2e36470c304/src/test/kernel/test_kernel.cpp#L100-L112):\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/734899a4c404f24379d0597744465c147d9ad024/src/test/kernel/test_kernel.cpp#L100-L112\r\n\r\nIn both cases, `remove_all` is likely necessary, but the kernel's test code is RAII, ideally `BasicTestingSetup` could be made similar in a follow-up or in this PR if reviewers think it is important.\r\n\r\nSimilarly in the python code, most usage was unnecessary, but there are a few places where `rmtree()` was necessary, I have added sanity checks to make sure these are inside of the `tmpdir` before doing recursive delete there.",
+      "state": "open",
+      "user": "davidgumberg",
+      "created_at": "2026-01-29T03:59:52Z",
+      "updated_at": "2026-02-08T02:13:59Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34439",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 1101,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3222520742,
+      "number": 34440,
+      "title": "Refactor CChain methods to use references, tests",
+      "body": "Refactor `CChain` methods (`Contains()`, `Next()`, etc.) to use references instead of pointers, to minimize the risk of accidental `nullptr` dereference (memory access violation). Also add missing unit tests to the `CChain` class.\r\n\r\nThe `CChain::Contains()` method (in `src/chain.h`) dereferences its input without checking. The `Next()` method also calls into this with a `nullptr` if invoked with `nullptr`. While most call sites have indirect guarantee that the input is not `nullptr`, it's not easy to establish this to all call sites with high confidence. These methods are publicly available. There is no known high-level use case to trigger this error, but the fix is easy, and makes the code safer.\r\n\r\nChanges:\r\n\r\n- Add basic unit tests for `CChain` class methods\r\n- Refactor `CChain::Contains()` to take reference\r\n- Refactor `CChain::Next()` to take reference\r\n- Add unit tests for `CChain::FindFork()`\r\n- Change `PeerManagerImpl::BlockRequestAllowed()` to take reference\r\n\r\nTODO:\r\n\r\n- ? /Change `CChain` internals to store references instead of pointers/\r\n- ? /Explore the change to always have at least one element (genesis), that way there is always genesis and tip./\r\n- Check related methods to change to reference -- `FindFork`, `FindEarliestAtLeast`, `FindForkInGlobalIndex`, `blockman.AddToBlockIndex`, etc.\r\n\r\nAlternative. A simpler change is to stick with pointers, with extra checks where needed, see #34416 .\r\n\r\nThis change is remotely related to and indirectly triggered by #32875 .\r\n",
+      "state": "open",
+      "user": "optout21",
+      "created_at": "2026-01-29T09:21:03Z",
+      "updated_at": "2026-02-08T02:10:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34440",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1556,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3226824452,
       "number": 34457,
@@ -32,55 +876,6 @@
       }
     },
     {
-      "id": 3256881734,
-      "number": 34532,
-      "title": "doc: add Tor-only node operation guide to tor.md",
-      "body": "## Summary\n\nAdds a new \"Running a Tor-only node\" section to `doc/tor.md` covering:\n\n- Minimal `bitcoin.conf` configuration for `onlynet=onion`\n- The `dnsseed`/`dns` incompatibility with `onlynet` (which causes a hard exit with a non-obvious error message)\n- Peer discovery mechanisms when DNS seeding is unavailable\n- How to verify onion address advertisement\n\n## Motivation\n\nThese are common pain points encountered when setting up a privacy-focused Tor-only node. The existing documentation covers running behind a Tor proxy and creating onion services, but doesn't address the specific configuration requirements and gotchas of Tor-only operation. The `dnsseed=1` + `onlynet=onion` incompatibility in particular produces a confusing error that isn't documented anywhere.\n\nDiscovered while setting up a Tor-only node on ARM64 (Raspberry Pi 5).\n\n## Test plan\n\n- [ ] Documentation only — no code changes\n- [ ] Verified all configuration examples match actual Bitcoin Core v27.0+ behavior\n- [ ] Tested the described setup on ARM64 aarch64 hardware",
-      "state": "open",
-      "user": "Jhackman2019",
-      "created_at": "2026-02-07T03:28:14Z",
-      "updated_at": "2026-02-08T01:27:13Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34532",
-      "labels": [
-        "Docs",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1095,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3239243501,
-      "number": 34489,
-      "title": "index: batch db writes during initial sync",
-      "body": "Decouples part of #26966.\r\n\r\nRight now, index initial sync writes to disk for every block, which is not the best for HDD. This change batches those, so disk writes are less frequent during initial sync. This also cuts down `cs_main` contention by reducing the number of `NextBlockSync` calls (instead of calling it for every block, we will call it once per block window), making the node more responsive (IBD and validation) while indexes sync up. On top of that, it lays the groundwork for the bigger speedups, since part of the parallelization pre-work is already in place.\r\n\r\nJust as a small summary:\r\n\r\n* Batch DB writes instead of flushing per block, which improves sync time on HDD due to the reduced number of disk write operations.\r\n* Reduce `cs_main` lock contention, which improves the overall node responsiveness (and primarily IBD) while the indexes threads are syncing.\r\n* Lays the groundwork for the real speedups, since part of #26966 parallelization pre-work is introduced here as well.\r\n\r\nNote:\r\nPending initial sync benchmark and further testing. I have only focused on decoupling and simplifying what was in #26966 first. Commits should be simple to diggest.",
-      "state": "open",
-      "user": "furszy",
-      "created_at": "2026-02-03T04:06:34Z",
-      "updated_at": "2026-02-08T01:24:24Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34489",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1220,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3243034362,
       "number": 34495,
       "title": "Replace boost signals with minimal compatible implementation",
@@ -100,31 +895,6 @@
         "text_length": 1736,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3135104327,
-      "number": 34176,
-      "title": "wallet: crash fix, handle non-writable db directories",
-      "body": "Make wallet creation and load fail with a clear error when the db directory isn’t writable.\r\n\r\n#### 1) For Wallet Creation\r\n\r\nBefore: creating a wallet would return a generic error:\r\n\"SQLiteDatabase: Failed to open database: unable to open database file\"\r\n\r\nAfter: creating a wallet returns:\r\n\"SQLiteDatabase: Failed to open database in directory <dir_path>: directory is not writable\"\r\n\r\n#### 2) For Wallet Loading\r\n\r\nWe currently allow loading wallets located on non-writable directories. This is problematic\r\nbecause the node crashes on any subsequent write; generating a block is enough to trigger it.\r\nCan be verified just by running the following test on master: https://github.com/furszy/bitcoin-core/commit/85fa4e2910f0a8f43d4ee5a1322cbb69656d85e9 \r\n\r\nAlso, to check directory writability, this creates a tmp file rather than relying on the\r\n`permissions()` functions, since perms bits alone may not reliably reflect actual writability\r\nin some systems.\r\n\r\nTesting Note:\r\nPushed the tests in separate commits so they can be cherry-picked on master for comparison.",
-      "state": "open",
-      "user": "furszy",
-      "created_at": "2025-12-29T19:44:56Z",
-      "updated_at": "2026-02-08T01:07:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34176",
-      "labels": [
-        "Wallet",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1125,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -173,31 +943,6 @@
         "text_length": 921,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3257065528,
-      "number": 34533,
-      "title": "wallet: resubmit transactions with private broadcast if enabled",
-      "body": "The wallet keeps track of transactions related to it and periodically rebroadcasts them every 12-36 hours if they are not mined.\r\n\r\nIf `-privatebroadcast=1` and a transaction is submitted locally with the `sendrawtransaction` RPC and it is related to the wallet, then the rebroadcasts would use the send-to-all method. Change that to use the private broadcast method.\r\n",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-02-07T05:35:17Z",
-      "updated_at": "2026-02-08T00:25:38Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34533",
-      "labels": [
-        "Wallet",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 433,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -275,79 +1020,6 @@
       }
     },
     {
-      "id": 2272618048,
-      "number": 31644,
-      "title": "leveldb: show non-default options during init",
-      "body": "To help with to debugging and traceability (in alignment with displaying other non-default args such as `Command-line arg: dbcache=\"10000\"`) we can extend the LevelDB opening log with an additional debug message for the used non-default settings.\r\n\r\nTo avoid showing booleans as e.g. `create_if_missing=1`, I've added a local `ToString` lambda for `bool`.\r\nI wanted to use `util::Join` at the end, but couldn't find any way that I liked.\r\n\r\nExample output after the change:\r\n```bash\r\n2025-10-15T02:39:45Z Opened LevelDB successfully\r\n2025-10-15T02:39:45Z [leveldb] startup options: options.compression=NoCompression, options.create_if_missing=true, options.max_file_size=33554432, options.paranoid_checks=true, options.write_buffer_size=524288, readoptions.fill_cache=false, readoptions.verify_checksums=true, writeoptions.sync=true\r\n```",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-01-12T17:30:54Z",
-      "updated_at": "2026-02-08T00:12:19Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31644",
-      "labels": [
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 883,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2803909911,
-      "number": 33324,
-      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
-      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-09-05T23:51:29Z",
-      "updated_at": "2026-02-08T00:04:49Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
-      "labels": [
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3232,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 2876629729,
-      "number": 33512,
-      "title": "coins: use number of dirty cache entries in flush warnings/logs",
-      "body": "Revival of https://github.com/bitcoin/bitcoin/pull/31703 with all outstanding review feedback addressed.\r\n\r\n<details>\r\n<summary>A few changes compared to the original</summary>\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/34207 resolved part of dirty counting in `SanityCheck`\r\n* `EmplaceCoinInternalDANGER` is also fuzz tested now\r\n* Warning and logging moved from `FlushStateToDisk` to `CCoinsViewDB::BatchWrite`, ensuring `AssumeUTXO` snapshot writes also display progress warnings\r\n* Removed the redundant changed counter in `BatchWrite` since we now track `dirty_count` directly\r\n* All instances use `dirty_count` (not `num_dirty`) and parameter alignment is corrected\r\n\r\n</details>\r\n\r\n----\r\n\r\n> Since #28280 and #28233, the percentage of dirty entries in the cache when a flush happens may in practice be far from 100%. The log output, the decision to warn about a large flush (#31534), and the disk-full detection, however always use the entire size of the cache.\r\n>\r\n> Fix this by keeping track of the number of dirty entries in `CCoinsViewCache`, and using that number. We've dropped the usage of `DynamicMemoryUsage` as it's the wrong metric, even before the non-wiping flushes were introduced (if everything is dirty, memory usage is correlated with, but not the same as, the amount of disk space written or used). They could be improved by keeping track of proper write size estimates in a follow-up, but here we're just using a fixed 48 bytes per entry estimate.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-10-01T02:24:51Z",
-      "updated_at": "2026-02-08T00:03:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33512",
-      "labels": [
-        "UTXO Db and Indexes",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 2,
-        "text_length": 1539,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3088060609,
       "number": 34038,
       "title": "logging: API improvements",
@@ -368,55 +1040,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 577,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3220617054,
-      "number": 34435,
-      "title": "refactor: use `_MiB`/`_GiB` consistently for byte conversions",
-      "body": "### Problem\r\nByte-size conversions in the codebase currently show up in many equivalent formats (multiplication/division chains, shifts, hex/binary literals), which creates a maintenance burden and makes review error-prone - especially considering the architectural differences of `size_t`.\r\nInspired by https://github.com/bitcoin/bitcoin/pull/34305#discussion_r2734720002, it seemed appropriate to unify `Mebibyte` usage across the codebase and add `Gibibyte` support with 32/64 bit `size_t` validation.\r\n\r\n### Fix\r\nThis PR refactors those call sites to use `\"\"_MiB` (existing) and `\"\"_GiB` (new), and adds the encountered value/pattern replacements to unit tests to make review straightforward, and to ensure the conversions remain valid.\r\nThe literals are overflow-checked when converting to `size_t`, and unit tests cover the 32-bit boundary cases.\r\n\r\nConcretely, it replaces patterns such as:\r\n* `1024*1024`, `1<<20`, `0x100000`, `1048576`, `/ 1024 / 1024`, `* (1.0 / 1024 / 1024)` → `1_MiB` or `double(1_MiB)`\r\n* `1024*1024*1024`, `1<<30`, `0x40000000`, `1024_MiB`, `>> 30` → `1_GiB`\r\n\r\n### Note\r\nIn the few places where arithmetic involves signed values, the result is identical to the previous code assuming those quantities never become negative.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-28T21:26:10Z",
-      "updated_at": "2026-02-07T23:54:18Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34435",
-      "labels": [
-        "Refactoring",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1317,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3220693682,
-      "number": 34436,
-      "title": "refactor + log: use new `CeilDiv` helper in UTXO `Flushing` warning",
-      "body": "### Problem\r\nThe `Flushing large (... GiB) UTXO set...` warning was rounding the target value down (e.g. `1643.7MiB` was printed as `1 GiB`) which downplayed the warning that is meant to set the user's expectations.\r\n\r\n### Fixes\r\nThis PR starts with introducing a small overflow-safe integer `CeilDiv()` helper and replaces existing ceiling-division expressions across the codebase as a pure refactor.\r\nIn the second commit, this method is applied to change the flushing message slightly by rounding the batch size up, amending https://github.com/bitcoin/bitcoin/pull/31534 which introduced the warning.\r\n\r\n### Reproducer:\r\n> killall bitcoind; rm -rfd build demo; mkdir demo && cmake -B build >/dev/null 2>&1 && cmake --build build -j$(nproc) --target bitcoind >/dev/null 2>&1 && build/bin/bitcoind -datadir=demo-dbcache=2000 -stopatheight=300000 | egrep 'height=300000|Flushing large'\r\n\r\nBefore:\r\n```bash\r\nUpdateTip: new best=000000000000000082ccf8f1557c5d40b21edabb18d2d691cfbf87118bac7254 height=300000 version=0x00000002 log2_work=78.499549 tx=38463789 date='2014-05-10T06:32:34Z'\r\nprogress=0.029457 cache=1643.7MiB(11822004txo)\r\n[warning] Flushing large (1 GiB) UTXO set to disk, it may take several minutes\r\n```\r\n\r\nAfter:\r\n```bash\r\nUpdateTip: new best=000000000000000082ccf8f1557c5d40b21edabb18d2d691cfbf87118bac7254 height=300000 version=0x00000002 log2_work=78.499549 tx=38463789 date='2014-05-10T06:32:34Z'\r\nprogress=0.029457 cache=1643.7MiB(11822004txo)\r\n[warning] Flushing large (2 GiB) UTXO set to disk, it may take several minutes\r\n```\r\n\r\nThe cache line shows `1643.7MiB`, which now rounds up to `2 GiB` instead of down to `1 GiB`.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-28T21:47:06Z",
-      "updated_at": "2026-02-07T23:54:13Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34436",
-      "labels": [
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1712,
         "has_nack": false,
         "has_ack": false
       }
@@ -443,31 +1066,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 305,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3250214855,
-      "number": 34514,
-      "title": "refactor: remove unnecessary std::move for trivially copyable types",
-      "body": "Inspired by https://github.com/bitcoin/bitcoin/pull/34320#discussion_r2751764873.\r\n\r\n### Problem\r\nA few function signatures in the codebase use rvalue references for trivially copyable types, forcing callers to `std::move()` values where there is no benefit - for trivially copyable types, moving is semantically identical to copying (see https://godbolt.org/z/hdrn17v9b).\r\n\r\nAdditionally, some call sites use `std::move()` on plain enums and primitive types where it is basically just noise.\r\n\r\nNote: `CheckTriviallyCopyableMove` remains `false` - `std::move()` on trivially copyable types is still permitted where it serves as intent documentation (e.g. signaling that a value should not be reused after a call).\r\n\r\n### Fix\r\n* Document why `CheckTriviallyCopyableMove` is kept disabled (to preserve `bugprone-use-after-move` coverage on trivially copyable types where `std::move` signals intent), cherry-picked from #34523\r\n* Change `EmplaceCoinInternalDANGER` to take `const COutPoint&` instead of `COutPoint&&`\r\n* Change logging functions to take `const SourceLocation&` instead of `SourceLocation&&`\r\n* Remove `std::move()` on enum types in RPC constructors and on `bool`/`int` members in `txgraph.cpp`",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-02-05T13:27:48Z",
-      "updated_at": "2026-02-07T23:52:10Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34514",
-      "labels": [
-        "Refactoring",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1275,
         "has_nack": false,
         "has_ack": false
       }
@@ -666,56 +1264,6 @@
       }
     },
     {
-      "id": 1444867984,
-      "number": 28122,
-      "title": "Silent Payments: Implement BIP352",
-      "body": "This PR is part of integrating silent payments into Bitcoin Core. The project is tracked in https://github.com/bitcoin/bitcoin/issues/28536\r\n\r\nBased on https://github.com/bitcoin-core/secp256k1/pull/1698\r\n\r\n## BIP352\r\n\r\nThis PR focuses strictly on the BIP logic and attempts to separate it from the wallet and transaction implementation details. This is accomplished by working directly with public and private keys, instead of needing a wallet backend and transactions for testing. Labels for the receiver are optional and thus deferred for a later PR.\r\n\r\nTest vectors from the BIP are included as unit tests.\r\n",
-      "state": "open",
-      "user": "josibake",
-      "created_at": "2023-07-21T18:36:37Z",
-      "updated_at": "2026-02-07T20:08:04Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/28122",
-      "labels": [
-        "Wallet",
-        "Privacy",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 646,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 2224317475,
-      "number": 31449,
-      "title": "coins,refactor: Reduce `getblockstats` RPC UTXO overhead estimation",
-      "body": "The [`getblockstats` RPC](https://github.com/bitcoin/bitcoin/pull/10757) currently overestimates UTXO overhead by treating the `fCoinBase` bitfield as an additional `bool` in `PER_UTXO_OVERHEAD`.\r\nHowever, `fCoinBase` and `nHeight` are stored as bitfields and effectively packed into a single 32-bit value; counting an extra bool in the overhead calculation is unnecessary.\r\n\r\nThis PR introduces the following changes across three commits:\r\n* Store `fCoinBase` as a bool bitfield to reduce implicit conversions at call sites.\r\n* Use a consistent height/coinbase packing style across Coin serialization, undo serialization, and coinstats hashing (casting `nHeight` to `uint32_t` before shifting to avoid signed-promotion UB).\r\n* Adjust UTXO overhead estimation to match the actual Coin layout and update the related tests accordingly.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2024-12-09T17:36:50Z",
-      "updated_at": "2026-02-07T19:54:47Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31449",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 901,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2285701879,
       "number": 31682,
       "title": "[IBD] specialize CheckBlock's input & coinbase checks",
@@ -781,28 +1329,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 2676,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3203071670,
-      "number": 34389,
-      "title": "net/log: standardize peer+addr log formatting via `LogPeer`",
-      "body": "This is an alternative to #34293, but aims to address the remaining logging inconsistencies more broadly.\r\nIt extends the example fixed there to every instance, restores the original separator behavior, applies it consistently via a single helper, and adds tests for `logips` (covering both current and new behavior).\r\n\r\n### Problem\r\nAfter #28521 centralized peer address logging into `CNode::LogIP()`, the original comma separator before `peeraddr=` was lost, resulting in inconsistent formatting across net (and recent private broadcast) logs.\r\nSome lines also had double spaces, empty fields, or mismatched format specifiers.\r\n\r\n### Fix\r\nIntroduces `CNode::LogPeer(bool)` which always emits `peer=<id>` and, when `-logips=1`, appends `, peeraddr=<addr>`. This eliminates hand-rolled separators and makes peer identification predictable.\r\nMinor issues (double spaces, empty placeholders, format specifiers) are fixed along the way in separate commits.\r\n\r\n### Reproducer\r\nRun with `-debug=net -logips=1` and observe peer log lines now show `peer=<id>, peeraddr=<addr>` (comma-separated). The new assertion in `feature_logging.py` automates this check.\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-23T12:09:26Z",
-      "updated_at": "2026-02-07T19:38:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34389",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1214,
         "has_nack": false,
         "has_ack": false
       }
@@ -975,30 +1501,6 @@
       }
     },
     {
-      "id": 2640910930,
-      "number": 32875,
-      "title": "index: handle case where pindex_prev equals chain tip in NextSyncBlock()",
-      "body": "# Background\r\nNextSyncBlock() is used in BaseIndex::Sync() to get the next block index to be synced, so that BaseIndex::Sync() can build the index for that block.\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/index/base.cpp#L150-L151\r\n\r\nIt normally calls chain.Next(pindex_prev) to get the next block index on the active chain. If that fails, pindex_prev is on a fork. In that case, chain.FindFork(pindex_prev) is called to return the fork point, and then chain.Next(fork point) is returned for the caller to handle.\r\nThe latter logic is referred to as the fork code below.\r\n\r\n# Issue:\r\nThe current master implementation of NextSyncBlock() handles a specific case implicitly in the fork code.\r\n\r\nThe special case is pindex_prev == chain tip (simplified as the special case below). This means the input block is already the tip of the active chain, and there is no next block to be indexed anymore. Thus, NextSyncBlock() should return nullptr. This expectation is also implied in BaseIndex::Sync():\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/index/base.cpp#L220-L221\r\n\r\nAlthough NextSyncBlock() does return nullptr in this case, it is handled in a confusing code flow:\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/index/base.cpp#L150-L166\r\n\r\ncalls line 158: chain.Next(pindex_prev) returns nullptr because the below code flow:\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/chain.h#L417-L423\r\n\r\ncalls line 419: chain.Contains():\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/chain.h#L411-L414\r\n\r\ncalls line 405:\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/chain.h#L403-L408\r\n\r\nThus in `NextSyncBlock` line 159, because pindex is nullptr, it finally falls into the fork code.\r\nit is handled only coincidentally by the fork code:\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/index/base.cpp#L163-L165\r\n\r\nin this code, FindFork() is called,\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/chain.cpp#L50-L59\r\nand because pindex is the active chain tip, the `while` loop on line 56 is not iterated. It finally returns pindex itself.\r\nSo at last `chain.Next(pindex_prev)` is called again to return nullptr.\r\n\r\nHowever, the fork code is designed to handle reorgs, not this special case. This seems to be an oversight rather than something by design.\r\n\r\n# How to test it\r\n\r\nBecause `NextSyncBlock()` returns nullptr in the special case anyway, some debug code like `assert()` or `std::cout` or log sematics has to be added into this method to see the code flow in this method. The caller can be this unit test:\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/1d3243806da6db8bd13e6b20906628ed434362b6/src/test/txindex_tests.cpp#L16-L33\r\n\r\nLine 32 calls `Sync()` and it calls `NextSyncBlock()` \r\n\r\n# Solution:\r\nRather than modifying the comments on lines 163–164 to make them consistent with the fork code behavior, it would be better to handle this special case explicitly and early in NextSyncBlock().\r\n",
-      "state": "open",
-      "user": "HowHsu",
-      "created_at": "2025-07-04T10:03:17Z",
-      "updated_at": "2026-02-07T17:31:36Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32875",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3285,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2584507258,
       "number": 32729,
       "title": "test,refactor: extract script template helpers & widen sigop count coverage",
@@ -1071,30 +1573,6 @@
       }
     },
     {
-      "id": 3054407979,
-      "number": 33966,
-      "title": "refactor: disentangle miner startup defaults from runtime options",
-      "body": "The interaction between node startup options like `-blockreservedweight` and runtime options, especially those passed via IPC, is confusing.\r\n\r\nThey're combined in `BlockAssembler::Options`, which this PR gets rid of in favour of two distinct structs:\r\n\r\n1. `BlockCreateOptions`: used by interface clients. As before, IPC clients have access to a safe / sane subset, whereas RPC and test code can use all fields.\r\n2. `MiningArgs`: these are set once during node startup\r\n\r\nBoth structs have a member for the maximum block height, which is not a problem since they're different structs. The one on `MiningArgs` (`block_max_weight`) matches `-maxblockheight` and is left alone. The one on `BlockCreateOptions` (`block_max_weight`) is an optional, it's set by `ApplyMiningDefaults` only if empty. \r\n\r\nThis all happens in the last commit and requires some preparation to keep things easy to review.\r\n\r\nWe get rid of `BlockAssembler::Options` but this is used in many tests. Since large churn is inevitable, we might as well switch all tests, bench and fuzzers over to the Mining interface. The first (non-base) commit does that, dramatically reducing direct use of `BlockAssembler`. Two exceptions are documented in the commit message. Because `test_block_validity` wasn't available via the interface and the block_assemble benchmark needs it, it's moved from `BlockAssembler::Options` to `BlockCreateOptions` (still not exposed via IPC).\r\n\r\nWe need access to mining related defaults and structs from both the miner and node initialization code. To avoid having to pull in all of `BlockAssembler` for the latter, the second commit introduces `node/mining.h` and moves constants and structs there from `src/node/types.h` (`BlockCreateOptions`, `BlockWaitOptions`, `BlockCheckOptions`) and `src/node/miner.h` (`DEFAULT_PRINT_MODIFIED_FEE`).\r\n\r\nI considered also moving `DEFAULT_BLOCK_MAX_WEIGHT`, `DEFAULT_BLOCK_RESERVED_WEIGHT`, `MINIMUM_BLOCK_RESERVED_WEIGHT` and `DEFAULT_BLOCK_MIN_TX_FEE` there from `policy.h`, since they are distinct from relay policy and not needed by the kernel. But this seems more appropriate for a follow-up and requires additional discussion.\r\n\r\nThe meat and potatoes of this PR is split between the three last commits for easier review:\r\n\r\n1. Adds `node/mining_args.{h,cpp}` and move the options checking out of `init.cpp`, without adding storage\r\n2. Add `block_max_weight` to `BlockCreateOptions` as explained above\r\n3. Introduce the `MiningArgs` struct, add it to the `NodeContext`, expand `mining_args.cpp` to store it, pass it to `BlockAssembler`, etc.\r\n\r\nI kept variable renaming and other formatting changes to a minimum to ease review with `--color-moved=dimmed-zebra`.\r\n\r\nThis PR builds on the bug fix in:\r\n- [ ] #33965\r\n\r\nOnce that is merged, this PR should not change behaviour.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-28T15:42:31Z",
-      "updated_at": "2026-02-07T16:10:22Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33966",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 2878,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2712708880,
       "number": 33112,
       "title": "wallet: relax external_signer flag constraints",
@@ -1116,52 +1594,6 @@
         "text_length": 1635,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3054115118,
-      "number": 33965,
-      "title": "mining: fix -blockreservedweight shadows IPC option",
-      "body": "Also enforce `MINIMUM_BLOCK_RESERVED_WEIGHT` for IPC clients.\r\n\r\nThe `-blockreservedweight` startup option should only affect RPC code, because IPC clients (currently) do not have a way to signal their intent to use the node default (the `BlockCreateOptions` struct defaults merely document a recommendation for client software).\r\n\r\nBefore this PR however, if the user set `-blockreservedweight` then `ApplyArgsManOptions` would cause the `block_reserved_weight` option passed by IPC clients to be ignored. _Users who don't set this value were not affected._\r\n\r\nFix this by making BlockCreateOptions::block_reserved_weight an std::optional.\r\n\r\nInternal interface users, such as the RPC call sites, don't set a value so -blockreservedweight is used. Whereas IPC clients do set a value which is no longer ignored.\r\n\r\nTest coverage is added, with a preliminary commit that refactors the `create_block_template` and `wait_next_template` helpers.\r\n\r\n`mining_basic.py` already ensured `-blockreservedweight` is enforced by mining RPC methods. The second commit adds coverage for Mining interface IPC clients. It also verifies that `-blockreservedweight` has no effect on them.\r\n\r\nThe third commit enforces `MINIMUM_BLOCK_RESERVED_WEIGHT` for IPC clients. Previously lower values were quietly clamped.\r\n\r\n---\r\n\r\nMerge order preference: #34452 should ideally go first.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-28T13:38:33Z",
-      "updated_at": "2026-02-07T15:14:17Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33965",
-      "labels": [
-        "Mining"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1412,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2837615883,
-      "number": 33421,
-      "title": "node: add  `BlockTemplateCache`",
-      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify an optional template age limit in `MillisecondsDouble`:\r\n\r\n- If template age limit is `nullopt`, we create a new template and return it without adding it to the cache.\r\n- If a matching template (block template with identical block creation options) exists in the cache and hasn't exceeded the age limit, the cached version is returned.\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned. When evicting stale templates, we assume no duplicates exist since templates are evicted as soon as their age limit is reached or exceeded.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted after each insertion.\r\n\r\n\r\nCache lookup requires an exact match on ALL `BlockAssembler::Options` fields. While some fields (e.g., `test_block_validity`, `print_modified_fee`, `coinbase_output_script`) could be ignored for cache reuse, they mainly differ in tests and benchmarks. We keep the logic simple and accept cache misses in those cases.\r\n\r\n\r\nThe cache enforces at most one template per set of options. When searching for a match in `getCachedTemplate()`, if a template with matching options is found but has exceeded the age limit, it's immediately evicted before returning `nullptr`. This ensures no duplicate options exist in the cache. A `SanityCheck()` method verifies this invariant in tests by checking all cached entries for duplicates.\r\n\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\n`GetBlockTemplate()` uses double-checked locking: it first checks the cache with only `m_mutex` held, then if there's a miss, acquires both `cs_main` and `m_mutex` to create the template. Before creating, it checks again since another thread might have added a template while locks were released. \r\n\r\nThis PR removes an unused `node/context.h` import from miner to prevent a circular dependency when exposing the block template cache to the node context.",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-09-17T18:47:09Z",
-      "updated_at": "2026-02-07T14:31:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2508,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -1213,30 +1645,6 @@
       }
     },
     {
-      "id": 2919092278,
-      "number": 33637,
-      "title": "refactor: optimize block index comparisons (1.4-6.8x faster)",
-      "body": "### Context\r\nThe comparator is often called either directly or for the sorting of [setBlockIndexCandidates](https://github.com/bitcoin/bitcoin/blob/master/src/validation.h#L637), a red-black tree-set containing valid block headers where the comparator is invoked extensively.\r\nBesided the sorted set usages, the comparator is used directly in `Chainstate` in `FindMostWorkChain`, `PruneBlockIndexCandidates`, `ActivateBestChain` and `InvalidateBlock`; and in `ChainstateManager` in `LoadBlockIndex`, `CheckBlockIndex`, `ActivateSnapshot` and `PopulateAndValidateSnapshot`.\r\n\r\nIt was profiled during the investigation of https://github.com/bitcoin/bitcoin/issues/33618#issuecomment-3402229976. \r\n\r\n### Testing\r\nTo ensure the optimized implementations are both fast and correct, the first commit adds a dedicated benchmark to measure `CBlockIndexWorkComparator` performance, and the second commit adds randomized tests comparing the new implementation with the original one.\r\n\r\n### Results\r\n\r\n> GCC 15.0.1:\r\n\r\n* `CBlockIndexWorkComparator`: 100,772,511 cmp/s → 656,674,205 cmp/s = 6.51x faster\r\n* `CheckBlockIndex`: 9,091 ops/s → 14,765 ops/s = 1.62x faster\r\n\r\n> Clang 22.0.0:\r\n\r\n* `CBlockIndexWorkComparator`: 100,451,893 cmp/s → 683,414,234 cmp/s = 6.8x faster\r\n* `CheckBlockIndex`: 10,322 ops/s → 14,376 ops/s = 1.39x faster\r\n\r\nSee https://corecheck.dev/bitcoin/bitcoin/pulls/33637 for the CI's `CheckBlockIndex` performance.\r\n\r\n<details>\r\n<summary>gcc and clang measurements</summary>\r\n\r\n> Compiler: gcc 15.0.1\r\nb60450fae8 bench: add benchmark to measure `CBlockIndexWorkComparator` performance\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                9.92 |      100,772,511.62 |    0.0% |           63.98 |           35.64 |  1.795 |          14.17 |    1.9% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          109,996.46 |            9,091.20 |    0.2% |    1,014,421.11 |      394,979.29 |  2.568 |     313,025.11 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\ne2e02177ba refactor: inline `arith_uint256` comparison operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.48 |      154,439,491.66 |    0.0% |           31.01 |           23.25 |  1.334 |           7.16 |    3.8% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|          105,754.86 |            9,455.83 |    0.1% |      913,130.11 |      379,588.20 |  2.406 |     276,692.11 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\n85b74b01de refactor: optimize `arith_uint256` comparison with spaceship operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.37 |      156,990,488.06 |    0.0% |           28.85 |           22.87 |  1.261 |           8.61 |    3.2% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           83,803.10 |           11,932.73 |    0.0% |      743,565.09 |      300,824.84 |  2.472 |     232,646.08 |    0.0% |      5.56 | `CheckBlockIndex`\r\n\r\ndeb58eea2f refactor: optimize `CBlockIndexWorkComparator` with std::tie\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                1.52 |      656,674,205.98 |    0.0% |           13.18 |            5.47 |  2.410 |           3.06 |    0.1% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           67,726.84 |           14,765.19 |    0.2% |      585,826.07 |      243,155.90 |  2.409 |     181,920.07 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\n> Compiler: clang 22.0.0\r\n\r\nb60450fae8 bench: add benchmark to measure `CBlockIndexWorkComparator` performance\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                9.96 |      100,451,893.46 |    0.0% |           61.28 |           35.75 |  1.714 |          13.62 |    2.1% |      5.52 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           96,878.70 |           10,322.19 |    0.1% |      802,827.10 |      347,679.01 |  2.309 |     234,823.10 |    0.0% |      5.50 | `CheckBlockIndex`\r\n\r\ne2e02177ba refactor: inline `arith_uint256` comparison operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.13 |      163,183,693.10 |    0.0% |           25.74 |           22.01 |  1.170 |           6.10 |    4.6% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           86,307.94 |           11,586.42 |    1.2% |      646,229.09 |      309,785.33 |  2.086 |     195,119.09 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\n85b74b01de refactor: optimize `arith_uint256` comparison with spaceship operator\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                6.36 |      157,330,900.16 |    1.0% |           26.20 |           22.61 |  1.159 |           6.55 |    4.4% |      5.53 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           75,031.66 |           13,327.71 |    1.0% |      650,604.15 |      266,934.04 |  2.437 |     149,967.14 |    0.0% |      5.54 | `CheckBlockIndex`\r\n\r\ndeb58eea2f refactor: optimize `CBlockIndexWorkComparator` with std::tie\r\n\r\n|              ns/cmp |               cmp/s |    err% |         ins/cmp |         cyc/cmp |    IPC |        bra/cmp |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|                1.46 |      683,414,234.14 |    0.0% |           16.12 |            5.25 |  3.067 |           4.02 |    0.1% |      5.50 | `CBlockIndexWorkComparator`\r\n\r\n|               ns/op |                op/s |    err% |          ins/op |          cyc/op |    IPC |         bra/op |   miss% |     total | benchmark\r\n|--------------------:|--------------------:|--------:|----------------:|----------------:|-------:|---------------:|--------:|----------:|:----------\r\n|           69,559.70 |           14,376.14 |    0.1% |      559,208.07 |      249,654.28 |  2.240 |     132,342.07 |    0.0% |      5.51 | `CheckBlockIndex`\r\n\r\n</details>\r\n\r\n### Reproducer\r\n\r\nRun the equivalence tests with:\r\n```bash\r\ncmake -B build && cmake --build build && ./build/bin/test_bitcoin --run_test=arith_uint256_tests,blockchain_tests\r\n```\r\n\r\nEach commit shows how it changes the relevant benchmarks.\r\n\r\n<details>\r\n<summary>Benchmark script</summary>\r\n\r\n```bash\r\nfor compiler in gcc clang; do \\\r\n  if [ \"$compiler\" = \"gcc\" ]; then CC=gcc; CXX=g++; COMP_VER=$(gcc -dumpfullversion); \\\r\n  else CC=clang; CXX=clang++; COMP_VER=$(clang -dumpversion); fi && \\\r\n  echo \"> Compiler: $compiler $COMP_VER\" && \\\r\n  for commit in 70c6244b709fcf6a853ea44b91b9ed219609ac90 516e05cd7d8dbb61b05854c59f5393367e502284 d053b27c06d06cccbc6395b0aa7dc1c4193a6fc3 8ef4ce2cb3ac80cbe58b8cf76e183f9eca6fafe4 703165e6d3b9fbd58b9c31ddce0e961047fc5e71; do \\\r\n    git fetch origin $commit >/dev/null 2>&1 && git checkout $commit >/dev/null 2>&1 && git log -1 --pretty='%h %s' && \\\r\n    rm -rf build && \\\r\n    cmake -B build -DBUILD_BENCH=ON -DENABLE_IPC=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX >/dev/null 2>&1 && \\\r\n    cmake --build build -j$(nproc) >/dev/null 2>&1 && \\\r\n    for i in 1; do \\\r\n      build/bin/bench_bitcoin -filter='CBlockIndexWorkComparator|CheckBlockIndex' -min-time=5000; \\\r\n    done; \\\r\n  done; \\\r\ndone\r\n```\r\n\r\n</details>\r\n\r\nNote: something similar was already started in https://github.com/bitcoin/bitcoin/pull/33334, but this is a broader optimization that doesn't use the same technique.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-10-16T01:54:31Z",
-      "updated_at": "2026-02-07T13:46:16Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33637",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 11214,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3254836472,
       "number": 34525,
       "title": "Release: Prepare \"Open Transifex translations for v31.0\" step",
@@ -1278,30 +1686,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 510,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3138438378,
-      "number": 34184,
-      "title": "mining: add cooldown to createNewBlock() immediately after IBD",
-      "body": "_This PR makes a breaking change to the Mining interface._\r\n\r\nAs reported in #33994, connected mining clients will receive a flood of new templates if the node is still going through IBD or catching up on the last 24 hours. This PR fixes that using an _optional_ cooldown mechanism, only applied to `createNewBlock()`.\r\n\r\nFirst, cooldown waits for IBD. Then, as the tip keeps moving forward, it waits a few seconds to see if the tip updated. If so, it restarts the timer and waits again. The trade-offs for this mechanism are explained below.\r\n\r\nBecause this PR changes `createNewBlock()` from a method that returns quickly to one that can block for minutes, the first commit fixes a bug in our `.capnp` definition, adding the missing `context` to `createNewBlock` (and `checkBlock`). It's an improved version of #33936.\r\n\r\nThis is a breaking API change, so it bumps the `makeMining` version and throws a nice error for older clients. That's tested in the functional test, and I also saw it with the sv2 Rust client. It may be possible to instead work around the existing bug and avoid the breaking change, but I don't think that's worth the efort and potential confusion at this point.\r\n\r\nThe second commit introduces the actual cooldown mechanism.\r\n\r\nThe third then adds an `interrupt()` method so that clients can cleanly disconnect.\r\n\r\n---\r\n\r\n## Rationale\r\n\r\nThe cooldown argument is optional, and not used by internal non-IPC code, for two reasons:\r\n\r\n1. The mechanism wreaks havoc on the functional test suite, which would require very careful mock time handling to work around. But that's pointless, because only IPC clients need it.\r\n2. It needs to be optional for IPC clients too, because in some situations, like a signet with only one miner, waiting for IBD can mean being stuck forever.\r\n\r\nThe reason it's only applied to `createNewBlock()` is that this is the first method called by clients; `waitNext()` is a method on the interface returned by `createNewBlock()`, at which point the cooldown is done.\r\n\r\nAfter IBD, we wait N seconds if the header is N blocks ahead of the tip, with a minimum of 3 and a maximum of 20 seconds. The minimum waiting time is short enough that it shouldn't be annoying or confusing for someone manually starting up a client. While the maximum should be harmless if it happens spuriously (which it shouldn't).\r\n\r\nIf the minimum wait is too short, clients get a burst of templates, as observed in the original issue. We can't entirely rule this out without a lot of additional complexity (like scanning our own log file for heuristics). This PR should make it a lot less likely, and thanks to the IBD wait also limit it to one day worth of blocks (`-maxtipage`).\r\n\r\nSome test runs on an M4 MacBook Pro, where I had a node catch up on the last few days worth of blocks:\r\n\r\n<img width=\"872\" height=\"972\" alt=\"Scherm­afbeelding 2026-02-04 om 18 21 17\" src=\"https://github.com/user-attachments/assets/7902a0f2-0e0b-4604-9688-cec2da073261\" />\r\n\r\nAs the chart shows, sometimes it takes longer than 3 seconds. But it turns out that in all those cases there were quite a few headers ahead of the tip. It also demonstrates that it's important to first wait for IBD, because it's less likely a random tip update takes longer than 20 seconds.\r\n\r\n- modified sv2-apps: https://github.com/Sjors/sv2-apps/tree/2026/02/cooldown\r\n- test script: https://gist.github.com/Sjors/feb6122c97acc2b9e6d66b168614609c#file-run_mainnet_pool_loop-zsh\r\n- chart script: https://gist.github.com/Sjors/feb6122c97acc2b9e6d66b168614609c#file-tip_interval_charts-py",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-12-31T05:17:32Z",
-      "updated_at": "2026-02-07T13:00:58Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34184",
-      "labels": [
-        "Mining"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 3633,
         "has_nack": false,
         "has_ack": false
       }
@@ -1378,54 +1762,6 @@
         "text_length": 704,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3102178109,
-      "number": 34075,
-      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
-      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-12-15T11:53:35Z",
-      "updated_at": "2026-02-07T11:30:15Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 1,
-        "text_length": 8927,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3119599294,
-      "number": 34124,
-      "title": "refactor: make `CCoinsView` a pure virtual interface",
-      "body": "### Problem\r\n`CCoinsView` serves as the interface for the coins database layer, but historically had a dual nature that caused confusion:\r\n\r\n* It provided default noop implementations (returning `std::nullopt`, `uint256()`, `false`, `nullptr`) instead of being pure virtual\r\n* Callers could instantiate a bare `CCoinsView` and get silent no-op behavior\r\n* Mixing the interface definition with a built-in dummy implementation blurred the abstraction boundary\r\n\r\n### Context\r\nThis is part of ongoing coins caching cleanup efforts, see https://github.com/bitcoin/bitcoin/issues/34280.\r\n\r\n### Fix\r\nThis PR separates interface and noop behavior, and makes `CCoinsView` pure virtual in incremental steps:\r\n* Add `CCoinsViewEmpty` as an explicit noop coins view for tests, benchmarks, and temporary backends\r\n* Replace direct bare-`CCoinsView` test/dummy instantiations with `CCoinsViewEmpty`\r\n* Incrementally make `CCoinsView` methods pure virtual (`GetCoin`, `GetBestBlock`, `BatchWrite`, `EstimateSize`, `Cursor`, `GetHeadBlocks`)\r\n* Keep default `HaveCoin(outpoint)` behavior (`GetCoin(outpoint).has_value()`)\r\n* Remove moved legacy default implementations from `coins.cpp`\r\n* Update the coins view fuzzer to switch between a real db-backed view and `CCoinsViewEmpty`\r\n* In `MemPoolAccept::PreChecks`, cache `best_block` before switching backend to `CCoinsViewEmpty` to avoid relying on empty-backend `GetBestBlock()`",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-12-20T08:47:33Z",
-      "updated_at": "2026-02-07T11:11:52Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34124",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1467,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -1574,30 +1910,6 @@
       }
     },
     {
-      "id": 3133212525,
-      "number": 34165,
-      "title": "coins: don't mutate main cache when connecting block",
-      "body": "This is a slightly modified version of the first few commits of #31132, which can be merged as an independent change. It has a small benefit on its own, but will help in moving the parent PR forward.\r\n\r\nWhen accessing coins via the `CCoinsViewCache`, methods like `GetCoin` can call `FetchCoin` which actually mutate `cacheCoins` internally to cache entries when they are pulled from the backing db. This is generally a performance improvement for single threaded access patterns, but it precludes us from accessing entries in a `CCoinsViewCache` from multiple threads without a lock.\r\n\r\nAnother aspect is that when we use the resettable `CCoinsViewCache` view backed by the main cache for use in `ConnectBlock()`, we will insert entries into the main cache even if the block is determined to be invalid. This is not the biggest concern, since an invalid block requires proof-of-work. But, an attacker could craft multiple invalid blocks to fill the main cache. This would make us `Flush` the cache more often than necessary. Obviously this would be very expensive to do on mainnet.\r\n\r\nIntroduce `CoinsViewOverlay`, a `CCoinsViewCache` subclass that reads coins without mutating the underlying cache via `FetchCoin()`.\r\n\r\nAdd `PeekCoin()` to look up a Coin through a stack of `CCoinsViewCache` layers without populating parent caches. This prevents the main cache from caching inputs pulled from disk for a block that has not yet been fully validated. Once `Flush()` is called on the view, these inputs will be added as spent to `coinsCache` in the main cache via `BatchWrite()`.\r\n\r\nThis is the foundation for async input fetching, where worker threads must not mutate shared state.\r\n",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2025-12-28T20:32:34Z",
-      "updated_at": "2026-02-07T10:45:40Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34165",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 1737,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3034182041,
       "number": 33922,
       "title": "mining: add getMemoryLoad() and track template non-mempool memory footprint",
@@ -1696,30 +2008,6 @@
       }
     },
     {
-      "id": 3149207404,
-      "number": 34208,
-      "title": "bench: add fluent API for untimed `setup` steps in nanobench",
-      "body": "### Context\r\nAs described in https://github.com/martinus/nanobench/issues/130, we have a few benchmarks where we have to reset the state between runs, otherwise the repetitions will do something else than the first iteration.\r\n\r\n### Upstream\r\nI have opened a PR to `nanobench` to introduce an untimed setup phase, see: https://github.com/martinus/nanobench/pull/136\r\nUnfortunately the author has health issues and couldn't contribute to it in the past 2 years.\r\n\r\n### Tests\r\n\r\nTests were only added upstream, would be a bit awkward to wire in `nanobench.h` outside the benchmarking setup:\r\nhttps://github.com/martinus/nanobench/pull/136/changes/58350cfe5912d7e0533ccfcd759eea5d62eb55bb#diff-88160f647ce57661afe7d755fa70a5fa342a2b79d72d3511596878e69ed5cdc3\r\n\r\n### Fix\r\nI have moved the changes here as well and applied it to a few simple benchmarks as demonstration.\r\nWe can revert ones that are controversial and add other ones in follow-ups, this PR is mostly meant to add the `setup` feature.\r\n\r\n### Benchmarks\r\nMost benchmarks show a modest \"speedup\", others a \"slowdown\" - but it's only the effect of the setup that's not measured anymore - and a `run` phase which does the same operation in each epoch iteration (wallet benchmark changes were reverted since for simplicity):\r\n<img width=\"1496\" height=\"882\" alt=\"image\" src=\"https://github.com/user-attachments/assets/34c14565-f3df-41e5-9a86-95b2ca21703a\" />\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-06T11:45:35Z",
-      "updated_at": "2026-02-07T10:22:59Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34208",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1475,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3248824084,
       "number": 34508,
       "title": "test: fix intermittent failure in interface_zmq.py",
@@ -1769,28 +2057,6 @@
       }
     },
     {
-      "id": 3169361001,
-      "number": 34271,
-      "title": "net_processing: make m_tx_for_private_broadcast optional",
-      "body": "Make `PeerManagerImpl::m_tx_for_private_broadcast` optional because it is needed for in private broadcast mode (`-privatebroadcast=1`).\r\n\r\nA followup to #29415, requested in:\r\nhttps://github.com/bitcoin/bitcoin/pull/29415#discussion_r2620864832\r\nhttps://github.com/bitcoin/bitcoin/pull/29415/files#r2620864832",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-01-13T11:32:27Z",
-      "updated_at": "2026-02-07T09:47:06Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34271",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 366,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3224372522,
       "number": 34450,
       "title": "[29.x] backports + final changes for 29.3rc2",
@@ -1810,30 +2076,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 91,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3181854676,
-      "number": 34320,
-      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
-      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the db.\r\nOne tries to deserialize, the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin` which delegates to `GetCoin`) and simplify `CCoinsViewCache::HaveCoin` to use `AccessCoin`.\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the database's `::GetCoin` (not `::HaveCoin`) on cache miss and checks cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: the latest version of the change keeps most `HaveCoin` calls for convenience, a previous version removed all of them.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-16T16:17:29Z",
-      "updated_at": "2026-02-07T09:29:13Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1238,
         "has_nack": false,
         "has_ack": true
       }
@@ -1953,31 +2195,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 407,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3249198695,
-      "number": 34511,
-      "title": "test: fully reset the state of CConnman in tests",
-      "body": "Member variables of `CConnman::m_private_broadcast` (introduced in\r\nhttps://github.com/bitcoin/bitcoin/pull/29415) could influence the tests\r\nwhich creates non-determinism if the same instance of `CConnman` is used\r\nfor repeated test iterations.\r\n\r\nSo, reset the state of `CConnman::m_private_broadcast` from\r\n`ConnmanTestMsg::Reset()`. Currently this affects the fuzz tests\r\n`process_message` and `process_messages`.\r\n\r\nReported in https://github.com/bitcoin/bitcoin/issues/34476#issuecomment-3849088794",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-02-05T08:52:48Z",
-      "updated_at": "2026-02-07T05:46:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34511",
-      "labels": [
-        "Tests",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 553,
         "has_nack": false,
         "has_ack": false
       }
@@ -2923,30 +3140,6 @@
       }
     },
     {
-      "id": 3187823761,
-      "number": 34342,
-      "title": "cli: Replace libevent usage with simple http client",
-      "body": "Part of the effort to remove the libevent dependency altogether, see #31194\r\n\r\nThis takes the [`HTTPHeaders` class](https://github.com/bitcoin/bitcoin/pull/32061/commits/d549f01caab659f1c431ccabf0f5ff1800debcfe) from #32061 and puts it into [`common/http.h|cpp`](https://github.com/bitcoin/bitcoin/pull/34342/commits/634d4dcfa428f17f0a12c2e2742c2c08e2345033). While it would not be strictly required for that PR to go in first, it might be better to review it first or simultaneously.\r\n\r\nOtherwise the change itself replaces the libevent-based HTTP client with a simple synchronous implementation which uses the `Sock` class directly.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2026-01-19T13:27:54Z",
-      "updated_at": "2026-02-06T20:23:51Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34342",
-      "labels": [
-        "Scripts and tools"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 686,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2647773300,
       "number": 32895,
       "title": "wallet: Prepare for future upgrades by recording versions of last client to open and decrypt",
@@ -3793,30 +3986,6 @@
       }
     },
     {
-      "id": 3210441228,
-      "number": 34411,
-      "title": "[POC] Full Libevent removal",
-      "body": "This builds on all the work being done by pinheadmz and fjahr (#32061, #34342, #34158), to demo a libevent-less bitcoind.\r\n\r\nOne thing we could decide to change, or not, is the `libevent` logging catergory. Other than that, any remaining references to libevent, should be in documentation/code comments.",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2026-01-26T12:35:26Z",
-      "updated_at": "2026-02-06T11:20:14Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34411",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 331,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3253567659,
       "number": 34523,
       "title": "doc: Clarify why performance-move-const-arg.CheckTriviallyCopyableMove=false",
@@ -3936,30 +4105,6 @@
       }
     },
     {
-      "id": 3221659481,
-      "number": 34439,
-      "title": "qa: Drop recursive deletes from test code, add lint checks.",
-      "body": "Both `fs::remove_all` and `shutil::rmtree()` are a bit dangerous, and most of their uses are not necessary, this PR removes most instances of both.\r\n\r\n`remove_all()` is still used in in `src/test/util/setup_common.cpp` as part of `BasicTestingSetup::BasicTestingSetup`'s constructor and destructor, and it is used in the kernel test code's [`TestDirectory`](https://github.com/bitcoin/bitcoin/blob/4ae00e9a7183cb15877c3014bf46f2e36470c304/src/test/kernel/test_kernel.cpp#L100-L112):\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/734899a4c404f24379d0597744465c147d9ad024/src/test/kernel/test_kernel.cpp#L100-L112\r\n\r\nIn both cases, `remove_all` is likely necessary, but the kernel's test code is RAII, ideally `BasicTestingSetup` could be made similar in a follow-up or in this PR if reviewers think it is important.\r\n\r\nSimilarly in the python code, most usage was unnecessary, but there are a few places where `rmtree()` was necessary, I have added sanity checks to make sure these are inside of the `tmpdir` before doing recursive delete there.",
-      "state": "open",
-      "user": "davidgumberg",
-      "created_at": "2026-01-29T03:59:52Z",
-      "updated_at": "2026-02-06T10:35:56Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34439",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 1101,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3241907915,
       "number": 34492,
       "title": "ci: Drop valgrind fuzz from GHA matrix",
@@ -3979,30 +4124,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1001,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3222520742,
-      "number": 34440,
-      "title": "Refactor CChain methods to use references, tests",
-      "body": "Refactor `CChain` methods (`Contains()`, `Next()`, etc.) to use references instead of pointers, to minimize the risk of accidental `nullptr` dereference (memory access violation). Also add missing unit tests to the `CChain` class.\r\n\r\nThe `CChain::Contains()` method (in `src/chain.h`) dereferences its input without checking. The `Next()` method also calls into this with a `nullptr` if invoked with `nullptr`. While most call sites have indirect guarantee that the input is not `nullptr`, it's not easy to establish this to all call sites with high confidence. These methods are publicly available. There is no known high-level use case to trigger this error, but the fix is easy, and makes the code safer.\r\n\r\nChanges:\r\n\r\n- Add basic unit tests for `CChain` class methods\r\n- Refactor `CChain::Contains()` to take reference\r\n- Refactor `CChain::Next()` to take reference\r\n- Add unit tests for `CChain::FindFork()`\r\n- Change `PeerManagerImpl::BlockRequestAllowed()` to take reference\r\n\r\nTODO:\r\n\r\n- ? /Change `CChain` internals to store references instead of pointers/\r\n- ? /Explore the change to always have at least one element (genesis), that way there is always genesis and tip./\r\n- Check related methods to change to reference -- `FindFork`, `FindEarliestAtLeast`, `FindForkInGlobalIndex`, `blockman.AddToBlockIndex`, etc.\r\n\r\nAlternative. A simpler change is to stick with pointers, with extra checks where needed, see #34416 .\r\n\r\nThis change is remotely related to and indirectly triggered by #32875 .\r\n",
-      "state": "open",
-      "user": "optout21",
-      "created_at": "2026-01-29T09:21:03Z",
-      "updated_at": "2026-02-06T10:32:19Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34440",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1556,
         "has_nack": false,
         "has_ack": false
       }
@@ -5313,30 +5434,6 @@
       }
     },
     {
-      "id": 2925411752,
-      "number": 33646,
-      "title": "log: check fclose() results and report safely in logging.cpp",
-      "body": "`fclose()` can report write errors (for example if the disk is full or the filesystem has a problem). Right now, some `fclose()` calls in `src/logging.cpp` ignore the return value. This means errors might go unnoticed and log lines could be lost without warning.\r\n\r\n## What this PR does:\r\n- Add a small helper that prints `fclose()` errors to `stderr` (with path and errno).\r\n- In shutdown: close `m_fileout` safely and report errors.\r\n- In reopen: open the new file, swap it in, close the old one, and report errors if closing fails.\r\n- In shrink/rotate: check all `fclose(file)` calls and report failures.\r\n\r\nNo other behavior changes. Normal logging, rotation, and console output remain unchanged.",
-      "state": "open",
-      "user": "cedwies",
-      "created_at": "2025-10-17T19:06:08Z",
-      "updated_at": "2026-02-05T09:21:14Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33646",
-      "labels": [
-        "Utils/log/libs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 761,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2972930823,
       "number": 33772,
       "title": "prevector: simplify implementation of comparison operators and match behavior of `std::vector`",
@@ -5358,30 +5455,6 @@
         "text_length": 1021,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2997112498,
-      "number": 33847,
-      "title": "kernel: Improve logging API",
-      "body": "Simplify kernel logging API and try to connect it to the rest of the kernel API by letting log options be set on `Logger` objects directly and `Logger` objects to be associated with `Context` objects directly. Also drop `logging_disable()` function and avoid having library accumulate log messages in a 1MB buffer by default.\r\n\r\nChanges are intended to make the API a little less surprising and more future proof. Rationale is described in some more detail the commit message.\r\n\r\nThis change is not backwards compatible but I'd expect it to port over pretty smoothly to the language bindings, and offer the same benefits for them as for C/C++ callers.\r\n\r\n",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2025-11-10T23:30:46Z",
-      "updated_at": "2026-02-05T06:31:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33847",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 683,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -5530,30 +5603,6 @@
       }
     },
     {
-      "id": 3163535277,
-      "number": 34254,
-      "title": "validation: Prevent duplicate logging and looping in invalid block handling",
-      "body": "`InvalidChainFound()` is called from 3 spots:\r\n1. from `InvalidBlockFound()`\r\n2. from `ActivateBestChain()`, with the highest connectable block of the chain\r\nas an arg (after having called `InvalidBlockFound()` already for the block that failed in `ConnectTip()`)\r\n3. from `InvalidateBlock()` (rpc-only)\r\n\r\nMost of the logic in `InvalidChainFound()` is not required for 2) and 3):\r\nIn `ActivateBestChain()`, the previous call to `InvalidChainFound()` before via `InvalidBlockFound` did the flag updates, best header calculation and logging, so only `m_best_invalid` could need additional updating.\r\nIn `InvalidateBlock()` (which doesn't call `InvalidBlockFound()`), we do most of the accounting manually.\r\n\r\nTherefore move of all logic but the `m_best_invalid` update into `InvalidBlockFound()`, avoiding duplicate logging and unnecessary work (the loops over the block index in `SetBlockFailureFlags()` and `RecalculateBestHeader()`\r\nwere done twice before).\r\n\r\nThe second commit renames `InvalidChainFound` to `UpdateBestInvalid` to adjust to its remaining role.\r\n\r\nThis addresses past discussions about repeated work in `InvalidateBlock()` (https://github.com/bitcoin/bitcoin/pull/31405#discussion_r2135717500) and `ActivateBestChain()` (https://github.com/bitcoin/bitcoin/pull/31533#discussion_r2607189790)",
-      "state": "open",
-      "user": "mzumsande",
-      "created_at": "2026-01-11T16:59:21Z",
-      "updated_at": "2026-02-04T20:13:22Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34254",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1386,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3182788993,
       "number": 34324,
       "title": "Add utxo_to_csv.py tool",
@@ -5645,30 +5694,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 212,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3193557787,
-      "number": 34359,
-      "title": "test: add test for rebroadcast of transaction received via p2p",
-      "body": "The wallet doesn't only rebroadcast transactions it created, but also relevant transactions received via p2p. \r\nSince this is not self-evident, add test coverage for it.",
-      "state": "open",
-      "user": "mzumsande",
-      "created_at": "2026-01-21T02:42:05Z",
-      "updated_at": "2026-02-04T14:15:28Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34359",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 232,
         "has_nack": false,
         "has_ack": false
       }
@@ -8971,7 +8996,7 @@
     }
   ],
   "summary": {
-    "total_prs": 293,
+    "total_prs": 294,
     "total_issues": 47,
     "total_comments": 58,
     "unique_participants": 98
