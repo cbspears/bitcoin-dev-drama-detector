@@ -1,10 +1,10 @@
 {
   "source": "mailing_list",
   "list": "bitcoin-dev",
-  "fetched_at": "2026-02-12T08:40:40.153872+00:00",
+  "fetched_at": "2026-02-12T16:53:33.005474+00:00",
   "date_range": {
-    "since": "2026-02-05T08:39:41.977974+00:00",
-    "until": "2026-02-12T08:39:41.977974+00:00"
+    "since": "2026-02-05T16:52:35.845254+00:00",
+    "until": "2026-02-12T16:52:35.845254+00:00"
   },
   "threads": [
     {
@@ -37,6 +37,70 @@
         "positive_keywords": 1,
         "nack_count": 0,
         "ack_count": 1
+      }
+    },
+    {
+      "title": "Re: [bitcoindev] Addressing remaining points on BIP 54",
+      "message_count": 1,
+      "participants": [
+        "Antoine Riard"
+      ],
+      "participant_count": 1,
+      "first_date": "Wed, 11 Feb 2026 19:57:06 -0800 (PST)",
+      "last_date": "Wed, 11 Feb 2026 19:57:06 -0800 (PST)",
+      "messages": [
+        {
+          "url": "https://gnusha.org/pi/bitcoindev/1922c72f-3288-42b4-b5ad-9757440348c5n@googlegroups.com",
+          "title": "Re: [bitcoindev] Addressing remaining points on BIP 54",
+          "author": "Antoine Riard <antoine.riard@gmail@com>",
+          "date": "Wed, 11 Feb 2026 19:57:06 -0800 (PST)",
+          "body": "[-- Attachment #1.1: Type: text/plain, Size: 18942 bytes --]\n\nHi,\n\nThanks for your insightful additional comments on the BIP rational.\n\n> Enforcing timelock validation gives us a context-independent guarantee \nwhen\n> validating a block that no past block in the chain could possibly have \nhad the\n> same pair of nLockTime and nSequence.\n\nI'm getting the general idea of the nlocktime field committing to the\ncurrent height minus one to ensure coinbase transaction uniquness and\navoids to re-activate BIP30 validation post block 1,983,702.\n\nWhere I'm diverging is on the necessity itself to have to set the\nnSequence field in any fashion in my understanding due to the check\nin `ContextualCheckBlock()` (L4312) and the check in `IsFinalTx()`\n(L4294). The first one is ensuring that nLocktime == nHeight - 1\notherwise the coinbase transaction is rejected as invalid. The\nsecond one is considering the transaction as final if nLocktime\nto current nBlockHeight.\n\nIf a transaction is respecting the first check, i.e nLocktime ==\nnHeight - 1, it is implying logicall that nLocktime < nBlockHeight\nif nHeight == nBlockHeight. Unless I'm logically missing something,\npost BIP54, for the case of the coinbase tx and counter-intuitively\n_for the case of the coinbase only_, the inspection of its nSequence\nfield to determine it's final is superflous.\n\nSaid differently, with the new BIP54 check the uniqueness property\nis coming from a context-dependent check ensuring that a coinbase\ntransaction is always set to the current heigh, and the general\nvalidation logic (at least the one of bitcoin core) is ensuring\nthat this context-dependent check is done on a linearly ordered\nset of block (multiple blocks can have the same ordinal index, but\nit shouldn't matter for transaction uniqueness).\n\nSee more comments under.\n\n> Technically, as per the code you point to, BIP 30 is enforced from\n> genesis in Bitcoin Core with the exception of the specific blocks at\n> height 91,842 and 91,880 in the historical chain",
+          "drama_signals": {
+            "drama_keywords": 1,
+            "positive_keywords": 0,
+            "text_length": 2055,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "nack_count": 0,
+        "ack_count": 0
+      }
+    },
+    {
+      "title": "[bitcoindev] Re: Addressing remaining points on BIP 54",
+      "message_count": 1,
+      "participants": [
+        "Antoine Riard"
+      ],
+      "participant_count": 1,
+      "first_date": "Wed, 7 Jan 2026 20:29:28 -0800 (PST)",
+      "last_date": "Wed, 7 Jan 2026 20:29:28 -0800 (PST)",
+      "messages": [
+        {
+          "url": "https://gnusha.org/pi/bitcoindev/05f5b0ee-b487-4733-9860-ac0705b6b901n@googlegroups.com",
+          "title": "[bitcoindev] Re: Addressing remaining points on BIP 54",
+          "author": "Antoine Riard <antoine.riard@gmail@com>",
+          "date": "Wed, 7 Jan 2026 20:29:28 -0800 (PST)",
+          "body": "[-- Attachment #1.1: Type: text/plain, Size: 9807 bytes --]\n\nHello Poinsot,\n\nThanks for the update. If I'm understanding correctly Luke's concern,\ncurrently the coinbase's scriptSig is used to store an extranonce. One\nhas to observe first there is no consensus limit on the size of a\ntransaction, which holds for the coinbase tx too, a fortiori there is\nno limit on the extranonce size a miner could fit in the scriptSig.\n\nThe point being made is that the nLocktime field of the coinbase\ntransaction could be used as a more efficient extra nonce due to\nthe positional location of nLocktime in a serialized coinbase being\none of the latest message block to be processed [0].\n\nNothing prevent a miner in already doing this and draw a speed advantage\nfrom the diminished computational work. I have not looked into CGminer code\nor one of its derivative forks, if there is an implemented option to do \nthat,\nbut yes there could be non-published existing mining firmware doing it. \nIIUC,\nBIP54 would nullify this theoretical \"speed advantage\" for all miners.\n\nNow, there could be an argument ecosystem-wise to let the nLocktime free,\nas who say speed advantage say less energy consumed network-wide (-- but\nisn't that a better outcome to maximize the energy burnt network-wide, even\nif it's probabilistic ?).\n\nOne alternative design would be to store the height commitment in the\ncommitment extension introduced by BIP141 [1]. In my understanding, as\nit has been pointed out by other minds in the design process about the\nactual proposal to put the height commitment in the nLocktime field, \nin the eventuality of more than 1 commitment being introduced, a naive\ndesign would come with the burden for non-upgraded nodes to have data\navailability to all the merkle path to validate a specific soft-forked\ncommitment. So a node could not just implement consensus validation rules\nfor SF #2, without getting the merkle tree data for SF #1.\n\nIt doesn't sound that this concern could be alleviated by making the",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 2055,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "nack_count": 0,
+        "ack_count": 0
       }
     },
     {
@@ -197,70 +261,6 @@
         "positive_keywords": 1,
         "nack_count": 0,
         "ack_count": 1
-      }
-    },
-    {
-      "title": "Re: [bitcoindev] Addressing remaining points on BIP 54",
-      "message_count": 1,
-      "participants": [
-        "\"'Antoine Poinsot' via Bitcoin Development Mailing List\""
-      ],
-      "participant_count": 1,
-      "first_date": "Thu, 05 Feb 2026 22:48:37 +0000",
-      "last_date": "Thu, 05 Feb 2026 22:48:37 +0000",
-      "messages": [
-        {
-          "url": "https://gnusha.org/pi/bitcoindev/0Gc3rCZzaVbzL88b9G3EDjXdayArs8JtirCO2nmmMVLDgbxovIEu7-hhQp0G4wPnEB3YABywEppEFbC-zSudJUiR7HW680kM6LWtHDmp_Hc=@protonmail.com",
-          "title": "Re: [bitcoindev] Addressing remaining points on BIP 54",
-          "author": "\"'Antoine Poinsot' via Bitcoin Development Mailing List\" <bitcoindev@googlegroups.com>",
-          "date": "Thu, 05 Feb 2026 22:48:37 +0000",
-          "body": "Hi,\n\nThanks for your careful review of our BIP.\n\nThere still appears to be some confusion around the rationale for also constraining the nSequence,\nwhich suggests the explanation needs to be clearer. I’ve noted this in my collected feedback for the\nBIP [0] and will restate the rationale in more detail below.\n\nThe purpose of constraining the nSequence of coinbase transactions is to ensure that timelock\nvalidation is performed. An nSequence set as final (i.e. equal to 0xffffffff) allows timelock\nvalidation to be bypassed. Enforcing timelock validation gives us a context-independent guarantee\nwhen validating a block that no past block in the chain could possibly have had the same pair of\nnLockTime and nSequence. Therefore, assuming SHA256 isn’t broken, the txid of the coinbase\ntransaction in the block being validated is guaranteed to be unique.\n\nOf course, we already know that no block pre-BIP 34 activation had its nLockTime set in the\nhistorical chain [2]. However, being able to state that post-BIP 54 activation no coinbase\ntransaction can possibly be a duplicate is a useful reduction in complexity. For instance, if BIP 54\nactivation height ever gets buried in Bitcoin Core, the BIP 30 check could just be disabled past\nthis height instead of having to figure out if we are on a chain that contains the historical BIP 34\nactivation block hash [3].\n\nHopefully this clarifies the rationale. I’ll now respond to some specific points from your email.\n\n> With BIP 30, there is now a check at block validation to reject as invalid any\n> block posterior to the BIP activation cutoff (March 15, 2012, 00:00 UTC) [0].\n\nTechnically, as per the code you point to, BIP 30 is enforced from genesis in Bitcoin Core with the\nexception of the specific blocks at height 91,842 and 91,880 in the historical chain.\n\n> the only implicit mentioning I'm seeing of this problem, is here [3], it doesn't seem it has been\n> very peer reviewed, less even said to be documented in the BIP rational or the implem",
-          "drama_signals": {
-            "drama_keywords": 2,
-            "positive_keywords": 1,
-            "text_length": 2055,
-            "has_nack": false,
-            "has_ack": true
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 1,
-        "nack_count": 0,
-        "ack_count": 1
-      }
-    },
-    {
-      "title": "[bitcoindev] Re: Addressing remaining points on BIP 54",
-      "message_count": 1,
-      "participants": [
-        "Antoine Riard"
-      ],
-      "participant_count": 1,
-      "first_date": "Wed, 7 Jan 2026 20:29:28 -0800 (PST)",
-      "last_date": "Wed, 7 Jan 2026 20:29:28 -0800 (PST)",
-      "messages": [
-        {
-          "url": "https://gnusha.org/pi/bitcoindev/05f5b0ee-b487-4733-9860-ac0705b6b901n@googlegroups.com",
-          "title": "[bitcoindev] Re: Addressing remaining points on BIP 54",
-          "author": "Antoine Riard <antoine.riard@gmail@com>",
-          "date": "Wed, 7 Jan 2026 20:29:28 -0800 (PST)",
-          "body": "[-- Attachment #1.1: Type: text/plain, Size: 9807 bytes --]\n\nHello Poinsot,\n\nThanks for the update. If I'm understanding correctly Luke's concern,\ncurrently the coinbase's scriptSig is used to store an extranonce. One\nhas to observe first there is no consensus limit on the size of a\ntransaction, which holds for the coinbase tx too, a fortiori there is\nno limit on the extranonce size a miner could fit in the scriptSig.\n\nThe point being made is that the nLocktime field of the coinbase\ntransaction could be used as a more efficient extra nonce due to\nthe positional location of nLocktime in a serialized coinbase being\none of the latest message block to be processed [0].\n\nNothing prevent a miner in already doing this and draw a speed advantage\nfrom the diminished computational work. I have not looked into CGminer code\nor one of its derivative forks, if there is an implemented option to do \nthat,\nbut yes there could be non-published existing mining firmware doing it. \nIIUC,\nBIP54 would nullify this theoretical \"speed advantage\" for all miners.\n\nNow, there could be an argument ecosystem-wise to let the nLocktime free,\nas who say speed advantage say less energy consumed network-wide (-- but\nisn't that a better outcome to maximize the energy burnt network-wide, even\nif it's probabilistic ?).\n\nOne alternative design would be to store the height commitment in the\ncommitment extension introduced by BIP141 [1]. In my understanding, as\nit has been pointed out by other minds in the design process about the\nactual proposal to put the height commitment in the nLocktime field, \nin the eventuality of more than 1 commitment being introduced, a naive\ndesign would come with the burden for non-upgraded nodes to have data\navailability to all the merkle path to validate a specific soft-forked\ncommitment. So a node could not just implement consensus validation rules\nfor SF #2, without getting the merkle tree data for SF #1.\n\nIt doesn't sound that this concern could be alleviated by making the",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 2055,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "nack_count": 0,
-        "ack_count": 0
       }
     },
     {
@@ -1800,38 +1800,6 @@
       }
     },
     {
-      "title": "Re: [bitcoindev] OP_CIV - Post-Quantum Signature Aggregation",
-      "message_count": 1,
-      "participants": [
-        "\"'conduition' via Bitcoin Development Mailing List\""
-      ],
-      "participant_count": 1,
-      "first_date": "Fri, 28 Nov 2025 10:52:27 -0800 (PST)",
-      "last_date": "Fri, 28 Nov 2025 10:52:27 -0800 (PST)",
-      "messages": [
-        {
-          "url": "https://gnusha.org/pi/bitcoindev/02e3cb64-50e8-4814-bf53-72db87deafc8n@googlegroups.com",
-          "title": "Re: [bitcoindev] OP_CIV - Post-Quantum Signature Aggregation",
-          "author": "\"'conduition' via Bitcoin Development Mailing List\" <bitcoindev@googlegroups.com>",
-          "date": "Fri, 28 Nov 2025 10:52:27 -0800 (PST)",
-          "body": "[-- Attachment #1.1: Type: text/plain, Size: 17217 bytes --]\n\nHey Tadge,\n\nYou're right that OP_CIV would discourage address reuse, but it'd also make \nlife difficult for wallet developers who want to adopt it. Some wallet devs \n*today* don't even bother with multi-address support, so imagine if to do \nso effeciently, they needed to statefully track prior UTXOs and generate \naddresses based on a changing UTXO set over time.\n\nAlso I want to mention, there's a big privacy difference between these CISA \ntechniques, and CISA via address reuse. \n\nIf I receive two payments to the same address, i immediately reveal that \nthose UTXOs are owned by the same entity: me.\n\nIf I receive two payments to *distinct* addresses which are linked via your \nOP_CIV (or via my idea by committing to pubkeys) then I can choose when and \nwhether to reveal the fact that those UTXOs are commonly owned. Most user \nwallets have more than just two UTXOs, so in a setting where I have \npossibly dozens of UTXOs, this offers me more flexibility with respect to \nmy on-chain privacy, allowing me to choose when and how to reveal common \nUTXO ownership. This is kind of already the status quo, because chainalysis \nuses common-input ownership heuristics even if they are flawed/incorrect, \njust for the sake of having a \"working\" tool they can sell.\n\nRegarding the extra cost, we can quantify that! Let's say we have a taptree \nof height `h` with `2^h` leaves. We use one leaf for a unique pubkey, and \nthe other `2^h - 1` tap leaves store commitments to other pubkeys or to \npre-existing UTXOs. To spend a TX with `n` inputs using this CISA paradigm, \nwe need one signature, plus `n - 1` taproot control blocks and tapscripts. \nEach control block has size `h * 32`, plus ~32 bytes to reference the other \npubkey or UTXO in the locking tapscript. So in total, the witness size \nscales as: `(n - 1)((h + 1) * 32)`. In other words, for every additional \ninput covered by the CISA scheme, we must pay for roughly `(h + 1) * 32",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 2061,
-            "has_nack": false,
-            "has_ack": true
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "nack_count": 0,
-        "ack_count": 1
-      }
-    },
-    {
       "title": "[bitcoindev] Q-Lock: Quantum-Resistant Spending via ECDSA + Hash-Based Secrets",
       "message_count": 1,
       "participants": [
@@ -1865,8 +1833,8 @@
     }
   ],
   "summary": {
-    "total_threads": 58,
-    "total_messages": 58,
+    "total_threads": 57,
+    "total_messages": 57,
     "unique_participants": 38
   }
 }
