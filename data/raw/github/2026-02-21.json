@@ -1,12 +1,683 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-02-21T08:23:22.383041+00:00",
+  "fetched_at": "2026-02-21T16:21:15.735336+00:00",
   "date_range": {
-    "since": "2026-02-14T08:23:22.382957+00:00",
-    "until": "2026-02-21T08:23:22.382957+00:00"
+    "since": "2026-02-14T16:21:15.735231+00:00",
+    "until": "2026-02-21T16:21:15.735231+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3299687172,
+      "number": 34616,
+      "title": "Cluster mempool: SFL cost model (take 2)",
+      "body": "Part of #30289, replaces earlier #34138.\r\n\r\nThis introduces a more accurate cost model for SFL, to control how much CPU time is spent inside the algorithm for clusters that cannot be linearized perfectly within a reasonable amount of time.\r\n\r\nThe goal is having a metric for the amount of work performed, so that txmempool can impose limits on that work: a lower bound that is always performed (unless optimality is reached before that point, of course), and an upper bound to limit the latency and total CPU time spent on this. There are conflicting design goals here:\r\n* On the one hand, it seems ideal if this metric is closely correlated to actual CPU time, because otherwise the limits become inaccurate.\r\n* On the other hand, it seems a nightmare to have the metric be platform/system dependent, as it makes network-wide reasoning nearly impossible. It's expected that slower systems take longer to do the same thing; this holds for everything, and we don't need to compensate for this.\r\n\r\nThere are multiple solutions to this:\r\n* One extreme is just measuring the time. This is very accurate, but extremely platform dependent, and also non-deterministic due to random scheduling/cache effects.\r\n* The other extreme is using a very abstract metric like counting how many times certain loops/function inside the algorithm run. That is what is implemented in master right now, just counting the sum of the numbers of transactions updated across all `UpdateChunks()` calls. It however necessarily fails to account for significant portions of runtime spent elsewhere, resulting in a rather wide range of \"ns per cost\" values.\r\n* This PR takes a middle ground, counting many function calls / branches / loops, with weights that were determined through benchmarking on an average on a number of systems.\r\n\r\nSpecifically, the cost model was obtained by:\r\n* For a variety of machines:\r\n  * Running a fixed collection of ~385000 clusters found through random generation and fuzzing, optimizing for difficulty of linearization.\r\n    * Linearize each ~3000 times, with different random seeds. Sometimes without input linearization, sometimes with a bad one.\r\n      * Gather cycle counts for each of the operations included in this cost model, broken down by their parameters.\r\n  * Correct the data by subtracting the runtime of obtaining the cycle count.\r\n  * Drop the 5% top and bottom samples from each cycle count dataset, and compute the average of the remaining samples.\r\n  * For each operation, fit a least-squares linear function approximation through the samples.\r\n* Rescale all machine expressions to make their total time match, as we only care about relative cost of each operation.\r\n* Take the per-operation average of operation expressions across all machines, to construct expressions for an average machine.\r\n* Approximate the result with integer coefficients.\r\n\r\nThe benchmarks were performed by `l0rinc <pap.lorinc@gmail.com>` and myself, on AMD Ryzen 5950X, AMD Ryzen 7995WX, AMD Ryzen 9980X, Apple M4 Max, Intel Core i5-12500H, Intel Core Ultra 7 155H, Intel N150 (Umbrel), Intel Core i7-7700, Intel Core i9-9900K, Intel Haswell (VPS, virtualized), ARM Cortex-A76 (Raspberry Pi 5).\r\n\r\nBased on final benchmarking, the \"acceptable\" iteration count (which is the minimum spent on every cluster) is to 64000 units, which corresponds to roughly 50 μs on Ryzen 5950X and similar modern desktop hardware.",
+      "state": "open",
+      "user": "sipa",
+      "created_at": "2026-02-18T17:26:22Z",
+      "updated_at": "2026-02-21T16:19:58Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34616",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 3453,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2837615883,
+      "number": 33421,
+      "title": "node: add  `BlockTemplateCache`",
+      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify an optional template age limit in `MillisecondsDouble`:\r\n\r\n- If template age limit is `nullopt`, we create a new template and return it without adding it to the cache.\r\n- If a matching template (block template with identical block creation options) exists in the cache and hasn't exceeded the age limit, the cached version is returned.\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned. When evicting stale templates, we assume no duplicates exist since templates are evicted as soon as their age limit is reached or exceeded.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted after each insertion.\r\n\r\n\r\nCache lookup requires an exact match on ALL `BlockAssembler::Options` fields. While some fields (e.g., `test_block_validity`, `print_modified_fee`, `coinbase_output_script`) could be ignored for cache reuse, they mainly differ in tests and benchmarks. We keep the logic simple and accept cache misses in those cases.\r\n\r\n\r\nThe cache enforces at most one template per set of options. When searching for a match in `getCachedTemplate()`, if a template with matching options is found but has exceeded the age limit, it's immediately evicted before returning `nullptr`. This ensures no duplicate options exist in the cache. A `SanityCheck()` method verifies this invariant in tests by checking all cached entries for duplicates.\r\n\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\n`GetBlockTemplate()` uses double-checked locking: it first checks the cache with only `m_mutex` held, then if there's a miss, acquires both `cs_main` and `m_mutex` to create the template. Before creating, it checks again since another thread might have added a template while locks were released. \r\n\r\nThis PR removes an unused `node/context.h` import from miner to prevent a circular dependency when exposing the block template cache to the node context.",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-09-17T18:47:09Z",
+      "updated_at": "2026-02-21T16:16:31Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2508,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3309768200,
+      "number": 34641,
+      "title": "node: scale `-dbcache` default from total system RAM",
+      "body": "### Problem\r\n\r\n`-dbcache` controls how much RAM Bitcoin Core uses for the in-memory view of the UTXO set, while the authoritative chainstate remains on disk.\r\nThe default is still the fixed `450 MiB` value, chosen almost a decade ago, even though chainstate size and typical hardware profiles have changed significantly since then.\r\n\r\nIn practice, a fixed 450 MiB default is often too conservative on modern systems, where larger cache sizes can reduce flush churn and disk roundtrips during validation, especially in IBD. At the same time, memory pressure remains important on smaller systems.\r\n\r\n### Historical changes\r\n\r\n| Date       | dbcache change | PR                                                                                                                                                                                                    |\r\n|------------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|\r\n| 2016-07-06 | 100 -> 300     | [#8273: Bump -dbcache default to 300MiB](https://github.com/bitcoin/bitcoin/commit/32cab91278651d07a11132b7636dc3d21144e616#diff-d102b6032635ce90158c1e6e614f03b50e4449aa46ce23370da5387a658342fdR25) |\r\n| 2017-04-05 | 300 -> 450     | [#10133: Clean up calculations of pcoinsTip memory usage](https://github.com/bitcoin/bitcoin/pull/10133/changes#diff-d102b6032635ce90158c1e6e614f03b50e4449aa46ce23370da5387a658342fdR31)             |\r\n\r\n### IRC\r\n\r\nThe Feb 17-19, 2026 discussion converged on avoiding a single new fixed `-dbcache` value and moving to RAM-aware defaults instead, balancing performance gains on modern hardware against OOM risk on lower-memory systems.\r\n\r\n<details>\r\n<summary>IRC log links</summary>\r\n\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-17\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-18\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-19\r\n\r\n</details>\r\n\r\n### Fix\r\n\r\nReplace the fixed default with a RAM-aware policy:\r\n```math\r\n\\text{default\\_dbcache}=\\mathrm{clamp}\\left(100\\,\\mathrm{MiB},\\ 0.25\\cdot\\left(\\text{system RAM}-2\\,\\mathrm{GiB}\\right),\\ 3000\\,\\mathrm{MiB}\\right)\r\n```\r\n\r\nIf system RAM cannot be determined, assume 4 GiB on 64-bit builds and 2 GiB on 32-bit builds.\r\nManual `-dbcache` values are unchanged and still override the automatic default.\r\n\r\n### Warning threshold update\r\n\r\nOversized `-dbcache` warnings are kept and aligned with the new policy - warn if:\r\n- `dbcache > default-dbcache` when `RAM < fallback RAM` (4 GiB on 64-bit, 2 GiB on 32-bit)\r\n- `dbcache` > `75% of total RAM`, otherwise\r\n\r\n### Performance measurements\r\n\r\n<details><summary>Umbrel - 20% faster reindex-chainstate with new default dbcache</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n<details><summary>2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        33619.332 s               [User: 61450.140 s, System: 5671.449 s]\r\n ```\r\n</details>\r\n\r\n<details><summary>2026-02-20 | reindex-chainstate | 936639 blocks | dbcache 3000 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        27910.440 s               [User: 44917.351 s, System: 2090.958 s]\r\n```\r\n</details>\r\n\r\n</details>\r\n\r\n<details><summary>Rpi5 - 20% faster reindex-chainstate with new default dbcache</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n\r\n```\r\n\r\n<details><summary>2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        48933.904 s               [User: 94560.562 s, System: 7823.574 s]\r\n ```\r\n</details>\r\n\r\n<details><summary>2026-02-20 | reindex-chainstate | 936639 blocks | dbcache 3000 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        40586.782 s               [User: 65901.116 s, System: 3260.832 s]\r\n```\r\n</details>\r\n\r\n</details>\r\n\r\n<details><summary>Apple M4 Max - 286% faster reindex-chainstate with new default dbcache</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=900000; \\\r\n  DATA_DIR=\"$HOME/Library/Application Support/Bitcoin\"; LOG_DIR=\"$HOME/bitcoin-reindex-logs\"; mkdir -p \"$LOG_DIR\"; \\\r\n  COMMA_COMMITS=${COMMITS// /,}; \\\r\n  (echo \"\"; for c in $(echo $COMMITS); do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(sysctl -n machdep.cpu.brand_string) | $(nproc) cores | $(printf '%.1fGiB' \"$(( $(sysctl -n hw.memsize)/1024/1024/1024 ))\") RAM | SSD | $(sw_vers -productName) $(sw_vers -productVersion) $(sw_vers -buildVersion) | $(xcrun clang --version | head -1)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$LOG_DIR/rdx-$(echo \"$COMMITS\" | sed -E 's/([a-f0-9]{8})[a-f0-9]+ ?/\\1-/g;s/-$//')-$STOP-$DBCACHE-appleclang.json\" \\\r\n    --parameter-list COMMIT \"$COMMA_COMMITS\" \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null || true; rm -f \\\"$DATA_DIR\\\"/debug.log; git checkout {COMMIT}; git reset --hard && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja -C build bitcoind -j2 && \\\r\n      ./build/bin/bitcoind -datadir=\\\"$DATA_DIR\\\" -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20\" \\\r\n    --conclude \"killall bitcoind 2>/dev/null || true; sleep 5; grep -q 'height=0' \\\"$DATA_DIR\\\"/debug.log && grep -q 'Disabling script verification at block #1' \\\"$DATA_DIR\\\"/debug.log && grep -q \\\"height=$STOP\\\" \\\"$DATA_DIR\\\"/debug.log || { echo 'debug.log assertions failed'; exit 1; }; \\\r\n                cp \\\"$DATA_DIR\\\"/debug.log \\\"$LOG_DIR\\\"/debug-{COMMIT}-\\$(date +%s).log 2>/dev/null || true\" \\\r\n    \"./build/bin/bitcoind -datadir=\\\"$DATA_DIR\\\" -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n<details><summary>2026-02-21 | reindex-chainstate | 900000 blocks | dbcache 450 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.2 25C56 | Apple clang version 17.0.0 (clang-1700.6.3.2)</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        20261.315 s               [User: 18768.521 s, System: 4271.673 s]\r\n ```\r\n</details>\r\n\r\n<details><summary>2026-02-21 | reindex-chainstate | 900000 blocks | dbcache 3000 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.2 25C56 | Apple clang version 17.0.0 (clang-1700.6.3.2)</summary>\r\n\r\n```bash\r\n\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        7064.184 s               [User: 7701.391 s, System: 668.060 s]\r\n```\r\n</details>\r\n\r\n</details>\r\n\r\n<details><summary>i9 - 5% faster pruned IBD with new default dbcache</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 3000; do \\\r\n  COMMITS=\"5a8a427610ed9672f485ebfefbb8e63b55282636\"; \\\r\n  STOP=933339; PRUNE=550; \\\r\n  CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/ShallowBitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | pruned IBD | ${STOP} blocks | dbcache ${DBCACHE} | pruning ${PRUNE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(df -T $BASE_DIR | awk 'NR==2{print $2}') | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") &&\\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 2 \\\r\n    --export-json \"$BASE_DIR/ibd-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -rf $DATA_DIR/*; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja -C build bitcoind -j2 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=1 -prune=$PRUNE -printtoconsole=0; sleep 20\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -blocksonly -prune=$PRUNE -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n<details><summary>2026-02-19 | pruned IBD | 933339 blocks | dbcache 450 | pruning 550 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | xfs | SSD</summary>\r\n\r\n```bash\r\n5a8a427610 Merge bitcoin/bitcoin#32745: scripted-diff: Update DeriveType enum values to mention ranged derivations\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/ShallowBitcoinData -stopatheight=933339 -dbcache=450 -blocksonly -prune=550 -printtoconsole=0 (COMMIT = 5a8a427610ed9672f485ebfefbb8e63b55282636)\r\n  Time (mean ± σ):     33256.735 s ± 954.998 s    [User: 74373.368 s, System: 4904.305 s]\r\n  Range (min … max):   32581.449 s … 33932.020 s    2 runs\r\n ```\r\n</details>\r\n\r\n<details><summary>2026-02-20 | pruned IBD | 933339 blocks | dbcache 3000 | pruning 550 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | xfs | SSD</summary>\r\n\r\n```bash\r\n5a8a427610 Merge bitcoin/bitcoin#32745: scripted-diff: Update DeriveType enum values to mention ranged derivations\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/ShallowBitcoinData -stopatheight=933339 -dbcache=3000 -blocksonly -prune=550 -printtoconsole=0 (COMMIT = 5a8a427610ed9672f485ebfefbb8e63b55282636)\r\n  Time (mean ± σ):     31670.463 s ± 621.972 s    [User: 70829.639 s, System: 4403.924 s]\r\n  Range (min … max):   31230.663 s … 32110.264 s    2 runs\r\n```\r\n</details>\r\n\r\n</details>\r\n\r\n### Quick reference (64 bit)\r\n\r\n| System RAM | Automatic default | Warning fires above |\r\n|------------|-------------------|---------------------|\r\n| 1 GiB      | 100 MiB           | 100 MiB             |\r\n| 2 GiB      | 100 MiB           | 100 MiB             |\r\n| 4 GiB      | 512 MiB           | 3071 MiB            |\r\n| 8 GiB      | 1536 MiB          | 6143 MiB            |\r\n| 16 GiB     | 3000 MiB          | 12287 MiB           |\r\n| 32 GiB     | 3000 MiB          | 24575 MiB           |\r\n\r\n<img width=\"1384\" height=\"583\" alt=\"image\" src=\"https://github.com/user-attachments/assets/2ccca03e-9130-457c-b386-f8aea15de955\" />\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-02-20T23:00:45Z",
+      "updated_at": "2026-02-21T16:14:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34641",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 16682,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3133212525,
+      "number": 34165,
+      "title": "coins: don't mutate main cache when connecting block",
+      "body": "This is a slightly modified version of the first few commits of #31132, which can be merged as an independent change. It has a small benefit on its own, but will help in moving the parent PR forward.\r\n\r\nWhen accessing coins via the `CCoinsViewCache`, methods like `GetCoin` can call `FetchCoin` which actually mutate `cacheCoins` internally to cache entries when they are pulled from the backing db. This is generally a performance improvement for single threaded access patterns, but it precludes us from accessing entries in a `CCoinsViewCache` from multiple threads without a lock.\r\n\r\nAnother aspect is that when we use the resettable `CCoinsViewCache` view backed by the main cache for use in `ConnectBlock()`, we will insert entries into the main cache even if the block is determined to be invalid. This is not the biggest concern, since an invalid block requires proof-of-work. But, an attacker could craft multiple invalid blocks to fill the main cache. This would make us `Flush` the cache more often than necessary. Obviously this would be very expensive to do on mainnet.\r\n\r\nIntroduce `CoinsViewOverlay`, a `CCoinsViewCache` subclass that reads coins without mutating the underlying cache via `FetchCoin()`.\r\n\r\nAdd `PeekCoin()` to look up a Coin through a stack of `CCoinsViewCache` layers without populating parent caches. This prevents the main cache from caching inputs pulled from disk for a block that has not yet been fully validated. Once `Flush()` is called on the view, these inputs will be added as spent to `coinsCache` in the main cache via `BatchWrite()`.\r\n\r\nThis is the foundation for async input fetching, where worker threads must not mutate shared state.\r\n",
+      "state": "closed",
+      "user": "andrewtoth",
+      "created_at": "2025-12-28T20:32:34Z",
+      "updated_at": "2026-02-21T16:08:12Z",
+      "merged_at": "2026-02-20T03:10:53Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34165",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 1737,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3207919952,
+      "number": 34401,
+      "title": "kernel:  add serialization method for btck_BlockHeader API",
+      "body": "This adds serialization for `btck_BlockHeader` API. Also, updated the `CheckHandle` to compare the byte content instead of size.\r\n\r\nThe changes here is done in two commits. First commit adds the `SpanWriter` class and next one moves the block header serialization to `SpanWriter`. See commit message for more details.\r\n\r\nFollow-up to #33822 .",
+      "state": "open",
+      "user": "yuvicc",
+      "created_at": "2026-01-25T06:50:13Z",
+      "updated_at": "2026-02-21T16:03:09Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34401",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 401,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2858375622,
+      "number": 33477,
+      "title": "Rollback for dumptxoutset without invalidating blocks",
+      "body": "This is an alternative approach to implement `dumptxoutset` with rollback that was discussed a few times. It does not rely on `invalidateblock` and `reconsiderblock` and instead creates a temporary copy of the coins DB, modifies this copy by rolling back as many blocks as necessary and then creating the dump from this temp copy DB. See also https://github.com/bitcoin/bitcoin/pull/29553#issuecomment-1978480989, https://github.com/bitcoin/bitcoin/issues/32817#issuecomment-3012406102 and #29565 discussions.\r\n\r\nThe nice side-effects of this are that forks can not interfere with the rollback and network activity does not have to be suspended. But there are also some downsides when comparing to the current approach: this does require some additional disk space for the copied coins DB and performance is slower (master took 3m 17s vs 9m 16s in my last test with the code here, rolling back ~1500 blocks). However, there is also not much code being added here, network can stay active throughout and performance would stay constant with this approach while it would impact master if there were forks that needed to be invalidated as well (see #33444 for the alternative approach), so this could still be considered a good trade-off.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-09-24T21:15:11Z",
+      "updated_at": "2026-02-21T15:50:07Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33477",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1289,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2902093523,
+      "number": 33593,
+      "title": "guix: Use UCRT runtime for Windows release binaries",
+      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-10-09T21:46:43Z",
+      "updated_at": "2026-02-21T14:37:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
+      "labels": [
+        "Windows",
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 213,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3216048052,
+      "number": 34422,
+      "title": "Update libmultiprocess subtree to be more stable with rust IPC client",
+      "body": "Includes:\r\n\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/241\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/240\r\n\r\nThe latter change fixes issues with asynchronous requests (https://github.com/bitcoin/bitcoin/issues/33923) and unclean disconnects (https://github.com/bitcoin/bitcoin/issues/34250) that happen with the rust mining client. It also adds tests for these fixes which had some previous review in #34284 (that PR was closed to simplify dependencies between PRs).\r\n\r\nThe changes can be verified by running `test/lint/git-subtree-check.sh src/ipc/libmultiprocess` as described in [developer notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#subtrees) and [lint instructions](https://github.com/bitcoin/bitcoin/tree/master/test/lint#git-subtree-checksh)\r\n\r\nResolves #33923 and #34250\r\n",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2026-01-27T20:06:40Z",
+      "updated_at": "2026-02-21T14:12:00Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34422",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 909,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2784259944,
+      "number": 33270,
+      "title": "stabilize translations by reverting old ids by text content",
+      "body": "### Summary\r\n\r\nRegenerating the Qt translation template (`src/qt/locale/bitcoin_en.xlf`) previously used sequential `_msg<N>` IDs. When strings moved within the sorted message list, IDs shifted, creating large diffs and making translation platforms treat unchanged strings as new.\r\n\r\nThis PR switches XLF `<trans-unit id=...>` values to stable IDs derived from a SHA256 hash of the message context and source text.\r\n\r\n### Details\r\n\r\nAs mentioned in https://github.com/bitcoin/bitcoin/pull/33224#issuecomment-3234820665, any change that moves a translatable string within the sorted messages can renumber subsequent entries when IDs are sequential.\r\n\r\nSome English texts can appear in multiple places (e.g. “Clear”) with different meanings depending on the Qt context. To avoid collisions, the hash includes the `<group resname=...>` context.\r\n\r\n### Fix\r\n\r\nThe `translate` target already runs `contrib/devtools/stabilize_xlf_ids.py`. Instead of trying to preserve/renumber `_msg<N>` IDs by matching old/new units, the script now rewrites every `<trans-unit id>` to:\r\n\r\n- `sha256(resname + \"\\0\" + source-text)` (hex)\r\n- keeping the existing plural `[N]` suffix for plural forms\r\n\r\nThe script also checks for duplicate IDs and aborts if any are detected.\r\n\r\nNote: this is a one-time mass change from `_msg<N>` IDs to hashes; after that, rerunning `translate` on an unchanged tree should not churn IDs.\r\n\r\nWith this PR applied, IDs become stable hashes so ordering changes no longer cause renumbering churn.\r\n\r\n### Reproducer\r\n\r\nYou can test the replacer by changing any translatable text:\r\n```patch\r\ndiff --git a/src/qt/bitcoingui.cpp b/src/qt/bitcoingui.cpp\r\n--- a/src/qt/bitcoingui.cpp\t(revision a38b8cf788922174538161cda81ce28f2ac462ec)\r\n+++ b/src/qt/bitcoingui.cpp\t(date 1767310724675)\r\n@@ -258,7 +258,7 @@\r\n     connect(modalOverlay, &ModalOverlay::triggered, tabGroup, &QActionGroup::setEnabled);\r\n \r\n     overviewAction = new QAction(platformStyle->SingleColorIcon(\":/icons/overview\"), tr(\"&Overview\"), this);\r\n-    overviewAction->setStatusTip(tr(\"Show general overview of wallet\"));\r\n+    overviewAction->setStatusTip(tr(\"Show general overview of Wallet\"));\r\n     overviewAction->setToolTip(overviewAction->statusTip());\r\n     overviewAction->setCheckable(true);\r\n     overviewAction->setShortcut(QKeySequence(QStringLiteral(\"Alt+1\")));\r\n```\r\nand regenerating the translations\r\n```bash\r\ncmake --preset dev-mode -DWITH_USDT=OFF && cmake --build build_dev_mode --target translate\r\n```\r\nYou will notice that the new text moved to a different place with a different hash, but all other messages retained their IDs.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-08-29T09:23:56Z",
+      "updated_at": "2026-02-21T14:09:42Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33270",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2676,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2925411752,
+      "number": 33646,
+      "title": "log: check fclose() results and report safely in logging.cpp",
+      "body": "`fclose()` can report write errors (for example if the disk is full or the filesystem has a problem). Right now, some `fclose()` calls in `src/logging.cpp` ignore the return value. This means errors might go unnoticed and log lines could be lost without warning.\r\n\r\n## What this PR does:\r\n- Add a small helper that prints `fclose()` errors to `stderr` (with path and errno).\r\n- In shutdown: close `m_fileout` safely and report errors.\r\n- In reopen: open the new file, swap it in, close the old one, and report errors if closing fails.\r\n- In shrink/rotate: check all `fclose(file)` calls and report failures.\r\n\r\nNo other behavior changes. Normal logging, rotation, and console output remain unchanged.",
+      "state": "open",
+      "user": "cedwies",
+      "created_at": "2025-10-17T19:06:08Z",
+      "updated_at": "2026-02-21T13:49:51Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33646",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 761,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2138649533,
+      "number": 31132,
+      "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
+      "body": "_Parts of this PR are isolated in independent smaller PRs to ease review:_\r\n\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34164_\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34165_\r\n* [ ] _https://github.com/bitcoin/bitcoin/pull/34576_\r\n\r\n---\r\n\r\nThis PR parallelizes fetching all input prevouts of a block during block connection, achieving over 3x faster IBD performance in some scenarios[^1][^2][^3][^4][^5].\r\n\r\n### Problem\r\n\r\nCurrently, when fetching inputs in `ConnectBlock`, each input is fetched from the cache sequentially. A cache miss requires a round trip to the disk database to fetch the outpoint and insert it into the cache. Since the database is read-only during `ConnectBlock`, we can fetch all inputs of a block in parallel on multiple threads while connecting.\r\n\r\n### Solution\r\n\r\nWe introduce a new `CoinsViewCacheAsync` `CCoinsViewCache` subclass that manages worker threads to fetch block inputs in parallel. The block is passed to the `CoinsViewCacheAsync` view before entering `ConnectBlock`, which kicks off the worker threads to begin fetching the inputs. The view is then passed to `ConnectBlock` since it provides the same API as `CCoinsViewCache`. The cache returns fetched coins as they become available via the overridden `FetchCoin` method. If not available yet, the main thread also fetches coins as it waits.\r\n\r\n### Implementation Details\r\n\r\nThe `CoinsViewCacheAsync` implements a lock-free MPSC (Multiple Producer, Single Consumer) queue design:\r\n\r\n- **Work Distribution**: Collects all input prevouts into a queue and uses a barrier to start all worker threads simultaneously\r\n- **Synchronization**: Worker threads use an atomic counter to claim which inputs to fetch, and each input has an atomic flag to signal completion to the main thread\r\n- **Main Thread Processing**: The main thread waits for inputs in order and moves their `Coin` into the `cacheCoins` map as they become available.\r\n- **Work Stealing**: If the main thread catches up to the workers, it assists with fetching to maximize parallelism\r\n- **Completion**: All threads synchronize on a barrier via a `Reset` method, which ensures all threads are parked before proceeding\r\n\r\n### Safety and Correctness\r\n\r\n- The `CoinsViewCacheAsync` works on a block that has not been fully validated, but it does not interfere or modify any of the validation during `ConnectBlock`\r\n- It simply fetches inputs in parallel, which must be fetched before a transaction is validated anyways\r\n- **Invalid blocks**: If an invalid block is mined, the temporary cache is reset without being flushed. This is an improvement over the current behavior, where existing inputs are inserted into the main `CoinsTip()` cache when pulled through for an invalid block\r\n\r\n### Performance\r\n\r\nBenchmarks show over 3x faster IBD performance in a cloud environment with network connected storage[^1], 3x faster IBD for an M4 Mac and up to 46% faster with directly connected storage[^2][^3][^4][^5]. The parallelization of expensive disk lookups provides significant speedup.\r\n\r\n[Flamegraphs show how the execution is changed](https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3617315125).\r\n\r\n### Credits\r\n\r\nInspired by [this comment](https://github.com/bitcoin/bitcoin/pull/18941#issuecomment-638553680).\r\n\r\nResolves https://github.com/bitcoin/bitcoin/issues/34121.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3678847806\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3515011880\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3463894000\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3347436866\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3488760623",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2024-10-22T14:40:28Z",
+      "updated_at": "2026-02-21T13:49:14Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31132",
+      "labels": [
+        "Validation",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 3806,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3299290114,
+      "number": 34615,
+      "title": "mempool: expose optimality of mempool to log / rpc",
+      "body": "Post-SFL #34023 I don't think we expect the mempool to be unordered for long periods of time. If we consider it likely to be a serious regression in production, it would be useful to expose the fact  that the mempool is not known to be optimal.\r\n\r\n1. do a MEMPOOL log after any `DoWork()` returns false, meaning non-optimal\r\n2. expose it via getmempoolinfo, by calling `DoWork(0)`, which does nothing but return known-optimality\r\n\r\nI'm not wedded to either approach, I just think something is better than nothing for the next release.",
+      "state": "open",
+      "user": "instagibbs",
+      "created_at": "2026-02-18T15:44:28Z",
+      "updated_at": "2026-02-21T13:19:13Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34615",
+      "labels": [
+        "Mempool",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 585,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3095820892,
+      "number": 34054,
+      "title": "net processing: Add ibd check before processing block for txdownloadman",
+      "body": "Calculating the rolling bloom filters for the txorphanage takes some CPU time from the scheduler thread. This can be observed for example in [this flamegraph](https://bitcoin-dev-tools.github.io/benchcoin/results/pr-172/20066462508/mainnet-default-instrumented-base-flamegraph.svg?x=920203898521&y=780), where handling the filter takes about 2.6% of total time (and most of the scheduler thread's time). \r\n\r\nDuring ibd the entries in the tx download bloom filter are just continuously rolled over and aren't consumed, since no mempool entries are created by incoming transactions from peers during ibd. The mempool does accept transactions via RPC, or the wallet at the time, however these don't interact with the orphanage and the txdownloadman, because adding anything to those is guarded by IsInitialBlockDownload() checks as well.\r\n\r\nWe're usually latching ibd to false a few blocks before catching up to the tip, so this should also not significantly degrade the performance of the filter once fully caught up.",
+      "state": "open",
+      "user": "sedited",
+      "created_at": "2025-12-12T09:06:28Z",
+      "updated_at": "2026-02-21T13:17:16Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34054",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1087,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2956421896,
+      "number": 33727,
+      "title": "zmq: Log bind error at Error level, abort startup on init error",
+      "body": "Fixes #33715",
+      "state": "open",
+      "user": "isrod",
+      "created_at": "2025-10-28T18:59:03Z",
+      "updated_at": "2026-02-21T12:56:28Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33727",
+      "labels": [
+        "RPC/REST/ZMQ",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 76,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2965956843,
+      "number": 33752,
+      "title": "rest: Query predecessor headers using negative count param",
+      "body": "There is currently no mechanism by which to batch-query headers from tip, backwards towards genesis.\r\nThis PR extends the REST Blockheaders API to support batch-querying predecessor headers, by providing a negative count parameter.",
+      "state": "open",
+      "user": "A-Manning",
+      "created_at": "2025-10-31T09:11:11Z",
+      "updated_at": "2026-02-21T12:29:26Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33752",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 290,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2517768893,
+      "number": 32489,
+      "title": "wallet: Add `exportwatchonlywallet` RPC to export a watchonly version of a wallet",
+      "body": "Currently, if a user wants to use an airgapped setup, they need to manually create the watchonly wallet that will live on the online node by importing the public descriptors. This PR introduces `exportwatchonlywallet` which will create a wallet file with the public descriptors to avoid exposing the specific internals to the user. Additionally, this RPC will copy any existing labels, transactions, and wallet flags. This ensures that the exported watchonly wallet is almost entirely a copy of the original wallet but without private keys.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-05-13T22:22:00Z",
+      "updated_at": "2026-02-21T11:58:05Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32489",
+      "labels": [
+        "Wallet",
+        "Needs rebase",
+        "Review club"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 622,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3284423117,
+      "number": 34591,
+      "title": "cmake: Improve `install_name_tool` workaround",
+      "body": "We stopped using `install_name_tool` in 3bee51427a05075150721f0a05ead8f92e1ba019 (https://github.com/bitcoin/bitcoin/pull/29890), which [required](https://github.com/hebasto/bitcoin/pull/180) a CMake-specific hack:https://github.com/bitcoin/bitcoin/blob/b65ff0e5a1fd4ea2ae75e204729b8008c4ebb9ab/CMakeLists.txt#L72-L76\r\n\r\nDue to recent changes in CMake, this hack has become problematic for the following reasons:\r\n1. It is no longer needed when using CMake 4.2 or newer. See upstream [Issue #27069](https://gitlab.kitware.com/cmake/cmake/-/issues/27069) and [MR #10955](https://gitlab.kitware.com/cmake/cmake/-/merge_requests/10955).\r\n\r\n2. It causes an [issue](https://github.com/bitcoin/bitcoin/issues/34513) when using CMake 4.0.5 or newer. See upstream [Issue #26814](https://gitlab.kitware.com/cmake/cmake/-/issues/26814) and [MR #10721](https://gitlab.kitware.com/cmake/cmake/-/merge_requests/10721).\r\n\r\nThis PR addresses both of these issues. Please see the individual commits for more details.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/34513.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2026-02-14T11:37:33Z",
+      "updated_at": "2026-02-21T11:49:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34591",
+      "labels": [
+        "Build system",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1104,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2982459951,
+      "number": 33796,
+      "title": "kernel: Expose `CheckTransaction` consensus validation function",
+      "body": "This PR exposes the consensus-level `CheckTransaction` function through the libbitcoinkernel C API and adds a corresponding C++ wrapper.\r\n\r\nCurrently, libkernel only provided script-level validation via `btck_script_pubkey_verify` and `ScriptPubkeyApi<>::Verify`. \r\n\r\nAFAIK there was no way to perform context-free consensus checks on a transaction’s structure (e.g., coinbase rules, money-range, duplicate inputs).\r\n\r\nThis change introduces a new API:\r\n\r\n```c\r\nint btck_check_transaction(const btck_Transaction* tx, btck_TxValidationState** out_state);\r\n```\r\n\r\nand a C++ convenience wrapper:\r\n\r\n```cpp\r\nstd::pair<bool, TxValidationState> btck::CheckTransaction(const Transaction& tx);\r\n```\r\n\r\nBoth follow the ownership and error-handling conventions established in `bitcoinkernel.h`.\r\n\r\nThe test suite is extended with cases covering:\r\n* coinbase scriptSig length bounds\r\n* empty vin / vout detection\r\n* negative or out-of-range output values\r\n* duplicate inputs\r\n* null prevouts in non-coinbase transactions\r\n\r\n",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2025-11-05T23:59:50Z",
+      "updated_at": "2026-02-21T11:28:23Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33796",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1077,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3124280596,
+      "number": 34141,
+      "title": "miniscript: Use Func and Expr when parsing keys, hashes, and locktimes",
+      "body": "The miniscript parser currently only looks for the next `)` when parsing key, hash, and locktime expressions. This fails to parse when the expressions contain a nested expression. Currently, this is only possible with `musig()` inside of key expressions. However, this pattern can be generalized to handling hashes and locktimes, so I implemented those too.\r\n\r\nFixes #34076",
+      "state": "closed",
+      "user": "achow101",
+      "created_at": "2025-12-22T21:36:58Z",
+      "updated_at": "2026-02-21T11:19:05Z",
+      "merged_at": "2026-02-21T11:19:04Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34141",
+      "labels": [
+        "Descriptors"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 444,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2999254279,
+      "number": 33854,
+      "title": "fix assumevalid is ignored during reindex",
+      "body": "During a reindex, the assumevalid setting may be ignored if the chainwork of the best header is below `minimumchainwork`. This happens when the previous IBD was stopped before connecting enough blocks to reach the required `minimumchainwork`. The assumevalid block will also be missing from the block index because the assumevalid block is set to match the `minimumchainwork`. See [Issue #31494](https://github.com/bitcoin/bitcoin/issues/31494).\r\n\r\nAs a result, `reindex` can take significantly longer to complete than necessary.\r\n\r\nThis PR addresses the issue by modifying reindex behaviour: if the chainwork of the `best_header` is below `minimumchainwork`, the node skips the `ActivateBestChain()` step and proceeds directly to synchronisation.\r\n\r\nThis PR takes a different approach from [PR #31615](https://github.com/bitcoin/bitcoin/pull/31615) to keep the validation path for `reindex` the same as the regular IBD validation path.\r\n\r\nDevelopers benchmarking IBD with `-reindex` may find this behaviour undesirable. In such cases, it’s recommended to use `-reindex-chainstate` instead or ensure that the available blocks have sufficient chainwork.\r\n\r\n`libbitcoinkernel` exposes the `ImportBlocks` function and expects `reindex` to connect blocks, so an attempt was made to preserve the existing behaviour for `libbitcoinkernel`.",
+      "state": "open",
+      "user": "Eunovo",
+      "created_at": "2025-11-11T14:21:14Z",
+      "updated_at": "2026-02-21T10:43:06Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33854",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1375,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1512762627,
+      "number": 28463,
+      "title": "p2p: Increase inbound capacity for block-relay only connections",
+      "body": "This is joint work with amitiuttarwar.\r\n\r\nSee issue #28462 for a broader discussion on increasing the number of block-relay-only connections independent of this particular implementation proposal.\r\n\r\nWe suggest to increase the number of inbound slots allocated to block-relay-only peers by increasing the default maximum connections from 125 to 200, with 50% of inbound slots accessible for tx-relaying peers.\r\nThis is a prerequisite for being able to increase the default number of outgoing block-relay-only peers later, because the current inbound capacity of the network is not sufficient.\r\nIn order to account for incoming tx-relaying peers separately from incoming block-relay peers, changes to the inbound eviction logic are necessary.\r\n\r\nSee the next post in this thread for a more detailed explanation and motivation of the changes.",
+      "state": "open",
+      "user": "mzumsande",
+      "created_at": "2023-09-12T20:36:39Z",
+      "updated_at": "2026-02-21T10:14:56Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/28463",
+      "labels": [
+        "P2P",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 904,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3310263904,
+      "number": 34643,
+      "title": "[RFC] cluster_linearize: add O(N) fast path for chain-shaped clusters",
+      "body": "This PR relies on PR https://github.com/bitcoin/bitcoin/pull/34625\r\n## Summary                                                                       \r\n                                                                                 \r\nThis PR adds `TryLinearizeChain()`, an O(N) specialised linearizer for chain-shaped\r\nclusters, and a benchmark targeting the feerate distribution that triggers the worst-case\r\nbehaviour of the general SPF algorithm on chains.                                \r\n                                                                                 \r\n**Commits:**                                                                     \r\n- `ad15466be1e4` cluster_linearize: add O(N) fast path for chain-shaped clusters \r\n- `72bf0faf820c` cluster_linearize: benchmark Linearize on worst-case chain feerate distribution\r\n                                                                                 \r\n---                                                                              \r\n                                                                                 \r\n## Motivation                                                                    \r\n                                                                                 \r\nInstrumentation added to a running node revealed that **virtually most cluster seen in the\r\nmempool is chain-shaped** — each transaction spends an output of the previous one. This is\r\nconsistent with widespread use of CPFP (Child-Pays-For-Parent) fee bumping, where a\r\nlow-feerate parent transaction is paired with a high-feerate child that spends one of its\r\noutputs, forming a two-transaction chain; longer chains arise from repeated CPFP stacking or\r\nbatch-payment patterns.                                                          \r\n                                                                                 \r\nBecause chain clusters dominate in practice, a topology-specific O(N) fast path has\r\ndisproportionately large impact compared with optimising for rarer topologies.   \r\n                                                                                 \r\nThe general `Linearize()` function uses the Spanning Forest (SPF) algorithm, whose\r\n`MakeTopological()` phase merges chunks iteratively. For a chain cluster with N transactions\r\nand strictly increasing individual feerates (fee_i = i+1), `MakeTopological` triggers a\r\ncascade that merges the entire chain into one chunk step-by-step. At merge step k, two\r\noperations each scan the growing top-part chunk of size k:                       \r\n                                                                                 \r\n- `UpdateChunk` iterates over all k transactions to write their `chunk_rep` (unconditionally,\r\n  regardless of any inner-loop conditions).                                      \r\n- `MergeChunks` iterates over all k transactions to locate the dependency connecting top and\r\n  bottom chunks.                                                                 \r\n                                                                                 \r\nThis accumulates O(1+2+...+(N-1)) = O(N²) loop iterations across the full cascade.\r\nAn O(N) specialised path avoids the SPF overhead entirely for chain-shaped clusters.\r\n                                                                                 \r\n---                                                                              \r\n                                                                                 \r\n## Algorithm                                                                     \r\n                                                                                 \r\n### Detection (`TryLinearizeChain`)                                              \r\n                                                                                 \r\nA cluster with N transactions is a chain if and only if its ancestor-set sizes form exactly\r\n{1, 2, ..., N}. This is checked in O(N) using a boolean presence array;          \r\n`Ancestors(i).Count()` is O(1) for the fixed-size `BitSet<64>` used here.        \r\n                                                                                 \r\n### Topological order                                                            \r\n                                                                                 \r\nThe node with k ancestors occupies position k−1 in the unique topological order. Recovered\r\nin O(N) by a single mapping pass.                                                \r\n                                                                                 \r\n### Why PostLinearize is not needed                                              \r\n                                                                                 \r\nThe topological order of a chain cluster is unique, and every adjacent pair has a dependency,\r\nso `ChunkLinearizationInfo`'s unconditional merge and `PostLinearize`'s merge/swap behave\r\nidentically (the swap branch never triggers). The topological order itself is the optimal\r\nlinearization, and `PostLinearize` can be safely skipped.                        \r\n                                                                                 \r\nThe result is returned early from `Linearize()` before the SPF machinery is initialised:\r\n                                                                                 \r\n```cpp                                                                           \r\n// In Linearize():                                                               \r\nif (auto chain_lin = TryLinearizeChain(depgraph); !chain_lin.empty()) {          \r\n    return {std::move(chain_lin), /*optimal=*/true, /*cost=*/0, /*is_chain=*/true};\r\n}                                                                                \r\n```                                                                              \r\n                                                                                 \r\nThe fourth return value (`is_chain`) allows the caller (`Relinearize()`) to skip the\r\n`PostLinearize()` pass, which is redundant for chains: `TryLinearizeChain` already\r\nproduces an optimal, connected linearization.                                    \r\n                                                                                 \r\n---                                                                              \r\n                                                                                 \r\n## Benchmark results                                                             \r\n                                                                                 \r\n### `LinearizeOptimallyMonotoneChainTotal` — increasing feerates (SPF worst case)\r\n                                                                                 \r\n`MakeMonotoneChainGraph` builds a chain with fee_i = i+1, size_i = 1. For the SPF\r\nalgorithm, every prefix of the chain has feerate (k+1)/2 (strictly increasing with length),\r\nso `MakeTopological` must merge the entire chain into a single chunk through N−1 steps.\r\nEach step scans the growing top-part chunk (via `UpdateChunk`'s unconditional `chunk_rep`\r\nwrite loop and `MergeChunks`'s dep-search loop), accumulating O(N²) iterations in total.\r\n`TryLinearizeChain` eliminates this entirely.                                    \r\n                                                                                 \r\n| Size | Before (ns/op) | After (ns/op) | Speedup |                              \r\n|------|---------------|--------------|---------|                                \r\n| 9 tx | 973 | 48 | **20×** |                                                    \r\n| 16 tx | 1,772 | 72 | **25×** |                                                 \r\n| 32 tx | 3,880 | 129 | **30×** |                                                \r\n| 48 tx | 6,205 | 185 | **34×** |                                                \r\n| 63 tx | 8,551 | 238 | **36×** |                                                \r\n                                                                                 \r\nInstructions per call after optimisation:                                        \r\n                                                                                 \r\n| N | Total instructions | Instructions/tx |                                     \r\n|---|-------------------|----------------|                                       \r\n| 9 | 954 | 106 |                                                                \r\n| 16 | 1,360 | 85 |                                                              \r\n| 32 | 2,295 | 72 |                                                              \r\n| 48 | 3,230 | 67 |                                                              \r\n| 63 | 4,100 | 65 |                                                              \r\n                                                                                 \r\nThe \"after\" timings confirm that `TryLinearizeChain` runs in O(N) regardless of feerate\r\ndistribution (~65–106 instructions per transaction at N=9..63, constant converging as N\r\ngrows). The speedup grows with N because the baseline trends towards O(N²) while the\r\noptimised path remains O(N).                                                     \r\n",
+      "state": "open",
+      "user": "HowHsu",
+      "created_at": "2026-02-21T05:11:29Z",
+      "updated_at": "2026-02-21T10:11:46Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34643",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 9324,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3310552312,
+      "number": 34644,
+      "title": "mining: add submitBlock to IPC Mining interface",
+      "body": "This PR adds a `submitBlock` method to the IPC Mining interface, equivalent to the `submitblock` RPC. It accepts a serialized block over IPC, validates/processes it via the normal block-processing path.\r\n\r\nThe method uses the same result shape as `checkBlock`: `bool` + `reason/debug out-params`. It reports duplicate, inconclusive, and invalid-block rejection details, and initializes reason/debug on every call.\r\n\r\nCloses #34626",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2026-02-21T08:47:59Z",
+      "updated_at": "2026-02-21T10:09:32Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34644",
+      "labels": [
+        "Mining",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 478,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3220617054,
+      "number": 34435,
+      "title": "refactor: use `_MiB`/`_GiB` consistently for byte conversions",
+      "body": "### Problem\r\nByte-size conversions in the codebase currently show up in many equivalent formats (multiplication/division chains, shifts, hex/binary literals), which creates a maintenance burden and makes review error-prone - especially considering the architectural differences of `size_t`.\r\nInspired by https://github.com/bitcoin/bitcoin/pull/34305#discussion_r2734720002, it seemed appropriate to unify `Mebibyte` usage across the codebase and add `Gibibyte` support with 32/64 bit `size_t` validation.\r\n\r\n### Fix\r\nThis PR refactors those call sites to use `\"\"_MiB` (existing) and `\"\"_GiB` (new), and adds the encountered value/pattern replacements to unit tests to make review straightforward, and to ensure the conversions remain valid.\r\nThe literals are overflow-checked when converting to `size_t`, and unit tests cover the 32-bit boundary cases.\r\n\r\nConcretely, it replaces patterns such as:\r\n* `1024*1024`, `1<<20`, `0x100000`, `1048576`, `/ 1024 / 1024`, `* (1.0 / 1024 / 1024)` → `1_MiB` or `double(1_MiB)`\r\n* `1024*1024*1024`, `1<<30`, `0x40000000`, `1024_MiB`, `>> 30` → `1_GiB`\r\n\r\n### Note\r\nIn the few places where arithmetic involves signed values, the result is identical to the previous code assuming those quantities never become negative.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-28T21:26:10Z",
+      "updated_at": "2026-02-21T09:50:05Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34435",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1317,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3031948596,
+      "number": 33920,
+      "title": "Export embedded ASMap RPC",
+      "body": "This depends on the embedded data PR itself (#28792), until merge this will remain in draft status. All commit but the last one are from there.\r\n\r\nThere has been interest in exporting the embedded data back into a file. This is implemented here with a simple `exportasmap` RPC which provides this functionality. The exported file can be used to verify the data integrity or statistical analysis using e.g. `contrib/asmap-tool.py`.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-11-20T23:53:36Z",
+      "updated_at": "2026-02-21T09:28:30Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33920",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 456,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3034182041,
+      "number": 33922,
+      "title": "mining: add getMemoryLoad() and track template non-mempool memory footprint",
+      "body": "Implements a way to track the memory footprint of all non-mempool transactions that are still being referenced by block templates, see discussion in  #33899. It does not impose a limit.\r\n\r\nIPC clients can query this footprint (total, across all clients) using the `getMemoryLoad()` IPC method. Its client-side usage is demonstrated here:\r\n- https://github.com/stratum-mining/sv2-tp/pull/63\r\n\r\nAdditionally, the functional test in `interface_ipc.py` is expanded to demonstrate how template memory management works: templates are not released until the client drops references to them, or calls the template destroy method, or disconnects. The destroy method is called automatically by clients using [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess), as [sv2-tp](https://github.com/stratum-mining/sv2-tp) does. In the Python tests it also happens when references are destroyed or go out of scope.\r\n\r\nThe PR starts with preparation refactor commits:\r\n\r\n1. Tweaks `interface_ipc.py` so `destroy()` calls happen in an order that's useful to later demonstrate memory management\r\n2. Change `std::unique_ptr<BlockTemplate> block_template` from a `static` defined in `rpc/mining.cpp` to `NodeContext`. This prevents a crash when we switch to a non-trivial destructor later (which uses `m_node`).\r\n\r\nThen the main commits:\r\n\r\n3. Add `template_tx_refs` to `NodeContext` to track how many templates contain any given transaction. This map is updated by the `BlockTemplate` constructor and destructor.\r\n4. Add `GetTemplateMemoryUsage()` which loops over this map and sums up the memory footprint for transactions outside the mempool\r\n5. Expose this information to IPC clients via `getMemoryLoad()` and add test coverage\r\n",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-21T15:34:14Z",
+      "updated_at": "2026-02-21T09:14:12Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33922",
+      "labels": [
+        "Mining",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1801,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3037988791,
+      "number": 33929,
+      "title": "test: Remove `system_tests/run_command` runtime dependencies",
+      "body": "`system_tests` currently rely on `cat`, `echo`, `false` and `sh` being available in `PATH` at runtime.\r\n\r\nThis PR:\r\n1. Removes these dependencies.\r\n2. Reduces the number of platform-specific code paths.\r\n\r\nThe change is primarily motivated by my work on maintaining the [`bitcoin-core`](https://packages.guix.gnu.org/packages/bitcoin-core) package in Guix. It enables the removal of the existing `bash` and `coreutils` native inputs, which in turn makes it possible to drop the implicit dependency on `qtbase@5` (see https://codeberg.org/guix/guix/pulls/4386#issuecomment-8613333).",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-11-23T23:03:10Z",
+      "updated_at": "2026-02-21T09:00:42Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33929",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 642,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3054407979,
+      "number": 33966,
+      "title": "refactor: disentangle miner startup defaults from runtime options",
+      "body": "The interaction between node startup options like `-blockreservedweight` and runtime options, especially those passed via IPC, is confusing.\r\n\r\nThey're combined in `BlockAssembler::Options`, which this PR gets rid of in favour of two distinct structs:\r\n\r\n1. `BlockCreateOptions`: used by interface clients. As before, IPC clients have access to a safe / sane subset, whereas RPC and test code can use all fields.\r\n2. `MiningArgs`: these are set once during node startup\r\n\r\nBoth structs have a member for the maximum block height, which is not a problem since they're different structs. The one on `MiningArgs` (`block_max_weight`) matches `-maxblockheight` and is left alone. The one on `BlockCreateOptions` (`block_max_weight`) is an optional, it's set by `ApplyMiningDefaults` only if empty. \r\n\r\nThis all happens in the last commit and requires some preparation to keep things easy to review.\r\n\r\nWe get rid of `BlockAssembler::Options` but this is used in many tests. Since large churn is inevitable, we might as well switch all tests, bench and fuzzers over to the Mining interface. The first (non-base) commit does that, dramatically reducing direct use of `BlockAssembler`. Two exceptions are documented in the commit message. Because `test_block_validity` wasn't available via the interface and the block_assemble benchmark needs it, it's moved from `BlockAssembler::Options` to `BlockCreateOptions` (still not exposed via IPC).\r\n\r\nWe need access to mining related defaults and structs from both the miner and node initialization code. To avoid having to pull in all of `BlockAssembler` for the latter, the second commit introduces `node/mining.h` and moves constants and structs there from `src/node/types.h` (`BlockCreateOptions`, `BlockWaitOptions`, `BlockCheckOptions`) and `src/node/miner.h` (`DEFAULT_PRINT_MODIFIED_FEE`).\r\n\r\nI considered also moving `DEFAULT_BLOCK_MAX_WEIGHT`, `DEFAULT_BLOCK_RESERVED_WEIGHT`, `MINIMUM_BLOCK_RESERVED_WEIGHT` and `DEFAULT_BLOCK_MIN_TX_FEE` there from `policy.h`, since they are distinct from relay policy and not needed by the kernel. But this seems more appropriate for a follow-up and requires additional discussion.\r\n\r\nThe meat and potatoes of this PR is split between the three last commits for easier review:\r\n\r\n1. Adds `node/mining_args.{h,cpp}` and move the options checking out of `init.cpp`, without adding storage\r\n2. Add `block_max_weight` to `BlockCreateOptions` as explained above\r\n3. Introduce the `MiningArgs` struct, add it to the `NodeContext`, expand `mining_args.cpp` to store it, pass it to `BlockAssembler`, etc.\r\n\r\nI kept variable renaming and other formatting changes to a minimum to ease review with `--color-moved=dimmed-zebra`.\r\n\r\nThis PR builds on the bug fix in:\r\n- [ ] #33965\r\n\r\nOnce that is merged, this PR should not change behaviour.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-28T15:42:31Z",
+      "updated_at": "2026-02-21T08:33:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33966",
+      "labels": [
+        "Refactoring",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2878,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3056547139,
       "number": 33974,
@@ -30,30 +701,6 @@
         "text_length": 1331,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3309768200,
-      "number": 34641,
-      "title": "node: scale `-dbcache` default from total system RAM",
-      "body": "### Problem\r\n\r\n`-dbcache` controls how much RAM Bitcoin Core uses for the in-memory view of the UTXO set, while the authoritative chainstate remains on disk.\r\nThe default is still the fixed `450 MiB` value, chosen almost a decade ago, even though chainstate size and typical hardware profiles have changed significantly since then.\r\n\r\nIn practice, a fixed 450 MiB default is often too conservative on modern systems, where larger cache sizes can reduce flush churn and disk roundtrips during validation, especially in IBD. At the same time, memory pressure remains important on smaller systems.\r\n\r\n### Historical changes\r\n\r\n| Date       | dbcache change | PR                                                                                                                                                                                                    |\r\n|------------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|\r\n| 2016-07-06 | 100 -> 300     | [#8273: Bump -dbcache default to 300MiB](https://github.com/bitcoin/bitcoin/commit/32cab91278651d07a11132b7636dc3d21144e616#diff-d102b6032635ce90158c1e6e614f03b50e4449aa46ce23370da5387a658342fdR25) |\r\n| 2017-04-05 | 300 -> 450     | [#10133: Clean up calculations of pcoinsTip memory usage](https://github.com/bitcoin/bitcoin/pull/10133/changes#diff-d102b6032635ce90158c1e6e614f03b50e4449aa46ce23370da5387a658342fdR31)             |\r\n\r\n### IRC\r\n\r\nThe Feb 17-19, 2026 discussion converged on avoiding a single new fixed `-dbcache` value and moving to RAM-aware defaults instead, balancing performance gains on modern hardware against OOM risk on lower-memory systems.\r\n\r\n<details>\r\n<summary>IRC log links</summary>\r\n\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-17\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-18\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-19\r\n\r\n</details>\r\n\r\n### Fix\r\n\r\nReplace the fixed default with a RAM-aware policy:\r\n```math\r\n\\text{default\\_dbcache}=\\mathrm{clamp}\\left(100\\,\\mathrm{MiB},\\ 0.25\\cdot\\left(\\text{system RAM}-2\\,\\mathrm{GiB}\\right),\\ 3000\\,\\mathrm{MiB}\\right)\r\n```\r\n\r\nIf system RAM cannot be determined, assume 4 GiB on 64-bit builds and 2 GiB on 32-bit builds.\r\nManual `-dbcache` values are unchanged and still override the automatic default.\r\n\r\n### Warning threshold update\r\n\r\nOversized `-dbcache` warnings are kept and aligned with the new policy - warn if:\r\n- `dbcache > default-dbcache` when `RAM < fallback RAM` (4 GiB on 64-bit, 2 GiB on 32-bit)\r\n- `dbcache` > `75% of total RAM`, otherwise\r\n\r\n### Performance measurements\r\n\r\n<details><summary>Umbrel - 20% faster reindex-chainstate with new default dbcache</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n<details><summary>2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        33619.332 s               [User: 61450.140 s, System: 5671.449 s]\r\n ```\r\n</details>\r\n\r\n<details><summary>2026-02-20 | reindex-chainstate | 936639 blocks | dbcache 3000 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        27910.440 s               [User: 44917.351 s, System: 2090.958 s]\r\n```\r\n</details>\r\n\r\n</details>\r\n\r\n<details><summary>Rpi5 - 20% faster reindex-chainstate with new default dbcache</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n\r\n```\r\n\r\n<details><summary>2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        48933.904 s               [User: 94560.562 s, System: 7823.574 s]\r\n ```\r\n</details>\r\n\r\n<details><summary>2026-02-20 | reindex-chainstate | 936639 blocks | dbcache 3000 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        40586.782 s               [User: 65901.116 s, System: 3260.832 s]\r\n```\r\n</details>\r\n\r\n</details>\r\n\r\n\r\n\r\n\r\n<details><summary>Apple M4 Max - 286% faster reindex-chainstate with new default dbcache</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=900000; \\\r\n  DATA_DIR=\"$HOME/Library/Application Support/Bitcoin\"; LOG_DIR=\"$HOME/bitcoin-reindex-logs\"; mkdir -p \"$LOG_DIR\"; \\\r\n  COMMA_COMMITS=${COMMITS// /,}; \\\r\n  (echo \"\"; for c in $(echo $COMMITS); do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(sysctl -n machdep.cpu.brand_string) | $(nproc) cores | $(printf '%.1fGiB' \"$(( $(sysctl -n hw.memsize)/1024/1024/1024 ))\") RAM | SSD | $(sw_vers -productName) $(sw_vers -productVersion) $(sw_vers -buildVersion) | $(xcrun clang --version | head -1)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$LOG_DIR/rdx-$(echo \"$COMMITS\" | sed -E 's/([a-f0-9]{8})[a-f0-9]+ ?/\\1-/g;s/-$//')-$STOP-$DBCACHE-appleclang.json\" \\\r\n    --parameter-list COMMIT \"$COMMA_COMMITS\" \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null || true; rm -f \\\"$DATA_DIR\\\"/debug.log; git checkout {COMMIT}; git reset --hard && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja -C build bitcoind -j2 && \\\r\n      ./build/bin/bitcoind -datadir=\\\"$DATA_DIR\\\" -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20\" \\\r\n    --conclude \"killall bitcoind 2>/dev/null || true; sleep 5; grep -q 'height=0' \\\"$DATA_DIR\\\"/debug.log && grep -q 'Disabling script verification at block #1' \\\"$DATA_DIR\\\"/debug.log && grep -q \\\"height=$STOP\\\" \\\"$DATA_DIR\\\"/debug.log || { echo 'debug.log assertions failed'; exit 1; }; \\\r\n                cp \\\"$DATA_DIR\\\"/debug.log \\\"$LOG_DIR\\\"/debug-{COMMIT}-\\$(date +%s).log 2>/dev/null || true\" \\\r\n    \"./build/bin/bitcoind -datadir=\\\"$DATA_DIR\\\" -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n<details><summary>2026-02-21 | reindex-chainstate | 900000 blocks | dbcache 450 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.2 25C56 | Apple clang version 17.0.0 (clang-1700.6.3.2)</summary>\r\n\r\n```bash\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        20261.315 s               [User: 18768.521 s, System: 4271.673 s]\r\n ```\r\n</details>\r\n\r\n<details><summary>2026-02-21 | reindex-chainstate | 900000 blocks | dbcache 3000 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.2 25C56 | Apple clang version 17.0.0 (clang-1700.6.3.2)</summary>\r\n\r\n```bash\r\n\r\n097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        7064.184 s               [User: 7701.391 s, System: 668.060 s]\r\n```\r\n</details>\r\n\r\n</details>\r\n\r\n\r\n### Quick reference (64 bit)\r\n\r\n| System RAM | Automatic default | Warning fires above |\r\n|------------|-------------------|---------------------|\r\n| 1 GiB      | 100 MiB           | 100 MiB             |\r\n| 2 GiB      | 100 MiB           | 100 MiB             |\r\n| 4 GiB      | 512 MiB           | 3071 MiB            |\r\n| 8 GiB      | 1536 MiB          | 6143 MiB            |\r\n| 16 GiB     | 3000 MiB          | 12287 MiB           |\r\n| 32 GiB     | 3000 MiB          | 24575 MiB           |\r\n\r\n<img width=\"1384\" height=\"583\" alt=\"image\" src=\"https://github.com/user-attachments/assets/2ccca03e-9130-457c-b386-f8aea15de955\" />\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-02-20T23:00:45Z",
-      "updated_at": "2026-02-21T08:13:08Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34641",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 13324,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -154,30 +801,6 @@
       }
     },
     {
-      "id": 3310263904,
-      "number": 34643,
-      "title": "cluster_linearize: add O(N) fast path for chain-shaped clusters",
-      "body": "This PR relies on PR https://github.com/bitcoin/bitcoin/pull/34625\r\n## Summary                                                                       \r\n                                                                                 \r\nThis PR adds `TryLinearizeChain()`, an O(N) specialised linearizer for chain-shaped\r\nclusters, and a benchmark targeting the feerate distribution that triggers the worst-case\r\nbehaviour of the general SPF algorithm on chains.                                \r\n                                                                                 \r\n**Commits:**                                                                     \r\n- `ad15466be1e4` cluster_linearize: add O(N) fast path for chain-shaped clusters \r\n- `72bf0faf820c` cluster_linearize: benchmark Linearize on worst-case chain feerate distribution\r\n                                                                                 \r\n---                                                                              \r\n                                                                                 \r\n## Motivation                                                                    \r\n                                                                                 \r\nInstrumentation added to a running node revealed that **virtually most cluster seen in the\r\nmempool is chain-shaped** — each transaction spends an output of the previous one. This is\r\nconsistent with widespread use of CPFP (Child-Pays-For-Parent) fee bumping, where a\r\nlow-feerate parent transaction is paired with a high-feerate child that spends one of its\r\noutputs, forming a two-transaction chain; longer chains arise from repeated CPFP stacking or\r\nbatch-payment patterns.                                                          \r\n                                                                                 \r\nBecause chain clusters dominate in practice, a topology-specific O(N) fast path has\r\ndisproportionately large impact compared with optimising for rarer topologies.   \r\n                                                                                 \r\nThe general `Linearize()` function uses the Spanning Forest (SPF) algorithm, whose\r\n`MakeTopological()` phase merges chunks iteratively. For a chain cluster with N transactions\r\nand strictly increasing individual feerates (fee_i = i+1), `MakeTopological` triggers a\r\ncascade that merges the entire chain into one chunk step-by-step. At merge step k, two\r\noperations each scan the growing top-part chunk of size k:                       \r\n                                                                                 \r\n- `UpdateChunk` iterates over all k transactions to write their `chunk_rep` (unconditionally,\r\n  regardless of any inner-loop conditions).                                      \r\n- `MergeChunks` iterates over all k transactions to locate the dependency connecting top and\r\n  bottom chunks.                                                                 \r\n                                                                                 \r\nThis accumulates O(1+2+...+(N-1)) = O(N²) loop iterations across the full cascade.\r\nAn O(N) specialised path avoids the SPF overhead entirely for chain-shaped clusters.\r\n                                                                                 \r\n---                                                                              \r\n                                                                                 \r\n## Algorithm                                                                     \r\n                                                                                 \r\n### Detection (`TryLinearizeChain`)                                              \r\n                                                                                 \r\nA cluster with N transactions is a chain if and only if its ancestor-set sizes form exactly\r\n{1, 2, ..., N}. This is checked in O(N) using a boolean presence array;          \r\n`Ancestors(i).Count()` is O(1) for the fixed-size `BitSet<64>` used here.        \r\n                                                                                 \r\n### Topological order                                                            \r\n                                                                                 \r\nThe node with k ancestors occupies position k−1 in the unique topological order. Recovered\r\nin O(N) by a single mapping pass.                                                \r\n                                                                                 \r\n### Why PostLinearize is not needed                                              \r\n                                                                                 \r\nThe topological order of a chain cluster is unique, and every adjacent pair has a dependency,\r\nso `ChunkLinearizationInfo`'s unconditional merge and `PostLinearize`'s merge/swap behave\r\nidentically (the swap branch never triggers). The topological order itself is the optimal\r\nlinearization, and `PostLinearize` can be safely skipped.                        \r\n                                                                                 \r\nThe result is returned early from `Linearize()` before the SPF machinery is initialised:\r\n                                                                                 \r\n```cpp                                                                           \r\n// In Linearize():                                                               \r\nif (auto chain_lin = TryLinearizeChain(depgraph); !chain_lin.empty()) {          \r\n    return {std::move(chain_lin), /*optimal=*/true, /*cost=*/0, /*is_chain=*/true};\r\n}                                                                                \r\n```                                                                              \r\n                                                                                 \r\nThe fourth return value (`is_chain`) allows the caller (`Relinearize()`) to skip the\r\n`PostLinearize()` pass, which is redundant for chains: `TryLinearizeChain` already\r\nproduces an optimal, connected linearization.                                    \r\n                                                                                 \r\n---                                                                              \r\n                                                                                 \r\n## Benchmark results                                                             \r\n                                                                                 \r\n### `LinearizeOptimallyMonotoneChainTotal` — increasing feerates (SPF worst case)\r\n                                                                                 \r\n`MakeMonotoneChainGraph` builds a chain with fee_i = i+1, size_i = 1. For the SPF\r\nalgorithm, every prefix of the chain has feerate (k+1)/2 (strictly increasing with length),\r\nso `MakeTopological` must merge the entire chain into a single chunk through N−1 steps.\r\nEach step scans the growing top-part chunk (via `UpdateChunk`'s unconditional `chunk_rep`\r\nwrite loop and `MergeChunks`'s dep-search loop), accumulating O(N²) iterations in total.\r\n`TryLinearizeChain` eliminates this entirely.                                    \r\n                                                                                 \r\n| Size | Before (ns/op) | After (ns/op) | Speedup |                              \r\n|------|---------------|--------------|---------|                                \r\n| 9 tx | 973 | 48 | **20×** |                                                    \r\n| 16 tx | 1,772 | 72 | **25×** |                                                 \r\n| 32 tx | 3,880 | 129 | **30×** |                                                \r\n| 48 tx | 6,205 | 185 | **34×** |                                                \r\n| 63 tx | 8,551 | 238 | **36×** |                                                \r\n                                                                                 \r\nInstructions per call after optimisation:                                        \r\n                                                                                 \r\n| N | Total instructions | Instructions/tx |                                     \r\n|---|-------------------|----------------|                                       \r\n| 9 | 954 | 106 |                                                                \r\n| 16 | 1,360 | 85 |                                                              \r\n| 32 | 2,295 | 72 |                                                              \r\n| 48 | 3,230 | 67 |                                                              \r\n| 63 | 4,100 | 65 |                                                              \r\n                                                                                 \r\nThe \"after\" timings confirm that `TryLinearizeChain` runs in O(N) regardless of feerate\r\ndistribution (~65–106 instructions per transaction at N=9..63, constant converging as N\r\ngrows). The speedup grows with N because the baseline trends towards O(N²) while the\r\noptimised path remains O(N).                                                     \r\n",
-      "state": "open",
-      "user": "HowHsu",
-      "created_at": "2026-02-21T05:11:29Z",
-      "updated_at": "2026-02-21T06:54:22Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34643",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 9318,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3088060609,
       "number": 34038,
       "title": "logging: replace -loglevel with -trace, various API improvements",
@@ -246,77 +869,6 @@
         "text_length": 664,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3299290114,
-      "number": 34615,
-      "title": "mempool: expose optimality of mempool to log / rpc",
-      "body": "Post-SFL #34023 I don't think we expect the mempool to be unordered for long periods of time. If we consider it likely to be a serious regression in production, it would be useful to expose the fact  that the mempool is not known to be optimal.\r\n\r\n1. do a MEMPOOL log after any `DoWork()` returns false, meaning non-optimal\r\n2. expose it via getmempoolinfo, by calling `DoWork(0)`, which does nothing but return known-optimality\r\n\r\nI'm not wedded to either approach, I just think something is better than nothing for the next release.",
-      "state": "open",
-      "user": "instagibbs",
-      "created_at": "2026-02-18T15:44:28Z",
-      "updated_at": "2026-02-21T05:52:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34615",
-      "labels": [
-        "Mempool",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 585,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3299687172,
-      "number": 34616,
-      "title": "Cluster mempool: SFL cost model (take 2)",
-      "body": "Part of #30289, replaces earlier #34138.\r\n\r\nThis introduces a more accurate cost model for SFL, to control how much CPU time is spent inside the algorithm for clusters that cannot be linearized perfectly within a reasonable amount of time.\r\n\r\nThe goal is having a metric for the amount of work performed, so that txmempool can impose limits on that work: a lower bound that is always performed (unless optimality is reached before that point, of course), and an upper bound to limit the latency and total CPU time spent on this. There are conflicting design goals here:\r\n* On the one hand, it seems ideal if this metric is closely correlated to actual CPU time, because otherwise the limits become inaccurate.\r\n* On the other hand, it seems a nightmare to have the metric be platform/system dependent, as it makes network-wide reasoning nearly impossible. It's expected that slower systems take longer to do the same thing; this holds for everything, and we don't need to compensate for this.\r\n\r\nThere are multiple solutions to this:\r\n* One extreme is just measuring the time. This is very accurate, but extremely platform dependent, and also non-deterministic due to random scheduling/cache effects.\r\n* The other extreme is using a very abstract metric like counting how many times certain loops/function inside the algorithm run. That is what is implemented in master right now, just counting the sum of the numbers of transactions updated across all `UpdateChunks()` calls. It however necessarily fails to account for significant portions of runtime spent elsewhere, resulting in a rather wide range of \"ns per cost\" values.\r\n* This PR takes a middle ground, counting many function calls / branches / loops, with weights that were determined through benchmarking on an average on a number of systems.\r\n\r\nSpecifically, the cost model was obtained by:\r\n* For a variety of machines:\r\n  * Running a fixed collection of ~385000 clusters found through random generation and fuzzing, optimizing for difficulty of linearization.\r\n    * Linearize each ~3000 times, with different random seeds. Sometimes without input linearization, sometimes with a bad one.\r\n      * Gather cycle counts for each of the operations included in this cost model, broken down by their parameters.\r\n  * Correct the data by subtracting the runtime of obtaining the cycle count.\r\n  * Drop the 5% top and bottom samples from each cycle count dataset, and compute the average of the remaining samples.\r\n  * For each operation, fit a least-squares linear function approximation through the samples.\r\n* Rescale all machine expressions to make their total time match, as we only care about relative cost of each operation.\r\n* Take the per-operation average of operation expressions across all machines, to construct expressions for an average machine.\r\n* Approximate the result with integer coefficients.\r\n\r\nThe benchmarks were performed by `l0rinc <pap.lorinc@gmail.com>` and myself, on AMD Ryzen 5950X, AMD Ryzen 7995WX, AMD Ryzen 9980X, Apple M4 Max, Intel Core i5-12500H, Intel Core Ultra 7 155H, Intel N150 (Umbrel), Intel Core i7-7700, Intel Core i9-9900K, Intel Haswell (VPS, virtualized), ARM Cortex-A76 (Raspberry Pi 5).\r\n\r\nBased on final benchmarking, the \"acceptable\" iteration count (which is the minimum spent on every cluster) is to 64000 units, which corresponds to roughly 50 μs on Ryzen 5950X and similar modern desktop hardware.",
-      "state": "open",
-      "user": "sipa",
-      "created_at": "2026-02-18T17:26:22Z",
-      "updated_at": "2026-02-21T05:36:40Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34616",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 3453,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3207919952,
-      "number": 34401,
-      "title": "kernel:  add serialization method for btck_BlockHeader API",
-      "body": "This adds serialization for `btck_BlockHeader` API. Also, updated the `CheckHandle` to compare the byte content instead of size.\r\n\r\nFollow-up to #33822 .",
-      "state": "open",
-      "user": "yuvicc",
-      "created_at": "2026-01-25T06:50:13Z",
-      "updated_at": "2026-02-21T05:18:39Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34401",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 212,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -481,28 +1033,6 @@
         "text_length": 1243,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3216048052,
-      "number": 34422,
-      "title": "Update libmultiprocess subtree to be more stable with rust IPC client",
-      "body": "Includes:\r\n\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/241\r\n- https://github.com/bitcoin-core/libmultiprocess/pull/240\r\n\r\nThe latter change fixes issues with asynchronous requests (https://github.com/bitcoin/bitcoin/issues/33923) and unclean disconnects (https://github.com/bitcoin/bitcoin/issues/34250) that happen with the rust mining client. It also adds tests for these fixes which had some previous review in #34284 (that PR was closed to simplify dependencies between PRs).\r\n\r\nThe changes can be verified by running `test/lint/git-subtree-check.sh src/ipc/libmultiprocess` as described in [developer notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#subtrees) and [lint instructions](https://github.com/bitcoin/bitcoin/tree/master/test/lint#git-subtree-checksh)\r\n\r\nResolves #33923 and #34250\r\n",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2026-01-27T20:06:40Z",
-      "updated_at": "2026-02-21T01:08:50Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34422",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 909,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -788,55 +1318,6 @@
         "text_length": 830,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3220617054,
-      "number": 34435,
-      "title": "refactor: use `_MiB`/`_GiB` consistently for byte conversions",
-      "body": "### Problem\r\nByte-size conversions in the codebase currently show up in many equivalent formats (multiplication/division chains, shifts, hex/binary literals), which creates a maintenance burden and makes review error-prone - especially considering the architectural differences of `size_t`.\r\nInspired by https://github.com/bitcoin/bitcoin/pull/34305#discussion_r2734720002, it seemed appropriate to unify `Mebibyte` usage across the codebase and add `Gibibyte` support with 32/64 bit `size_t` validation.\r\n\r\n### Fix\r\nThis PR refactors those call sites to use `\"\"_MiB` (existing) and `\"\"_GiB` (new), and adds the encountered value/pattern replacements to unit tests to make review straightforward, and to ensure the conversions remain valid.\r\nThe literals are overflow-checked when converting to `size_t`, and unit tests cover the 32-bit boundary cases.\r\n\r\nConcretely, it replaces patterns such as:\r\n* `1024*1024`, `1<<20`, `0x100000`, `1048576`, `/ 1024 / 1024`, `* (1.0 / 1024 / 1024)` → `1_MiB` or `double(1_MiB)`\r\n* `1024*1024*1024`, `1<<30`, `0x40000000`, `1024_MiB`, `>> 30` → `1_GiB`\r\n\r\n### Note\r\nIn the few places where arithmetic involves signed values, the result is identical to the previous code assuming those quantities never become negative.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-28T21:26:10Z",
-      "updated_at": "2026-02-20T21:31:04Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34435",
-      "labels": [
-        "Refactoring",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1317,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3284423117,
-      "number": 34591,
-      "title": "cmake: Improve `install_name_tool` workaround",
-      "body": "We stopped using `install_name_tool` in 3bee51427a05075150721f0a05ead8f92e1ba019 (https://github.com/bitcoin/bitcoin/pull/29890), which [required](https://github.com/hebasto/bitcoin/pull/180) a CMake-specific hack:https://github.com/bitcoin/bitcoin/blob/b65ff0e5a1fd4ea2ae75e204729b8008c4ebb9ab/CMakeLists.txt#L72-L76\r\n\r\nDue to recent changes in CMake, this hack has become problematic for the following reasons:\r\n1. It is no longer needed when using CMake 4.2 or newer. See upstream [Issue #27069](https://gitlab.kitware.com/cmake/cmake/-/issues/27069) and [MR #10955](https://gitlab.kitware.com/cmake/cmake/-/merge_requests/10955).\r\n\r\n2. It causes an [issue](https://github.com/bitcoin/bitcoin/issues/34513) when using CMake 4.0.5 or newer. See upstream [Issue #26814](https://gitlab.kitware.com/cmake/cmake/-/issues/26814) and [MR #10721](https://gitlab.kitware.com/cmake/cmake/-/merge_requests/10721).\r\n\r\nThis PR addresses both of these issues. Please see the individual commits for more details.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/34513.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2026-02-14T11:37:33Z",
-      "updated_at": "2026-02-20T21:23:43Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34591",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1104,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -1150,31 +1631,6 @@
       }
     },
     {
-      "id": 3054407979,
-      "number": 33966,
-      "title": "refactor: disentangle miner startup defaults from runtime options",
-      "body": "The interaction between node startup options like `-blockreservedweight` and runtime options, especially those passed via IPC, is confusing.\r\n\r\nThey're combined in `BlockAssembler::Options`, which this PR gets rid of in favour of two distinct structs:\r\n\r\n1. `BlockCreateOptions`: used by interface clients. As before, IPC clients have access to a safe / sane subset, whereas RPC and test code can use all fields.\r\n2. `MiningArgs`: these are set once during node startup\r\n\r\nBoth structs have a member for the maximum block height, which is not a problem since they're different structs. The one on `MiningArgs` (`block_max_weight`) matches `-maxblockheight` and is left alone. The one on `BlockCreateOptions` (`block_max_weight`) is an optional, it's set by `ApplyMiningDefaults` only if empty. \r\n\r\nThis all happens in the last commit and requires some preparation to keep things easy to review.\r\n\r\nWe get rid of `BlockAssembler::Options` but this is used in many tests. Since large churn is inevitable, we might as well switch all tests, bench and fuzzers over to the Mining interface. The first (non-base) commit does that, dramatically reducing direct use of `BlockAssembler`. Two exceptions are documented in the commit message. Because `test_block_validity` wasn't available via the interface and the block_assemble benchmark needs it, it's moved from `BlockAssembler::Options` to `BlockCreateOptions` (still not exposed via IPC).\r\n\r\nWe need access to mining related defaults and structs from both the miner and node initialization code. To avoid having to pull in all of `BlockAssembler` for the latter, the second commit introduces `node/mining.h` and moves constants and structs there from `src/node/types.h` (`BlockCreateOptions`, `BlockWaitOptions`, `BlockCheckOptions`) and `src/node/miner.h` (`DEFAULT_PRINT_MODIFIED_FEE`).\r\n\r\nI considered also moving `DEFAULT_BLOCK_MAX_WEIGHT`, `DEFAULT_BLOCK_RESERVED_WEIGHT`, `MINIMUM_BLOCK_RESERVED_WEIGHT` and `DEFAULT_BLOCK_MIN_TX_FEE` there from `policy.h`, since they are distinct from relay policy and not needed by the kernel. But this seems more appropriate for a follow-up and requires additional discussion.\r\n\r\nThe meat and potatoes of this PR is split between the three last commits for easier review:\r\n\r\n1. Adds `node/mining_args.{h,cpp}` and move the options checking out of `init.cpp`, without adding storage\r\n2. Add `block_max_weight` to `BlockCreateOptions` as explained above\r\n3. Introduce the `MiningArgs` struct, add it to the `NodeContext`, expand `mining_args.cpp` to store it, pass it to `BlockAssembler`, etc.\r\n\r\nI kept variable renaming and other formatting changes to a minimum to ease review with `--color-moved=dimmed-zebra`.\r\n\r\nThis PR builds on the bug fix in:\r\n- [ ] #33965\r\n\r\nOnce that is merged, this PR should not change behaviour.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-28T15:42:31Z",
-      "updated_at": "2026-02-20T16:54:05Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33966",
-      "labels": [
-        "Refactoring",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 2878,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3173584131,
       "number": 34284,
       "title": "ipc, test: Add tests for unclean disconnect and thread busy behavior",
@@ -1393,30 +1849,6 @@
       }
     },
     {
-      "id": 3037988791,
-      "number": 33929,
-      "title": "test: Remove `system_tests/run_command` runtime dependencies",
-      "body": "`system_tests` currently rely on `cat`, `echo`, `false` and `sh` being available in `PATH` at runtime.\r\n\r\nThis PR:\r\n1. Removes these dependencies.\r\n2. Reduces the number of platform-specific code paths.\r\n\r\nThe change is primarily motivated by my work on maintaining the [`bitcoin-core`](https://packages.guix.gnu.org/packages/bitcoin-core) package in Guix. It enables the removal of the existing `bash` and `coreutils` native inputs, which in turn makes it possible to drop the implicit dependency on `qtbase@5` (see https://codeberg.org/guix/guix/pulls/4386#issuecomment-8613333).",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-11-23T23:03:10Z",
-      "updated_at": "2026-02-20T15:13:45Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33929",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 642,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3264847922,
       "number": 34544,
       "title": "wallet: Disallow wallet names that are paths including `..` and `.` elements",
@@ -1484,31 +1916,6 @@
         "text_length": 6134,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 2517768893,
-      "number": 32489,
-      "title": "wallet: Add `exportwatchonlywallet` RPC to export a watchonly version of a wallet",
-      "body": "Currently, if a user wants to use an airgapped setup, they need to manually create the watchonly wallet that will live on the online node by importing the public descriptors. This PR introduces `exportwatchonlywallet` which will create a wallet file with the public descriptors to avoid exposing the specific internals to the user. Additionally, this RPC will copy any existing labels, transactions, and wallet flags. This ensures that the exported watchonly wallet is almost entirely a copy of the original wallet but without private keys.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2025-05-13T22:22:00Z",
-      "updated_at": "2026-02-20T14:15:23Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32489",
-      "labels": [
-        "Wallet",
-        "Review club"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 622,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -1947,31 +2354,6 @@
       }
     },
     {
-      "id": 3034182041,
-      "number": 33922,
-      "title": "mining: add getMemoryLoad() and track template non-mempool memory footprint",
-      "body": "Implements a way to track the memory footprint of all non-mempool transactions that are still being referenced by block templates, see discussion in  #33899. It does not impose a limit.\r\n\r\nIPC clients can query this footprint (total, across all clients) using the `getMemoryLoad()` IPC method. Its client-side usage is demonstrated here:\r\n- https://github.com/stratum-mining/sv2-tp/pull/63\r\n\r\nAdditionally, the functional test in `interface_ipc.py` is expanded to demonstrate how template memory management works: templates are not released until the client drops references to them, or calls the template destroy method, or disconnects. The destroy method is called automatically by clients using [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess), as [sv2-tp](https://github.com/stratum-mining/sv2-tp) does. In the Python tests it also happens when references are destroyed or go out of scope.\r\n\r\nThe PR starts with preparation refactor commits:\r\n\r\n1. Tweaks `interface_ipc.py` so `destroy()` calls happen in an order that's useful to later demonstrate memory management\r\n2. Change `std::unique_ptr<BlockTemplate> block_template` from a `static` defined in `rpc/mining.cpp` to `NodeContext`. This prevents a crash when we switch to a non-trivial destructor later (which uses `m_node`).\r\n\r\nThen the main commits:\r\n\r\n3. Add `template_tx_refs` to `NodeContext` to track how many templates contain any given transaction. This map is updated by the `BlockTemplate` constructor and destructor.\r\n4. Add `GetTemplateMemoryUsage()` which loops over this map and sums up the memory footprint for transactions outside the mempool\r\n5. Expose this information to IPC clients via `getMemoryLoad()` and add test coverage\r\n",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-21T15:34:14Z",
-      "updated_at": "2026-02-20T11:11:22Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33922",
-      "labels": [
-        "Mining",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1801,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3174906348,
       "number": 34293,
       "title": "Bugfix: net_processing: Restore missing comma between peer and peeraddr in \"receive version message\" and \"New ___ peer connected\"",
@@ -2164,30 +2546,6 @@
       }
     },
     {
-      "id": 3124280596,
-      "number": 34141,
-      "title": "miniscript: Use Func and Expr when parsing keys, hashes, and locktimes",
-      "body": "The miniscript parser currently only looks for the next `)` when parsing key, hash, and locktime expressions. This fails to parse when the expressions contain a nested expression. Currently, this is only possible with `musig()` inside of key expressions. However, this pattern can be generalized to handling hashes and locktimes, so I implemented those too.\r\n\r\nFixes #34076",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2025-12-22T21:36:58Z",
-      "updated_at": "2026-02-20T09:04:47Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34141",
-      "labels": [
-        "Descriptors"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 444,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3299949354,
       "number": 34617,
       "title": "fees: wallet: remove block policy fee estimator internals from wallet",
@@ -2234,28 +2592,6 @@
         "text_length": 1285,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3031948596,
-      "number": 33920,
-      "title": "Export embedded ASMap RPC",
-      "body": "This depends on the embedded data PR itself (#28792), until merge this will remain in draft status. All commit but the last one are from there.\r\n\r\nThere has been interest in exporting the embedded data back into a file. This is implemented here with a simple `exportasmap` RPC which provides this functionality. The exported file can be used to verify the data integrity or statistical analysis using e.g. `contrib/asmap-tool.py`.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2025-11-20T23:53:36Z",
-      "updated_at": "2026-02-20T08:15:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33920",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 456,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -2350,55 +2686,6 @@
         "text_length": 716,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2138649533,
-      "number": 31132,
-      "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
-      "body": "_Parts of this PR are isolated in independent smaller PRs to ease review:_\r\n\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34164_\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34165_\r\n* [ ] _https://github.com/bitcoin/bitcoin/pull/34576_\r\n\r\n---\r\n\r\nThis PR parallelizes fetching all input prevouts of a block during block connection, achieving over 3x faster IBD performance in some scenarios[^1][^2][^3][^4][^5].\r\n\r\n### Problem\r\n\r\nCurrently, when fetching inputs in `ConnectBlock`, each input is fetched from the cache sequentially. A cache miss requires a round trip to the disk database to fetch the outpoint and insert it into the cache. Since the database is read-only during `ConnectBlock`, we can fetch all inputs of a block in parallel on multiple threads while connecting.\r\n\r\n### Solution\r\n\r\nWe introduce a new `CoinsViewCacheAsync` `CCoinsViewCache` subclass that manages worker threads to fetch block inputs in parallel. The block is passed to the `CoinsViewCacheAsync` view before entering `ConnectBlock`, which kicks off the worker threads to begin fetching the inputs. The view is then passed to `ConnectBlock` since it provides the same API as `CCoinsViewCache`. The cache returns fetched coins as they become available via the overridden `FetchCoin` method. If not available yet, the main thread also fetches coins as it waits.\r\n\r\n### Implementation Details\r\n\r\nThe `CoinsViewCacheAsync` implements a lock-free MPSC (Multiple Producer, Single Consumer) queue design:\r\n\r\n- **Work Distribution**: Collects all input prevouts into a queue and uses a barrier to start all worker threads simultaneously\r\n- **Synchronization**: Worker threads use an atomic counter to claim which inputs to fetch, and each input has an atomic flag to signal completion to the main thread\r\n- **Main Thread Processing**: The main thread waits for inputs in order and moves their `Coin` into the `cacheCoins` map as they become available.\r\n- **Work Stealing**: If the main thread catches up to the workers, it assists with fetching to maximize parallelism\r\n- **Completion**: All threads synchronize on a barrier via a `Reset` method, which ensures all threads are parked before proceeding\r\n\r\n### Safety and Correctness\r\n\r\n- The `CoinsViewCacheAsync` works on a block that has not been fully validated, but it does not interfere or modify any of the validation during `ConnectBlock`\r\n- It simply fetches inputs in parallel, which must be fetched before a transaction is validated anyways\r\n- **Invalid blocks**: If an invalid block is mined, the temporary cache is reset without being flushed. This is an improvement over the current behavior, where existing inputs are inserted into the main `CoinsTip()` cache when pulled through for an invalid block\r\n\r\n### Performance\r\n\r\nBenchmarks show over 3x faster IBD performance in a cloud environment with network connected storage[^1], 3x faster IBD for an M4 Mac and up to 46% faster with directly connected storage[^2][^3][^4][^5]. The parallelization of expensive disk lookups provides significant speedup.\r\n\r\n[Flamegraphs show how the execution is changed](https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3617315125).\r\n\r\n### Credits\r\n\r\nInspired by [this comment](https://github.com/bitcoin/bitcoin/pull/18941#issuecomment-638553680).\r\n\r\nResolves https://github.com/bitcoin/bitcoin/issues/34121.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3678847806\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3515011880\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3463894000\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3347436866\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3488760623",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2024-10-22T14:40:28Z",
-      "updated_at": "2026-02-20T04:18:57Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31132",
-      "labels": [
-        "Validation",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 3806,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3133212525,
-      "number": 34165,
-      "title": "coins: don't mutate main cache when connecting block",
-      "body": "This is a slightly modified version of the first few commits of #31132, which can be merged as an independent change. It has a small benefit on its own, but will help in moving the parent PR forward.\r\n\r\nWhen accessing coins via the `CCoinsViewCache`, methods like `GetCoin` can call `FetchCoin` which actually mutate `cacheCoins` internally to cache entries when they are pulled from the backing db. This is generally a performance improvement for single threaded access patterns, but it precludes us from accessing entries in a `CCoinsViewCache` from multiple threads without a lock.\r\n\r\nAnother aspect is that when we use the resettable `CCoinsViewCache` view backed by the main cache for use in `ConnectBlock()`, we will insert entries into the main cache even if the block is determined to be invalid. This is not the biggest concern, since an invalid block requires proof-of-work. But, an attacker could craft multiple invalid blocks to fill the main cache. This would make us `Flush` the cache more often than necessary. Obviously this would be very expensive to do on mainnet.\r\n\r\nIntroduce `CoinsViewOverlay`, a `CCoinsViewCache` subclass that reads coins without mutating the underlying cache via `FetchCoin()`.\r\n\r\nAdd `PeekCoin()` to look up a Coin through a stack of `CCoinsViewCache` layers without populating parent caches. This prevents the main cache from caching inputs pulled from disk for a block that has not yet been fully validated. Once `Flush()` is called on the view, these inputs will be added as spent to `coinsCache` in the main cache via `BatchWrite()`.\r\n\r\nThis is the foundation for async input fetching, where worker threads must not mutate shared state.\r\n",
-      "state": "closed",
-      "user": "andrewtoth",
-      "created_at": "2025-12-28T20:32:34Z",
-      "updated_at": "2026-02-20T03:12:48Z",
-      "merged_at": "2026-02-20T03:10:53Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34165",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 1737,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -2978,28 +3265,6 @@
       }
     },
     {
-      "id": 2837615883,
-      "number": 33421,
-      "title": "node: add  `BlockTemplateCache`",
-      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify an optional template age limit in `MillisecondsDouble`:\r\n\r\n- If template age limit is `nullopt`, we create a new template and return it without adding it to the cache.\r\n- If a matching template (block template with identical block creation options) exists in the cache and hasn't exceeded the age limit, the cached version is returned.\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned. When evicting stale templates, we assume no duplicates exist since templates are evicted as soon as their age limit is reached or exceeded.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted after each insertion.\r\n\r\n\r\nCache lookup requires an exact match on ALL `BlockAssembler::Options` fields. While some fields (e.g., `test_block_validity`, `print_modified_fee`, `coinbase_output_script`) could be ignored for cache reuse, they mainly differ in tests and benchmarks. We keep the logic simple and accept cache misses in those cases.\r\n\r\n\r\nThe cache enforces at most one template per set of options. When searching for a match in `getCachedTemplate()`, if a template with matching options is found but has exceeded the age limit, it's immediately evicted before returning `nullptr`. This ensures no duplicate options exist in the cache. A `SanityCheck()` method verifies this invariant in tests by checking all cached entries for duplicates.\r\n\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\n`GetBlockTemplate()` uses double-checked locking: it first checks the cache with only `m_mutex` held, then if there's a miss, acquires both `cs_main` and `m_mutex` to create the template. Before creating, it checks again since another thread might have added a template while locks were released. \r\n\r\nThis PR removes an unused `node/context.h` import from miner to prevent a circular dependency when exposing the block template cache to the node context.",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-09-17T18:47:09Z",
-      "updated_at": "2026-02-19T19:04:45Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2508,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 304070624,
       "number": 16545,
       "title": "refactor: Implement missing error checking for ArgsManager flags",
@@ -3094,30 +3359,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 430,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3095820892,
-      "number": 34054,
-      "title": "net processing: Add ibd check before processing block for txdownloadman",
-      "body": "Calculating the rolling bloom filters for the txorphanage takes some CPU time from the scheduler thread. This can be observed for example in [this flamegraph](https://bitcoin-dev-tools.github.io/benchcoin/results/pr-172/20066462508/mainnet-default-instrumented-base-flamegraph.svg?x=920203898521&y=780), where handling the filter takes about 2.6% of total time (and most of the scheduler thread's time). \r\n\r\nDuring ibd the entries in the tx download bloom filter are just continuously rolled over and aren't consumed, since no mempool entries are created by incoming transactions from peers during ibd. The mempool does accept transactions via RPC, or the wallet at the time, however these don't interact with the orphanage and the txdownloadman, because adding anything to those is guarded by IsInitialBlockDownload() checks as well.\r\n\r\nWe're usually latching ibd to false a few blocks before catching up to the tip, so this should also not significantly degrade the performance of the filter once fully caught up.",
-      "state": "open",
-      "user": "sedited",
-      "created_at": "2025-12-12T09:06:28Z",
-      "updated_at": "2026-02-19T17:19:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34054",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1087,
         "has_nack": false,
         "has_ack": false
       }
@@ -3574,31 +3815,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1859,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2902093523,
-      "number": 33593,
-      "title": "guix: Use UCRT runtime for Windows release binaries",
-      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-10-09T21:46:43Z",
-      "updated_at": "2026-02-19T07:28:48Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
-      "labels": [
-        "Windows",
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 213,
         "has_nack": false,
         "has_ack": false
       }
@@ -5107,31 +5323,6 @@
       }
     },
     {
-      "id": 2956421896,
-      "number": 33727,
-      "title": "zmq: Log bind error at Error level, abort startup on init error",
-      "body": "Fixes #33715",
-      "state": "open",
-      "user": "isrod",
-      "created_at": "2025-10-28T18:59:03Z",
-      "updated_at": "2026-02-15T13:28:53Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33727",
-      "labels": [
-        "RPC/REST/ZMQ",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 76,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3226540911,
       "number": 34456,
       "title": "p2p: assign separate network keys to outbound onion connections",
@@ -5204,28 +5395,6 @@
       }
     },
     {
-      "id": 2784259944,
-      "number": 33270,
-      "title": "stabilize translations by reverting old ids by text content",
-      "body": "### Summary\r\n\r\nRegenerating the Qt translation template (`src/qt/locale/bitcoin_en.xlf`) previously used sequential `_msg<N>` IDs. When strings moved within the sorted message list, IDs shifted, creating large diffs and making translation platforms treat unchanged strings as new.\r\n\r\nThis PR switches XLF `<trans-unit id=...>` values to stable IDs derived from a SHA256 hash of the message context and source text.\r\n\r\n### Details\r\n\r\nAs mentioned in https://github.com/bitcoin/bitcoin/pull/33224#issuecomment-3234820665, any change that moves a translatable string within the sorted messages can renumber subsequent entries when IDs are sequential.\r\n\r\nSome English texts can appear in multiple places (e.g. “Clear”) with different meanings depending on the Qt context. To avoid collisions, the hash includes the `<group resname=...>` context.\r\n\r\n### Fix\r\n\r\nThe `translate` target already runs `contrib/devtools/stabilize_xlf_ids.py`. Instead of trying to preserve/renumber `_msg<N>` IDs by matching old/new units, the script now rewrites every `<trans-unit id>` to:\r\n\r\n- `sha256(resname + \"\\0\" + source-text)` (hex)\r\n- keeping the existing plural `[N]` suffix for plural forms\r\n\r\nThe script also checks for duplicate IDs and aborts if any are detected.\r\n\r\nNote: this is a one-time mass change from `_msg<N>` IDs to hashes; after that, rerunning `translate` on an unchanged tree should not churn IDs.\r\n\r\nWith this PR applied, IDs become stable hashes so ordering changes no longer cause renumbering churn.\r\n\r\n### Reproducer\r\n\r\nYou can test the replacer by changing any translatable text:\r\n```patch\r\ndiff --git a/src/qt/bitcoingui.cpp b/src/qt/bitcoingui.cpp\r\n--- a/src/qt/bitcoingui.cpp\t(revision a38b8cf788922174538161cda81ce28f2ac462ec)\r\n+++ b/src/qt/bitcoingui.cpp\t(date 1767310724675)\r\n@@ -258,7 +258,7 @@\r\n     connect(modalOverlay, &ModalOverlay::triggered, tabGroup, &QActionGroup::setEnabled);\r\n \r\n     overviewAction = new QAction(platformStyle->SingleColorIcon(\":/icons/overview\"), tr(\"&Overview\"), this);\r\n-    overviewAction->setStatusTip(tr(\"Show general overview of wallet\"));\r\n+    overviewAction->setStatusTip(tr(\"Show general overview of Wallet\"));\r\n     overviewAction->setToolTip(overviewAction->statusTip());\r\n     overviewAction->setCheckable(true);\r\n     overviewAction->setShortcut(QKeySequence(QStringLiteral(\"Alt+1\")));\r\n```\r\nand regenerating the translations\r\n```bash\r\ncmake --preset dev-mode -DWITH_USDT=OFF && cmake --build build_dev_mode --target translate\r\n```\r\nYou will notice that the new text moved to a different place with a different hash, but all other messages retained their IDs.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-08-29T09:23:56Z",
-      "updated_at": "2026-02-14T19:24:38Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33270",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 2676,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3243034362,
       "number": 34495,
       "title": "Replace boost signals with minimal compatible implementation",
@@ -5271,6 +5440,209 @@
     }
   ],
   "issues": [
+    {
+      "id": 3972277056,
+      "number": 34645,
+      "title": "oss-fuzz: coins_view_overlay: ASSERT: m_dirty_count == 0",
+      "body": "https://issues.oss-fuzz.com/issues/486389268\n```bash\nCommand: /mnt/scratch0/clusterfuzz/resources/platform/linux/unshare -c -n /mnt/scratch0/clusterfuzz/bot/builds/clusterfuzz-builds_bitcoin-core_83aef6625aaeafa301867de74608b320f3c923fe/revisions/coins_view_overlay -rss_limit_mb=2560 -timeout=60 -runs=100 /mnt/scratch0/clusterfuzz/bot/inputs/fuzzer-testcases/crash-e84f31ab73616c1a282fb40ce4e33abd394fb911\n\tTime ran: 0.49608683586120605\n\t\n\tINFO: Running with entropic power schedule (0xFF, 100).\n\tINFO: Seed: 360939801\n\tINFO: Loaded 1 modules   (603691 inline 8-bit counters): 603691 [0x55a793000eb0, 0x55a7930944db),\n\tINFO: Loaded 1 PC tables (603691 PCs): 603691 [0x55a7930944e0,0x55a7939ca790),\n\t/mnt/scratch0/clusterfuzz/bot/builds/clusterfuzz-builds_bitcoin-core_83aef6625aaeafa301867de74608b320f3c923fe/revisions/coins_view_overlay: Running 1 inputs 100 time(s) each.\n\tRunning: /mnt/scratch0/clusterfuzz/bot/inputs/fuzzer-testcases/crash-e84f31ab73616c1a282fb40ce4e33abd394fb911\n\tcoins.cpp:283 void CCoinsViewCache::Flush(bool): Assertion `m_dirty_count == 0` failed.\n\t==241== ERROR: libFuzzer: deadly signal\n\t    #0 0x55a7909aa551 in __sanitizer_print_stack_trace /src/llvm-project/compiler-rt/lib/asan/asan_stack.cpp:87:3\n\t    #1 0x55a79089bff8 in fuzzer::PrintStackTrace() /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerUtil.cpp:210:5\n\t    #2 0x55a79087eb45 in fuzzer::Fuzzer::CrashCallback() /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:231:3\n\t    #3 0x7f08d19c041f in libpthread.so.0\n\t    #4 0x7f08d17b400a in __libc_signal_restore_set /build/glibc-B3wQXB/glibc-2.31/sysdeps/unix/sysv/linux/internal-signals.h:86:3\n\t    #5 0x7f08d17b400a in raise /build/glibc-B3wQXB/glibc-2.31/sysdeps/unix/sysv/linux/raise.c:48:3\n\t    #6 0x7f08d1793858 in abort /build/glibc-B3wQXB/glibc-2.31/stdlib/abort.c:79:7\n\t    #7 0x55a7915cc5e2 in assertion_fail(std::__1::source_location const&, std::__1::basic_string_view<char, std::__1::char_traits<char>>) [bitcoin-core/src/util/check.cpp:41](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/util/check.cpp#L41):5\n\t    #8 0x55a79128c7ea in inline_assertion_check<false, bool> [bitcoin-core/src/util/check.h:90](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/util/check.h#L90):13\n\t    #9 0x55a79128c7ea in CCoinsViewCache::Flush(bool) [bitcoin-core/src/coins.cpp:283](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/coins.cpp#L283):5\n\t    #10 0x55a790c4dea7 in operator() [bitcoin-core/src/test/fuzz/coins_view.cpp:135](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/test/fuzz/coins_view.cpp#L135):34\n\t    #11 0x55a790c4dea7 in CallOneOf<(lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:116:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:134:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:137:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:140:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:146:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:160:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:164:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:167:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:173:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:181:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:189:13), (lambda at /src/bitcoin-core/src/test/fuzz/coins_view.cpp:197:13)> [bitcoin-core/src/test/fuzz/util.h:42](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/test/fuzz/util.h#L42):27\n\t    #12 0x55a790c4dea7 in TestCoinsView(FuzzedDataProvider&, CCoinsViewCache&, CCoinsView&, bool) [bitcoin-core/src/test/fuzz/coins_view.cpp:114](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/test/fuzz/coins_view.cpp#L114):9\n\t    #13 0x55a790c4c486 in coins_view_overlay_fuzz_target(std::__1::span<unsigned char const, 18446744073709551615ul>) [bitcoin-core/src/test/fuzz/coins_view.cpp:404](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/test/fuzz/coins_view.cpp#L404):5\n\t    #14 0x55a7912282f4 in operator() /usr/local/include/c++/v1/__functional/function.h:274:12\n\t    #15 0x55a7912282f4 in operator() /usr/local/include/c++/v1/__functional/function.h:772:10\n\t    #16 0x55a7912282f4 in test_one_input [bitcoin-core/src/test/fuzz/fuzz.cpp:88](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/test/fuzz/fuzz.cpp#L88):5\n\t    #17 0x55a7912282f4 in LLVMFuzzerTestOneInput [bitcoin-core/src/test/fuzz/fuzz.cpp:216](https://github.com/bitcoin/bitcoin/blob/ee2065fdeaca91caaad9eb7daeeffe939441d804/src/test/fuzz/fuzz.cpp#L216):5\n\t    #18 0x55a79088022d in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:619:13\n\t    #19 0x55a790869f42 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:329:6\n\t    #20 0x55a79086fe10 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:865:9\n\t    #21 0x55a79089c9a2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10\n\t    #22 0x7f08d1795082 in __libc_start_main /build/glibc-B3wQXB/glibc-2.31/csu/libc-start.c:308:16\n\t    #23 0x55a79086302d in _start\n\t\n\tNOTE: libFuzzer has rudimentary signal handlers.\n\t      Combine libFuzzer with AddressSanitizer or similar for better crash reports.\n\tSUMMARY: libFuzzer: deadly signal\n```",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-02-21T16:07:31Z",
+      "updated_at": "2026-02-21T16:08:38Z",
+      "closed_at": null,
+      "comments": 1,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34645",
+      "labels": [],
+      "comment_data": [
+        {
+          "id": 3939024362,
+          "user": "fanquake",
+          "body": "cc @andrewtoth ",
+          "created_at": "2026-02-21T16:08:38Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 15,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 5778,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3510034192,
+      "number": 33607,
+      "title": "Release Schedule for 31.0",
+      "body": "Here is a proposed release schedule for `v31.0`, the next major release of Bitcoin Core.\nThe dates are set to target a release in early April.\n\n## 2026-02-06 :heavy_check_mark:\n- Open Transifex translations for `v31.0`\n- Soft translation string freeze (no large or non-critical string changes until release)\n- Finalize and close translations for `v29.0`\n\n## 2026-02-20 :construction:\n- Feature freeze (bug fixes only until release)\n- Translation string freeze (no more source language changes until release)\n\n## 2026-03-10 :construction:\n- Anything needed before branch-off, see https://github.com/bitcoin/bitcoin/blob/master/doc/release-process.md\n- Split off `31.x` branch from `master`\n- Start RC cycle, tag and release `v31.0rc1`\n- Start merging for `32.x` on `master` branch\n\n## 2026-04-10 :construction:\n- Tag `v31.0` (aim).\n\nIf any specific dates are a problem for you, please leave a comment.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2025-10-13T13:14:55Z",
+      "updated_at": "2026-02-21T16:05:10Z",
+      "closed_at": null,
+      "comments": 10,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33607",
+      "labels": [
+        "Tracking Issue"
+      ],
+      "comment_data": [
+        {
+          "id": 3910437479,
+          "user": "AO-LocLab",
+          "body": "The [LLM translation review](https://github.com/maflcko/b-c-gui-translations-review) is a valuable tool. Errors that made sense were fixed in the French translation.",
+          "created_at": "2026-02-16T20:42:54Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 165,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3932987788,
+          "user": "hebasto",
+          "body": "> ## 2026-02-20 🚧\n> \n>    * Translation string freeze (no more source language changes until release)\n\nPlease review https://github.com/bitcoin-core/gui/pull/931.",
+          "created_at": "2026-02-20T10:39:19Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 162,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3938917153,
+          "user": "ostruvek",
+          "body": "Sorry for my late reaction. Czech translation should be completed except two strings which I am not able to save after edit.",
+          "created_at": "2026-02-21T14:57:48Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 124,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3939010103,
+          "user": "Emzy",
+          "body": "> Sorry for my late reaction. Czech translation should be completed except two strings which I am not able to save after edit.\n\nHave a look at the [1] [other] buttons at the top right side of Transiflex. You need to provide both translations to press the save button.",
+          "created_at": "2026-02-21T15:59:48Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 267,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 926,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3730153407,
+      "number": 34076,
+      "title": "tapscript with time-locked musig2",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\nTrying to import descriptor with time-locked musig fragment in tapscript returns:\n```\nerror code: -5\nerror message:\nInvalid musig() expression\n```\n\n### Expected behaviour\n\nImport should work.\n\n### Steps to reproduce\n\ntry `getdescriptorinfo` with following BIP-388 policy:\n\n`tr(musig(@0,@1,@2)/**,{and_v(v:pk(musig(@0,@1)/**),older(12960)),{and_v(v:pk(musig(@0,@2)/**),older(12960)),and_v(v:pk(musig(@1,@2)/**),older(12960))}})`\n\nwhich translates (for example) to following descriptor:\n\n```\ntr(musig([a471be2d/88h/1h/0h]tpubDCyTVDMyRxsEeAf7KLPRfUZkSCCjsZPqZoM2Ay3FqtH55CxvTchpK2DSbTgVRziFGesGGibdsfC4BktGNUMwb4VjGwu2KuzDCp9A97rVH8q,[0f056943/88h/1h/0h]tpubDD8WTkCBJwj5WHR8S1gr2y64LcFSwEic38zGRKEuHXUUPRacZyTREJp9vZ5fayGVqEzzBacffrkK1g4CJRA5PgXE7MkrsLcUWbeixkLaNM6,[6b69e5e9/88h/1h/0h]tpubDCMSPy71rEscssSimZNZ3S1Z2aguLeeLbguzDUXJVfwiCxuAE88omLcd95895x9au5Tw81bCuPhNcmSCzp2Yz13EReNHduoFKc4f1VNs7VG)/<0;1>/*,{and_v(v:pk(musig([6b69e5e9/88h/1h/0h]tpubDCMSPy71rEscssSimZNZ3S1Z2aguLeeLbguzDUXJVfwiCxuAE88omLcd95895x9au5Tw81bCuPhNcmSCzp2Yz13EReNHduoFKc4f1VNs7VG,[a471be2d/88h/1h/0h]tpubDCyTVDMyRxsEeAf7KLPRfUZkSCCjsZPqZoM2Ay3FqtH55CxvTchpK2DSbTgVRziFGesGGibdsfC4BktGNUMwb4VjGwu2KuzDCp9A97rVH8q)/<0;1>/*),older(12960)),{and_v(v:pk(musig([6b69e5e9/88h/1h/0h]tpubDCMSPy71rEscssSimZNZ3S1Z2aguLeeLbguzDUXJVfwiCxuAE88omLcd95895x9au5Tw81bCuPhNcmSCzp2Yz13EReNHduoFKc4f1VNs7VG,[0f056943/88h/1h/0h]tpubDD8WTkCBJwj5WHR8S1gr2y64LcFSwEic38zGRKEuHXUUPRacZyTREJp9vZ5fayGVqEzzBacffrkK1g4CJRA5PgXE7MkrsLcUWbeixkLaNM6)/<0;1>/*),older(12960)),and_v(v:pk(musig([a471be2d/88h/1h/0h]tpubDCyTVDMyRxsEeAf7KLPRfUZkSCCjsZPqZoM2Ay3FqtH55CxvTchpK2DSbTgVRziFGesGGibdsfC4BktGNUMwb4VjGwu2KuzDCp9A97rVH8q,[0f056943/88h/1h/0h]tpubDD8WTkCBJwj5WHR8S1gr2y64LcFSwEic38zGRKEuHXUUPRacZyTREJp9vZ5fayGVqEzzBacffrkK1g4CJRA5PgXE7MkrsLcUWbeixkLaNM6)/<0;1>/*),older(12960))}})\n```\n\n(imo) error is caused by the first leaf where `expr` after split is missing terminating parentheses of musig expression https://github.com/bitcoin/bitcoin/blob/2210feb4466eff1455468f0a25045fce4b89c55d/src/script/descriptor.cpp#L1844-L1847\n\nOR use below patch to add test case to musig functional tests:\n\n```\nSubject: [PATCH] test\n---\nIndex: test/functional/wallet_musig.py\nIDEA additional info:\nSubsystem: com.intellij.openapi.diff.impl.patch.CharsetEP\n<+>UTF-8\n===================================================================\ndiff --git a/test/functional/wallet_musig.py b/test/functional/wallet_musig.py\n--- a/test/functional/wallet_musig.py\t(revision 2210feb4466eff1455468f0a25045fce4b89c55d)\n+++ b/test/functional/wallet_musig.py\t(date 1765796643152)\n@@ -236,6 +236,7 @@\n         self.do_test(\"tr(H,{pk(musig/*), pk(same keys different musig/*)})\", \"tr($H,{pk(musig($0,$1,$2)/<0;1>/*),pk(musig($1,$2)/0/*)})\", scriptpath=True)\n         self.do_test(\"tr(musig/*,{pk(partial keys diff musig-1/*),pk(partial keys diff musig-2/*)})}\", \"tr(musig($0,$1,$2)/<3;4>/*,{pk(musig($0,$1)/<5;6>/*),pk(musig($1,$2)/7/*)})\")\n         self.do_test(\"tr(musig/*,{pk(partial keys diff musig-1/*),pk(partial keys diff musig-2/*)})} script-path\", \"tr(musig($0,$1,$2)/<3;4>/*,{pk(musig($0,$1)/<5;6>/*),pk(musig($1,$2)/7/*)})\", scriptpath=True, nosign_wallets=[0])\n+        self.do_test(\"time-locked musig\", \"tr(musig($0,$1,$2)/<0;1>/*,{and_v(v:pk(musig($0,$1)/<0;1>/*),older(12960)),{and_v(v:pk(musig($0,$2)/<0;1>/*),older(12960)),and_v(v:pk(musig($1,$2)/<0;1>/*),older(12960))}})\", scriptpath=True)\n \n \n if __name__ == '__main__':\n```\n\n### Relevant log output\n\n_No response_\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\nmaster@2210feb4466eff1455468f0a25045fce4b89c55d\n\n### Operating system and version\n\nLinux ... 6.14.0-37-generic #37~24.04.1-Ubuntu ... x86_64 x86_64 x86_64 GNU/Linux\n\n### Machine specifications\n\n_No response_",
+      "state": "closed",
+      "user": "scgbckbone",
+      "created_at": "2025-12-15T12:14:26Z",
+      "updated_at": "2026-02-21T11:19:04Z",
+      "closed_at": "2026-02-21T11:19:04Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34076",
+      "labels": [
+        "Wallet",
+        "Descriptors"
+      ],
+      "comment_data": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 3948,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3963457530,
+      "number": 34626,
+      "title": "Sv2 needs a `submitBlock` IPC method",
+      "body": "currently, IPC mining interface only allows broadcasting blocks via `BlockTemplate.submitSolution`\n\na Sv2 Job Declarator Server can receive solutions via [`PushSolution`](https://stratumprotocol.org/specification/06-job-declaration-protocol/#649-pushsolution-client---server) message, for which it has no corresponding `BlockTemplate` on the Bitcoin Core side\n\nin summary, we need the equivalent of a [`submitblock`](https://developer.bitcoin.org/reference/rpc/submitblock.html#submitblock) RPC\n\ncc @ryanofsky @ismaelsadeeq @Sjors ",
+      "state": "open",
+      "user": "plebhash",
+      "created_at": "2026-02-19T15:08:04Z",
+      "updated_at": "2026-02-21T09:38:30Z",
+      "closed_at": null,
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34626",
+      "labels": [
+        "Mining",
+        "interfaces"
+      ],
+      "comment_data": [
+        {
+          "id": 3928095640,
+          "user": "Sjors",
+          "body": "This should be trivial, but I would file this under nice to have, not \"need\". It would allow a client implementation without any RPC code, which is nice.\n\n",
+          "created_at": "2026-02-19T15:43:23Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 155,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3928826054,
+          "user": "plebhash",
+          "body": "> This should be trivial, but I would file this under nice to have, not \"need\".\n\nwell, not having this available forces SRI to take a hybrid IPC/RPC route for full Sv2 JDS functionality, which is pretty ugly\n\nso from our standpoint, I'd lean more towards the \"need\"\n\nbut I understand there could be other priorities compared to this",
+          "created_at": "2026-02-19T17:43:43Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 332,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3938518311,
+          "user": "w0xlt",
+          "body": "I’ve opened PR https://github.com/bitcoin/bitcoin/pull/34644 for this.\nI’m not very familiar with the IPC interface, but it looked straightforward. Happy to adjust if needed.",
+          "created_at": "2026-02-21T09:38:30Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 174,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 568,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3967338664,
       "number": 34632,
@@ -5826,19 +6198,6 @@
       ],
       "comment_data": [
         {
-          "id": 3898600856,
-          "user": "hebasto",
-          "body": "> > The issue is caused by this code:\n> \n> That code has existed since we migrated to CMake, so it looks like you'll need to investigate what has changed upstream, to now cause this change in behaviour.\n\nBisecting pointed at commit [`eb8facd39606e9472f9ff6de40d7caf76767d0da`](https://gitlab.kitware.com/cmake/cmake/-/commit/eb8facd39606e9472f9ff6de40d7caf76767d0da) from [MR #10721](https://gitlab.kitware.com/cmake/cmake/-/merge_requests/10721).\n\ncc @purpleKarrot ",
-          "created_at": "2026-02-13T18:10:31Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 466,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
           "id": 3933780423,
           "user": "fanquake",
           "body": "From what I can tell, this doesn't effect `30.x`?",
@@ -5914,70 +6273,6 @@
       }
     },
     {
-      "id": 3510034192,
-      "number": 33607,
-      "title": "Release Schedule for 31.0",
-      "body": "Here is a proposed release schedule for `v31.0`, the next major release of Bitcoin Core.\nThe dates are set to target a release in early April.\n\n## 2026-02-06 :heavy_check_mark:\n- Open Transifex translations for `v31.0`\n- Soft translation string freeze (no large or non-critical string changes until release)\n- Finalize and close translations for `v29.0`\n\n## 2026-02-20 :construction:\n- Feature freeze (bug fixes only until release)\n- Translation string freeze (no more source language changes until release)\n\n## 2026-03-10 :construction:\n- Anything needed before branch-off, see https://github.com/bitcoin/bitcoin/blob/master/doc/release-process.md\n- Split off `31.x` branch from `master`\n- Start RC cycle, tag and release `v31.0rc1`\n- Start merging for `32.x` on `master` branch\n\n## 2026-04-10 :construction:\n- Tag `v31.0` (aim).\n\nIf any specific dates are a problem for you, please leave a comment.",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2025-10-13T13:14:55Z",
-      "updated_at": "2026-02-20T10:39:19Z",
-      "closed_at": null,
-      "comments": 8,
-      "url": "https://github.com/bitcoin/bitcoin/issues/33607",
-      "labels": [
-        "Tracking Issue"
-      ],
-      "comment_data": [
-        {
-          "id": 3902099581,
-          "user": "hebasto",
-          "body": "> Hi [@hebasto](https://github.com/hebasto) French is done but for the strings I asked you about on Transifex: https://app.transifex.com/bitcoin/bitcoin/translate/#fr/qt-translation-031x?q=reviewed%3Ano%20comment%3Ahebasto\n\nAll new comments on Transifex have been addressed. Apologies for the delay.",
-          "created_at": "2026-02-14T16:00:18Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 299,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3910437479,
-          "user": "AO-LocLab",
-          "body": "The [LLM translation review](https://github.com/maflcko/b-c-gui-translations-review) is a valuable tool. Errors that made sense were fixed in the French translation.",
-          "created_at": "2026-02-16T20:42:54Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 165,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3932987788,
-          "user": "hebasto",
-          "body": "> ## 2026-02-20 🚧\n> \n>    * Translation string freeze (no more source language changes until release)\n\nPlease review https://github.com/bitcoin-core/gui/pull/931.",
-          "created_at": "2026-02-20T10:39:19Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 162,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 926,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3966579468,
       "number": 34629,
       "title": "interfaces/wallet: replace raw receive-request string APIs with typed methods",
@@ -6047,58 +6342,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 946,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3963457530,
-      "number": 34626,
-      "title": "Sv2 needs a `submitBlock` IPC method",
-      "body": "currently, IPC mining interface only allows broadcasting blocks via `BlockTemplate.submitSolution`\n\na Sv2 Job Declarator Server can receive solutions via [`PushSolution`](https://stratumprotocol.org/specification/06-job-declaration-protocol/#649-pushsolution-client---server) message, for which it has no corresponding `BlockTemplate` on the Bitcoin Core side\n\nin summary, we need the equivalent of a [`submitblock`](https://developer.bitcoin.org/reference/rpc/submitblock.html#submitblock) RPC\n\ncc @ryanofsky @ismaelsadeeq @Sjors ",
-      "state": "open",
-      "user": "plebhash",
-      "created_at": "2026-02-19T15:08:04Z",
-      "updated_at": "2026-02-19T20:13:35Z",
-      "closed_at": null,
-      "comments": 2,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34626",
-      "labels": [
-        "Mining",
-        "interfaces"
-      ],
-      "comment_data": [
-        {
-          "id": 3928095640,
-          "user": "Sjors",
-          "body": "This should be trivial, but I would file this under nice to have, not \"need\". It would allow a client implementation without any RPC code, which is nice.\n\n",
-          "created_at": "2026-02-19T15:43:23Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 155,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3928826054,
-          "user": "plebhash",
-          "body": "> This should be trivial, but I would file this under nice to have, not \"need\".\n\nwell, not having this available forces SRI to take a hybrid IPC/RPC route for full Sv2 JDS functionality, which is pretty ugly\n\nso from our standpoint, I'd lean more towards the \"need\"\n\nbut I understand there could be other priorities compared to this",
-          "created_at": "2026-02-19T17:43:43Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 332,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 568,
         "has_nack": false,
         "has_ack": false
       }
@@ -6908,19 +7151,6 @@
       ],
       "comment_data": [
         {
-          "id": 3901672217,
-          "user": "SakshiKasat18",
-          "body": "I’m able to run rpc_signer.py on current upstream master (macOS) and it passes for me. The issue report shows the test can fail due to OS-dependent execve failed errno strings. I’ll open a small PR to accept the reported alternate message while keeping the check tight.\n\nTested: python3 build/test/functional/test_runner.py rpc_signer.py",
-          "created_at": "2026-02-14T10:45:41Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 337,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
           "id": 3906971099,
           "user": "maflcko",
           "body": "Is this still an issue with a recent version of Bitcoin Core? If yes, what are the steps to reproduce?\n\n> but on doing the same for master and 28.x on a VM(Ubuntu 24.04.1 LTS on VirtualBox) gave the same strace output as my system but with the correct error message.\n\nThe fact that this stops reproducing as soon as you hop into a vm, and the fact that no one else reproduced this so far, makes me wonder if this is a local issue?",
@@ -7227,19 +7457,6 @@
         "Block storage"
       ],
       "comment_data": [
-        {
-          "id": 3902062225,
-          "user": "hebasto",
-          "body": "> ### What version of Bitcoin Core are you using?\n> \n> 28.1.0\n> ### Operating system and version\n> \n> Windows 10\n\nHave you tried the most recent release [v30.2](https://bitcoincore.org/en/releases/30.2/)?",
-          "created_at": "2026-02-14T15:27:14Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 204,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
         {
           "id": 3914443282,
           "user": "maflcko",
@@ -7594,19 +7811,6 @@
       ],
       "comment_data": [
         {
-          "id": 3901564876,
-          "user": "varunnaikr",
-          "body": "Hi, I am a Summer of Bitcoin 2026 applicant.\nI would like to work on this issue.\nCan I take this up?\n",
-          "created_at": "2026-02-14T09:28:29Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 101,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
           "id": 3906200400,
           "user": "Mterra64",
           "body": "I have been reviewing this issue to better understand the current behavior of the `importprunedfunds` RPC.\n\nFrom what I understand, the RPC currently allows importing receiving transactions but does not support importing spending transactions. This seems to create an incomplete wallet state representation, especially in scenarios where pruned nodes need to reconstruct historical wallet activity.\n\nWould extending support to spending transactions require additional validation logic to ensure consistency with existing UTXO tracking and wallet state management?\n\nI am currently exploring how wallet transaction metadata is handled internally, particularly how imported transactions are reconciled with the UTXO set.\n\nAny clarification on the intended architectural constraints around `importprunedfunds` would be very helpful.",
@@ -7670,9 +7874,9 @@
     }
   ],
   "summary": {
-    "total_prs": 220,
-    "total_issues": 45,
-    "total_comments": 97,
-    "unique_participants": 90
+    "total_prs": 227,
+    "total_issues": 47,
+    "total_comments": 96,
+    "unique_participants": 94
   }
 }
