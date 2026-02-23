@@ -1,34 +1,152 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-02-23T01:44:22.680268+00:00",
+  "fetched_at": "2026-02-23T08:41:50.017200+00:00",
   "date_range": {
-    "since": "2026-02-16T01:44:22.680188+00:00",
-    "until": "2026-02-23T01:44:22.680188+00:00"
+    "since": "2026-02-16T08:41:50.017147+00:00",
+    "until": "2026-02-23T08:41:50.017147+00:00"
   },
   "pull_requests": [
     {
-      "id": 2138649533,
-      "number": 31132,
-      "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
-      "body": "_Parts of this PR are isolated in independent smaller PRs to ease review:_\r\n\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34164_\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34165_\r\n* [ ] _https://github.com/bitcoin/bitcoin/pull/34576_\r\n\r\n---\r\n\r\nThis PR parallelizes fetching all input prevouts of a block during block connection, achieving over 3x faster IBD performance in some scenarios[^1][^2][^3][^4][^5].\r\n\r\n### Problem\r\n\r\nCurrently, when fetching inputs in `ConnectBlock`, each input is fetched from the cache sequentially. A cache miss requires a round trip to the disk database to fetch the outpoint and insert it into the cache. Since the database is read-only during `ConnectBlock`, we can fetch all inputs of a block in parallel on multiple threads while connecting.\r\n\r\n### Solution\r\n\r\nWe add a ThreadPool to CoinsViewOverlay to fetch block inputs in parallel. The block is passed to the `CoinsViewOverlay` view before entering `ConnectBlock`, which kicks off the worker threads to begin fetching the inputs. The cache returns fetched coins as they become available via the overridden `FetchCoinFromBase` method. If not available yet, the main thread also fetches coins as it waits.\r\n\r\n### Implementation Details\r\n\r\nThe `CoinsViewOverlay` implements a lock-free MPSC (Multiple Producer, Single Consumer) queue design:\r\n\r\n- **Work Distribution**: Collects all input prevouts into a queue and uses a barrier to start all worker threads simultaneously\r\n- **Synchronization**: Worker threads use an atomic counter to claim which inputs to fetch, and each input has an atomic flag to signal completion to the main thread\r\n- **Main Thread Processing**: The main thread waits for inputs in order and moves their `Coin` into the `cacheCoins` map as they become available.\r\n- **Work Stealing**: If the main thread catches up to the workers, it assists with fetching to maximize parallelism\r\n- **Completion**: All thread futures are waited on in StopFetching, which is called from any mutating method (Flush/Sync/SetBackend/Reset). The ResetGuard going out of scope ensure this happens before the block is destroyed.\r\n\r\n### Safety and Correctness\r\n\r\n- The `CoinsViewOverlay` works on a block that has not been fully validated, but it does not interfere or modify any of the validation during `ConnectBlock`\r\n- It simply fetches inputs in parallel, which must be fetched before a transaction is validated anyways\r\n- **Invalid blocks**: If an invalid block is mined, the temporary cache is reset without being flushed. This is an improvement over the current behavior, where existing inputs are inserted into the main `CoinsTip()` cache when pulled through for an invalid block\r\n\r\n### Performance\r\n\r\nBenchmarks show over 3x faster IBD performance in a cloud environment with network connected storage[^1], 3x faster IBD for an M4 Mac and up to 46% faster with directly connected storage[^2][^3][^4][^5]. The parallelization of expensive disk lookups provides significant speedup.\r\n\r\n[Flamegraphs show how the execution is changed](https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3617315125).\r\n\r\n### Credits\r\n\r\nInspired by [this comment](https://github.com/bitcoin/bitcoin/pull/18941#issuecomment-638553680).\r\n\r\nResolves https://github.com/bitcoin/bitcoin/issues/34121.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3678847806\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3515011880\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3463894000\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3347436866\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3488760623",
+      "id": 3181854676,
+      "number": 34320,
+      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
+      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the DB.\r\nOne tries to deserialize; the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin`, which delegates to `GetCoin`) and simplify `CCoinsViewCache::HaveCoin` to use `AccessCoin`.\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the database's `::GetCoin` (not `::HaveCoin`) on cache miss and checks the cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: The latest version of the change keeps most `HaveCoin` calls for convenience; a previous version removed all of them.",
       "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2024-10-22T14:40:28Z",
-      "updated_at": "2026-02-23T01:29:19Z",
+      "user": "l0rinc",
+      "created_at": "2026-01-16T16:17:29Z",
+      "updated_at": "2026-02-23T08:38:34Z",
       "merged_at": null,
       "comments": 0,
       "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31132",
+      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
       "labels": [
-        "Validation",
-        "Needs rebase",
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1243,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3220617054,
+      "number": 34435,
+      "title": "refactor: use `_MiB`/`_GiB` consistently for byte conversions",
+      "body": "### Problem\r\nByte-size conversions in the codebase currently show up in many equivalent formats (multiplication/division chains, shifts, hex/binary literals), which creates a maintenance burden and makes review error-prone - especially considering the architectural differences of `size_t`.\r\nInspired by https://github.com/bitcoin/bitcoin/pull/34305#discussion_r2734720002, it seemed appropriate to unify `Mebibyte` usage across the codebase and add `Gibibyte` support with 32/64 bit `size_t` validation.\r\n\r\n### Fix\r\nThis PR refactors those call sites to use `\"\"_MiB` (existing) and `\"\"_GiB` (new), and adds the encountered value/pattern replacements to unit tests to make review straightforward, and to ensure the conversions remain valid.\r\nThe literals are overflow-checked when converting to `size_t`, and unit tests cover the 32-bit boundary cases.\r\n\r\nConcretely, it replaces patterns such as:\r\n* `1024*1024`, `1<<20`, `0x100000`, `1048576`, `/ 1024 / 1024`, `* (1.0 / 1024 / 1024)` → `1_MiB` or `double(1_MiB)`\r\n* `1024*1024*1024`, `1<<30`, `0x40000000`, `1024_MiB`, `>> 30` → `1_GiB`\r\n\r\n### Note\r\nIn the few places where arithmetic involves signed values, the result is identical to the previous code assuming those quantities never become negative.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-28T21:26:10Z",
+      "updated_at": "2026-02-23T08:25:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34435",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1317,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3226824452,
+      "number": 34457,
+      "title": "wallet: add private broadcast support for wallet transactions",
+      "body": "## Summary\r\n\r\nExtends the private broadcast feature (#29415) to wallet transactions. When `-privatebroadcast=1` is enabled, wallet RPCs (`sendtoaddress`, `send`, `sendall`, `sendmany`) now broadcast transactions through short-lived Tor/I2P connections instead of announcing to all connected peers.\r\n\r\nEDIT: The per-transaction private_broadcast flag in mapValue of the original proposal has been removed (rationale: https://github.com/bitcoin/bitcoin/pull/34533#pullrequestreview-3829186494). \r\n\r\n<details>\r\n  <summary>Previous approach</summary>\r\n  \r\n## Key Changes\r\n\r\n**Centralized availability check** (commit 1)\r\n- Moves the Tor/I2P reachability check from `sendrawtransaction` RPC to `BroadcastTransaction()`\r\n- All broadcast callers now get consistent error handling\r\n\r\n**Wallet integration** (commit 2)\r\n- `CommitTransaction()`: Uses private broadcast when enabled, fails loudly if Tor/I2P unavailable\r\n- `ResubmitWalletTransactions()`: Rebroadcasts using the original broadcast method\r\n- Persists a `private_broadcast` flag in the wallet transaction's `mapValue`\r\n\r\n**Functional tests** (commits 3-4)\r\n- Tests wallet send via SOCKS5 proxy\r\n- Tests flag persistence across restarts\r\n- Tests error handling when Tor/I2P unavailable\r\n\r\n## Behavior Matrix\r\n\r\n| Scenario | TX Flag | Node Setting | Expected Behavior | Tested |\r\n|----------|---------------|--------------|-------------------|--------|\r\n| New tx | Private | - | Via SOCKS5, flag set | Test 1 ✓ |\r\n| Resubmit | Private | Public | Skip | Test 2 ✓ |\r\n| Resubmit | Public | Private | Skip | Test 3 ✓ |\r\n| Resubmit | Private | Private | Rebroadcast | Test 3 ✓ |\r\n| New tx | Private | - (no Tor) | RPC error | Test 4 ✓ |\r\n| Resubmit | Private | Private (no Tor) | Log error | Test 4 ✓ |\r\n\r\n**Why skip on mode mismatch?** Rebroadcasting via a different method than originally used may allow correlation of transaction to origin, or may indicate origin has `-privatebroadcast` enabled.\r\n\r\n</details>",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2026-01-30T08:06:34Z",
+      "updated_at": "2026-02-23T07:55:57Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34457",
+      "labels": [
+        "Wallet",
         "CI failed"
       ],
       "drama_signals": {
         "drama_keywords": 0,
         "positive_keywords": 1,
-        "text_length": 3747,
+        "text_length": 2021,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3223998841,
+      "number": 34448,
+      "title": "ci, iwyu: Fix warnings in `src/util` and treat them as errors",
+      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2026-01-29T15:38:39Z",
+      "updated_at": "2026-02-23T07:41:07Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34448",
+      "labels": [
+        "Refactoring",
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 305,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3243034362,
+      "number": 34495,
+      "title": "Replace boost signals with minimal compatible implementation",
+      "body": "This drops our dependency on `boost::signals2`, leaving `boost::multi_index` as the only remaining boost dependency for bitcoind.\r\n\r\n`boost::signals2` is a complex beast, but we only use a small portion of it. Namely: it's a way for multiple subscribers to connect to the same event, and the ability to later disconnect individual subscribers from that event.\r\n\r\n`btcsignals` adheres to the subset of the `boost::signals2` API that we currently use, and thus is a drop-in replacement. Rather than implementing a complex `slot` tracking class that we never used anyway (and which was much more useful in the days before std::function existed), callbacks are simply wrapped directly in `std::function`s.\r\n\r\nThe new tests work with either `boost::signals2` or the new `btcsignals` implementation. Reviewers can verify\r\nfunctional equivalency by running the tests in the commit that introduces them against `boost::signals2`, then again with `btcsignals`.\r\n\r\nThe majority of the commits in this PR are preparation and cleanup. Once `boost::signals2` is no longer needed, it is removed from depends. Additionally, a few CMake targets no longer need boost includes as they were previously only required for signals.\r\n\r\nI think this is actually pretty straightforward to review. I kept things simple, including keeping types unmovable/uncopyable where possible rather than trying to define those semantics. In doing so, the new implementation has even fewer type requirements than boost, which I believe is due to a boost bug. I've opened a PR upstream for that to attempt to maintain parity between the implementations.\r\n\r\nSee individual commits for more details.\r\n\r\nCloses #26442.",
+      "state": "open",
+      "user": "theuni",
+      "created_at": "2026-02-03T21:27:43Z",
+      "updated_at": "2026-02-23T04:35:50Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34495",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1736,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3257065528,
+      "number": 34533,
+      "title": "wallet: resubmit transactions with private broadcast if enabled",
+      "body": "The wallet keeps track of transactions related to it and periodically rebroadcasts them every 12-36 hours if they are not mined.\r\n\r\nIf `-privatebroadcast=1` and a transaction is submitted locally with the `sendrawtransaction` RPC and it is related to the wallet, then the rebroadcasts would use the send-to-all method. Change that to use the private broadcast method.\r\n",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-02-07T05:35:17Z",
+      "updated_at": "2026-02-23T03:21:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34533",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 433,
         "has_nack": false,
         "has_ack": true
       }
@@ -41,7 +159,7 @@
       "state": "open",
       "user": "furszy",
       "created_at": "2026-02-22T23:55:06Z",
-      "updated_at": "2026-02-23T01:07:49Z",
+      "updated_at": "2026-02-23T03:15:00Z",
       "merged_at": null,
       "comments": 0,
       "review_comments": 0,
@@ -54,6 +172,77 @@
         "drama_keywords": 1,
         "positive_keywords": 0,
         "text_length": 862,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3259815827,
+      "number": 34534,
+      "title": "rpc: Manual prune lock management (Take 2)",
+      "body": "This is a refreshed version of #19463, which was closed after inactivity but there was some mentions of users/external applications at the last CoreDev that would be interested in using this. Unfortunately, I can not recall who was mentioned as a potential user but I would appreciate if someone could ping them to take a look if this is still relevant to them.\r\n\r\nThis PR leverages the existing prune locks system we already have. The interface of the RPCs of the old PR has been slightly updated, it now matches the pattern used by `setban`/`listbanned` exactly. The locks are prefixed to distinguish them from the systems locks and prevent naming colissions. They are not persisted across restarts.\r\n\r\nUsage of temporary prune locking may also be helpful in other functional test scenarios but I didn't spend time to check where might apply.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2026-02-08T14:01:05Z",
+      "updated_at": "2026-02-23T03:08:16Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34534",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 887,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2138649533,
+      "number": 31132,
+      "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
+      "body": "_Parts of this PR are isolated in independent smaller PRs to ease review:_\r\n\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34164_\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34165_\r\n* [ ] _https://github.com/bitcoin/bitcoin/pull/34576_\r\n\r\n---\r\n\r\nThis PR parallelizes fetching all input prevouts of a block during block connection, achieving over 3x faster IBD performance in some scenarios[^1][^2][^3][^4][^5].\r\n\r\n### Problem\r\n\r\nCurrently, when fetching inputs in `ConnectBlock`, each input is fetched from the cache sequentially. A cache miss requires a round trip to the disk database to fetch the outpoint and insert it into the cache. Since the database is read-only during `ConnectBlock`, we can fetch all inputs of a block in parallel on multiple threads while connecting.\r\n\r\n### Solution\r\n\r\nWe add a ThreadPool to CoinsViewOverlay to fetch block inputs in parallel. The block is passed to the `CoinsViewOverlay` view before entering `ConnectBlock`, which kicks off the worker threads to begin fetching the inputs. The cache returns fetched coins as they become available via the overridden `FetchCoinFromBase` method. If not available yet, the main thread also fetches coins as it waits.\r\n\r\n### Implementation Details\r\n\r\nThe `CoinsViewOverlay` implements a lock-free MPSC (Multiple Producer, Single Consumer) queue design:\r\n\r\n- **Work Distribution**: Collects all input prevouts into a queue and uses a barrier to start all worker threads simultaneously\r\n- **Synchronization**: Worker threads use an atomic counter to claim which inputs to fetch, and each input has an atomic flag to signal completion to the main thread\r\n- **Main Thread Processing**: The main thread waits for inputs in order and moves their `Coin` into the `cacheCoins` map as they become available.\r\n- **Work Stealing**: If the main thread catches up to the workers, it assists with fetching to maximize parallelism\r\n- **Completion**: All thread futures are waited on in StopFetching, which is called from any mutating method (Flush/Sync/SetBackend/Reset). The ResetGuard going out of scope ensure this happens before the block is destroyed.\r\n\r\n### Safety and Correctness\r\n\r\n- The `CoinsViewOverlay` works on a block that has not been fully validated, but it does not interfere or modify any of the validation during `ConnectBlock`\r\n- It simply fetches inputs in parallel, which must be fetched before a transaction is validated anyways\r\n- **Invalid blocks**: If an invalid block is mined, the temporary cache is reset without being flushed. This is an improvement over the current behavior, where existing inputs are inserted into the main `CoinsTip()` cache when pulled through for an invalid block\r\n\r\n### Performance\r\n\r\nBenchmarks show over 3x faster IBD performance in a cloud environment with network connected storage[^1], 3x faster IBD for an M4 Mac and up to 46% faster with directly connected storage[^2][^3][^4][^5]. The parallelization of expensive disk lookups provides significant speedup.\r\n\r\n[Flamegraphs show how the execution is changed](https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3617315125).\r\n\r\n### Credits\r\n\r\nInspired by [this comment](https://github.com/bitcoin/bitcoin/pull/18941#issuecomment-638553680).\r\n\r\nResolves https://github.com/bitcoin/bitcoin/issues/34121.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3678847806\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3515011880\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3463894000\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3347436866\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3488760623",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2024-10-22T14:40:28Z",
+      "updated_at": "2026-02-23T02:32:04Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31132",
+      "labels": [
+        "Validation",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3747,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2757848362,
+      "number": 33223,
+      "title": "coinselection: Tiebreak SRD eviction by weight",
+      "body": "@yancyribbens [pointed out](https://github.com/p2pderivatives/rust-bitcoin-coin-selection/pull/108#issuecomment-3202107069) that SRD would fail to find a possible solution if there are multiple UTXOs of the same effective value with diverse weight.\r\n\r\nThis adds a tiebreaker that will make SRD succeed in such a scenario.",
+      "state": "open",
+      "user": "murchandamus",
+      "created_at": "2025-08-19T22:51:00Z",
+      "updated_at": "2026-02-23T01:59:54Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33223",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 368,
         "has_nack": false,
         "has_ack": false
       }
@@ -1694,30 +1883,6 @@
       }
     },
     {
-      "id": 3220617054,
-      "number": 34435,
-      "title": "refactor: use `_MiB`/`_GiB` consistently for byte conversions",
-      "body": "### Problem\r\nByte-size conversions in the codebase currently show up in many equivalent formats (multiplication/division chains, shifts, hex/binary literals), which creates a maintenance burden and makes review error-prone - especially considering the architectural differences of `size_t`.\r\nInspired by https://github.com/bitcoin/bitcoin/pull/34305#discussion_r2734720002, it seemed appropriate to unify `Mebibyte` usage across the codebase and add `Gibibyte` support with 32/64 bit `size_t` validation.\r\n\r\n### Fix\r\nThis PR refactors those call sites to use `\"\"_MiB` (existing) and `\"\"_GiB` (new), and adds the encountered value/pattern replacements to unit tests to make review straightforward, and to ensure the conversions remain valid.\r\nThe literals are overflow-checked when converting to `size_t`, and unit tests cover the 32-bit boundary cases.\r\n\r\nConcretely, it replaces patterns such as:\r\n* `1024*1024`, `1<<20`, `0x100000`, `1048576`, `/ 1024 / 1024`, `* (1.0 / 1024 / 1024)` → `1_MiB` or `double(1_MiB)`\r\n* `1024*1024*1024`, `1<<30`, `0x40000000`, `1024_MiB`, `>> 30` → `1_GiB`\r\n\r\n### Note\r\nIn the few places where arithmetic involves signed values, the result is identical to the previous code assuming those quantities never become negative.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-28T21:26:10Z",
-      "updated_at": "2026-02-21T09:50:05Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34435",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1317,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3031948596,
       "number": 33920,
       "title": "Export embedded ASMap RPC",
@@ -2101,30 +2266,6 @@
       }
     },
     {
-      "id": 3181854676,
-      "number": 34320,
-      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
-      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the DB.\r\nOne tries to deserialize; the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin`, which delegates to `GetCoin`) and simplify `CCoinsViewCache::HaveCoin` to use `AccessCoin`.\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the database's `::GetCoin` (not `::HaveCoin`) on cache miss and checks the cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: The latest version of the change keeps most `HaveCoin` calls for convenience; a previous version removed all of them.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-16T16:17:29Z",
-      "updated_at": "2026-02-21T01:22:26Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1243,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3187823761,
       "number": 34342,
       "title": "cli: Replace libevent usage with simple http client",
@@ -2385,30 +2526,6 @@
       }
     },
     {
-      "id": 3226824452,
-      "number": 34457,
-      "title": "wallet: add private broadcast support for wallet transactions",
-      "body": "## Summary\r\n\r\nExtends the private broadcast feature (#29415) to wallet transactions. When `-privatebroadcast=1` is enabled, wallet RPCs (`sendtoaddress`, `send`, `sendall`, `sendmany`) now broadcast transactions through short-lived Tor/I2P connections instead of announcing to all connected peers.\r\n\r\n## Key Changes\r\n\r\n**Centralized availability check** (commit 1)\r\n- Moves the Tor/I2P reachability check from `sendrawtransaction` RPC to `BroadcastTransaction()`\r\n- All broadcast callers now get consistent error handling\r\n\r\n**Wallet integration** (commit 2)\r\n- `CommitTransaction()`: Uses private broadcast when enabled, fails loudly if Tor/I2P unavailable\r\n- `ResubmitWalletTransactions()`: Rebroadcasts using the original broadcast method\r\n- Persists a `private_broadcast` flag in the wallet transaction's `mapValue`\r\n\r\n**Functional tests** (commits 3-4)\r\n- Tests wallet send via SOCKS5 proxy\r\n- Tests flag persistence across restarts\r\n- Tests error handling when Tor/I2P unavailable\r\n\r\n## Behavior Matrix\r\n\r\n| Scenario | TX Flag | Node Setting | Expected Behavior | Tested |\r\n|----------|---------------|--------------|-------------------|--------|\r\n| New tx | Private | - | Via SOCKS5, flag set | Test 1 ✓ |\r\n| Resubmit | Private | Public | Skip | Test 2 ✓ |\r\n| Resubmit | Public | Private | Skip | Test 3 ✓ |\r\n| Resubmit | Private | Private | Rebroadcast | Test 3 ✓ |\r\n| New tx | Private | - (no Tor) | RPC error | Test 4 ✓ |\r\n| Resubmit | Private | Private (no Tor) | Log error | Test 4 ✓ |\r\n\r\n**Why skip on mode mismatch?** Rebroadcasting via a different method than originally used may allow correlation of transaction to origin, or may indicate origin has `-privatebroadcast` enabled.\r\n",
-      "state": "open",
-      "user": "w0xlt",
-      "created_at": "2026-01-30T08:06:34Z",
-      "updated_at": "2026-02-20T20:09:19Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34457",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1758,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2496293029,
       "number": 32409,
       "title": "test: Introduce `SUPPRESS_ABORT_MESSAGE` environment variable",
@@ -2530,31 +2647,6 @@
       }
     },
     {
-      "id": 3223998841,
-      "number": 34448,
-      "title": "ci, iwyu: Fix warnings in `src/util` and treat them as errors",
-      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2026-01-29T15:38:39Z",
-      "updated_at": "2026-02-20T17:54:55Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34448",
-      "labels": [
-        "Refactoring",
-        "Utils/log/libs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 305,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3250214855,
       "number": 34514,
       "title": "refactor: remove unnecessary std::move for trivially copyable types",
@@ -2622,54 +2714,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 465,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3257065528,
-      "number": 34533,
-      "title": "wallet: resubmit transactions with private broadcast if enabled",
-      "body": "The wallet keeps track of transactions related to it and periodically rebroadcasts them every 12-36 hours if they are not mined.\r\n\r\nIf `-privatebroadcast=1` and a transaction is submitted locally with the `sendrawtransaction` RPC and it is related to the wallet, then the rebroadcasts would use the send-to-all method. Change that to use the private broadcast method.\r\n",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-02-07T05:35:17Z",
-      "updated_at": "2026-02-20T16:14:50Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34533",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 433,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3259815827,
-      "number": 34534,
-      "title": "rpc: Manual prune lock management (Take 2)",
-      "body": "This is a refreshed version of #19463, which was closed after inactivity but there was some mentions of users/external applications at the last CoreDev that would be interested in using this. Unfortunately, I can not recall who was mentioned as a potential user but I would appreciate if someone could ping them to take a look if this is still relevant to them.\r\n\r\nThis PR leverages the existing prune locks system we already have. The interface of the RPCs of the old PR has been slightly updated, it now matches the pattern used by `setban`/`listbanned` exactly. The locks are prefixed to distinguish them from the systems locks and prevent naming colissions. They are not persisted across restarts.\r\n\r\nUsage of temporary prune locking may also be helpful in other functional test scenarios but I didn't spend time to check where might apply.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2026-02-08T14:01:05Z",
-      "updated_at": "2026-02-20T16:01:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34534",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 887,
         "has_nack": false,
         "has_ack": false
       }
@@ -5572,81 +5616,188 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 2086428775,
-      "number": 30951,
-      "title": "net: option to disallow v1 connection on ipv4 and ipv6 peers",
-      "body": "resolves #29618.\r\n\r\nThis PR adds a config flag option `-v2onlyclearnet` which disallows outbound v1 connections on ipv4 and ipv6 networks since they're unencrypted. outbound v1 connections are still possible from tor/i2p/cjdns peers since they're encrypted networks.\r\n\r\n- v1 outbound connections to peers are not attempted\r\n- v1 reconnections are not attempted (if peer is falsely advertised as v2 peer and we attempt a v2 connection but it fails, we do not attempt a v1 reconnection when `-v2onlyclearnet` is switched on)\r\n\r\nCurrently 70% of reachable nodes in network supporting v2 (according to https://21.ninja/reachable-nodes/node-service-share/ and https://bitnodes.io/nodes). Also found 81% of addresses supporting v2 in the addrman of nodes I checked - personal node and the nodes in [peer.observer](https://peer.observer/addrman/alice). (You can use [this branch ](https://github.com/stratospher/bitcoin/commits/addrinfo_service_display/)to check the % of v2 addresses in a node's addrman.)",
-      "state": "open",
-      "user": "stratospher",
-      "created_at": "2024-09-23T12:23:48Z",
-      "updated_at": "2026-02-16T07:29:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/30951",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1060,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2989452954,
-      "number": 33822,
-      "title": "kernel: Add block header support and validation",
-      "body": "Adds a new `btck_BlockHeader` type and associated functions to create, access, and validate block headers. Block headers will have their own type (`btck_BlockHeader`) that can be created from raw data, copied, and queried for all the standard header fields (hash, prev hash, timestamp, bits, version, nonce). We can also extract headers from full blocks or block tree entries.\r\n\r\nThe first commit here refactors `BlockValidationState` to use Handle/View pattern so external code can own them, which is required for the header processing in the API.\r\n\r\n #### New Block Header API\r\n\r\n  - **`btck_BlockHeader` type**: Opaque handle for block headers\r\n  - **Header methods**:\r\n    - `btck_block_header_create()`: Create header from 80-byte serialized data\r\n    - `btck_block_header_copy()`: Copy block headers\r\n    - `btck_block_header_destroy()`: Destroy header object\r\n    - `btck_block_header_get_hash()`: Calculate block hash\r\n    - `btck_block_header_get_prev_hash()`: Get previous block hash\r\n    - `btck_block_header_get_timestamp()`: Get block timestamp\r\n    - `btck_block_header_get_bits()`: Get difficulty target (compact format)\r\n    - `btck_block_header_get_version()`: Get block version\r\n    - `btck_block_header_get_nonce()`: Get proof-of-work nonce\r\n    \r\n    - `btck_block_get_header()`: Extract header from a full block\r\n    - `btck_block_tree_entry_get_block_header()`: Get header associated with a block tree entry\r\n  \r\n  - **Header Processing Methods:**\r\n    - **`btck_chainstate_manager_process_block_header()`**: Validates and processes a block header without requiring the full block. This performs proof-of-work verification, timestamp validation, and updates the internal chain state.\r\n    - **`btck_chainstate_manager_get_best_entry()`**: Returns the block tree entry with the most cumulative proof-of-work.\r\n\r\nWhy `btck_chainstate_manager_get_best_entry()` is included alongside header validation? Just as we have logic to get the tip for block validation (so you can request more blocks extending your best from your peers), we need the equivalent for header validation. To make header validation worthwhile, knowing what the best current header is seems useful—it tells you what headers to request next from peers.\r\n\r\n\r\n\r\n  ### Testing\r\n\r\n  Added tests in `test_kernel.cpp` that cover creating headers from raw data, extracting all header fields, and processing headers through the chainstate manager.\r\n  \r\n  CC sedited",
-      "state": "closed",
-      "user": "yuvicc",
-      "created_at": "2025-11-07T17:16:01Z",
-      "updated_at": "2026-02-16T06:27:01Z",
-      "merged_at": "2026-01-23T13:04:11Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33822",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 2492,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2309959380,
-      "number": 31774,
-      "title": "crypto: Use secure_allocator for `AES256_ctx`",
-      "body": "Fixes #31744 \r\n\r\nReuse `secure_allocator` for `AES256_ctx` in the aes 256 encrypters and decrypters and the `iv` of `AES256CBC` encrypters and decrypters. These classes are relevant to `CCrypter`, used for encrypting wallets, and my understanding is that if an attacker knows some or all of the contents of these data structures (`AES256_ctx` & `iv`) they might be able to decrypt a user's wallet.\r\n\r\n Presently the `secure_allocator` tries to protect sensitive data with `mlock()` on POSIX systems and `VirtualLock()` on Windows to prevent memory being paged to disk, and by zero'ing out memory contents on deallocation with `memory_cleanse()` which is similar to `OPENSSL_cleanse()` by scaring compilers away from optimizing `memset` calls on non-Windows systems, and using `SecureZeroMemory()` on Windows.",
-      "state": "open",
-      "user": "davidgumberg",
-      "created_at": "2025-01-31T20:10:56Z",
-      "updated_at": "2026-02-16T04:24:04Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31774",
-      "labels": [
-        "Utils/log/libs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 854,
-        "has_nack": false,
-        "has_ack": true
-      }
     }
   ],
   "issues": [
+    {
+      "id": 3968351917,
+      "number": 34634,
+      "title": "rpc shutdown race: [error] libevent: http.c:2842: Assertion TAILQ_FIRST(&evcon->requests) == req failed in evhttp_send",
+      "body": "Diff to reproduce:\n\n```diff\ndiff --git a/src/httpserver.cpp b/src/httpserver.cpp\nindex b84f0da08f..98dc24eb36 100644\n--- a/src/httpserver.cpp\n+++ b/src/httpserver.cpp\n@@ -190,2 +190,3 @@ static void http_request_cb(struct evhttp_request* req, void* arg)\n {\n+        UninterruptibleSleep(std::chrono::milliseconds{100});\n     evhttp_connection* conn{evhttp_request_get_connection(req)};\ndiff --git a/src/init.cpp b/src/init.cpp\nindex e2cdb9c647..f1a820147b 100644\n--- a/src/init.cpp\n+++ b/src/init.cpp\n@@ -1552,2 +1552,4 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)\n \n+    UninterruptibleSleep(std::chrono::milliseconds{60});\n+\n     // ********************************************************* Step 5: verify wallet database integrity\n```\n\nSteps to reproduce (takes about 3-4 tries):\n\n```\nvalgrind --tool=none ./bld-cmake/bin/bitcoind -datadir=/tmp/ -walletdir=wallets_missing -server=1 -printtoconsole=1 -debug=http -regtest -rpcuser=u -rpcpassword=pw & while sleep 0.05 ; do ./bld-cmake/bin/bitcoin-cli -datadir=/tmp/ -regtest -rpcuser=u -rpcpassword=pw getblockcount &> /dev/null ; done\n```\n\nOutput:\n\n```\n...\n2026-02-20T12:30:16Z [http] Waiting for HTTP event thread to exit\n2026-02-20T12:30:16Z [http] Received a POST request for / from 127.0.0.1:51160\n2026-02-20T12:30:16Z [error] libevent: http.c:2842: Assertion TAILQ_FIRST(&evcon->requests) == req failed in evhttp_send\n==2885428== \n==2885428== Process terminating with default action of signal 6 (SIGABRT): dumping core\n==2885428==    at 0x5D3AE5C: __pthread_kill_implementation (in /usr/lib64/libc.so.6)\n==2885428==    by 0x5CE0F0D: raise (in /usr/lib64/libc.so.6)\n==2885428==    by 0x5CC86CF: abort (in /usr/lib64/libc.so.6)\n==2885428==    by 0x57016FC: ??? (in /usr/lib64/libevent_core-2.1.so.7.0.1)\n==2885428==    by 0x571D8B2: event_errx (in /usr/lib64/libevent_core-2.1.so.7.0.1)\n==2885428==    by 0x574AD2C: evhttp_send_reply (in /usr/lib64/libevent_extra-2.1.so.7.0.1)\n==2885428==    by 0x44EDDE8: std::_Function_handler<void (), HTTPRequest::WriteReply(int, std::span<std::byte const, 18446744073709551615ul>)::$_0>::_M_invoke(std::_Any_data const&) (src/httpserver.cpp:596)\n==2885428==    by 0x44EBB87: httpevent_callback_fn(int, short, void*) (std_function.h:593)\n==2885428==    by 0x57183C7: ??? (in /usr/lib64/libevent_core-2.1.so.7.0.1)\n==2885428==    by 0x571A22E: event_base_loop (in /usr/lib64/libevent_core-2.1.so.7.0.1)\n==2885428==    by 0x44EB4CC: ThreadHTTP(event_base*) (src/httpserver.cpp:304)\n==2885428==    by 0x59833E3: ??? (in /usr/lib64/libstdc++.so.6.0.34)\n==2885428== \n[1]+  Aborted                 (core dumped) valgrind --tool=none ./bld-cmake/bin/bitcoind -datadir=/tmp/ -walletdir=wallets_missing -server=1 -printtoconsole=1 -debug=http -regtest -rpcuser=u -rpcpassword=pw\n^C\n",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-02-20T12:34:02Z",
+      "updated_at": "2026-02-23T08:37:33Z",
+      "closed_at": null,
+      "comments": 5,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34634",
+      "labels": [],
+      "comment_data": [
+        {
+          "id": 3934058587,
+          "user": "maflcko",
+          "body": "I initially tried to reproduce https://github.com/bitcoin/bitcoin/issues/34624, but I guess I ran into a separate issue instead?",
+          "created_at": "2026-02-20T12:38:01Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 128,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3937025472,
+          "user": "hodlinator",
+          "body": "This seems to fix the issue - waiting for the `eventBase` dispatch thread to finish processing events *before* we free `eventHTTP`:\n\n```diff\n--- a/src/httpserver.cpp\n+++ b/src/httpserver.cpp\n@@ -473,18 +473,15 @@ void StopHTTPServer()\n         }\n         g_requests.WaitUntilEmpty();\n     }\n-    if (eventHTTP) {\n-        // Schedule a callback to call evhttp_free in the event base thread, so\n-        // that evhttp_free does not need to be called again after the handling\n-        // of unfinished request connections that follows.\n-        event_base_once(eventBase, -1, EV_TIMEOUT, [](evutil_socket_t, short, void*) {\n-            evhttp_free(eventHTTP);\n-            eventHTTP = nullptr;\n-        }, nullptr, nullptr);\n-    }\n     if (eventBase) {\n         LogDebug(BCLog::HTTP, \"Waiting for HTTP event thread to exit\\n\");\n         if (g_thread_http.joinable()) g_thread_http.join();\n+    }\n+    if (eventHTTP) {\n+        evhttp_free(eventHTTP);\n+        eventHTTP = nullptr;\n+    }\n+    if (eventBase) {\n         event_base_free(eventBase);\n         eventBase = nullptr;\n     }\n```",
+          "created_at": "2026-02-20T20:32:24Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 1,
+            "text_length": 1088,
+            "has_nack": false,
+            "has_ack": true
+          }
+        },
+        {
+          "id": 3937038162,
+          "user": "hodlinator",
+          "body": "(I was curious whether it had anything to do with `ThreadPool` in 4a05825a3f3993b8e402a7c18e2bc04f6d287e96 but it reproduces for the merge-commit before that one).",
+          "created_at": "2026-02-20T20:34:44Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 163,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3943124942,
+          "user": "maflcko",
+          "body": "thx for the check and fix. Not sure if anything needs to be done here at this point, given that libevent will be removed anyway?",
+          "created_at": "2026-02-23T07:31:06Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 128,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3943368774,
+          "user": "hodlinator",
+          "body": "Yeah, I guess it's not a new issue for v31, so no rush.\n\nI'm also not sure whether the fix above is 100% complete, maybe `eventHTTP` in some cases will prevent event dispatch from completing and the thread from joining.",
+          "created_at": "2026-02-23T08:37:33Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 219,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2926,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3941584748,
+      "number": 34592,
+      "title": "Fatal Error: Filename too long.",
+      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\n<img width=\"828\" height=\"637\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/0a607957-b068-4b58-83ca-27e8a8296eef\" />\n\nDir path cannot get any shorter but I think its misleading, there are no files even close to 256 char, might be an issue because its on E:\\ ? Nothing useful in debug.log. Fix the data for core as well, it's still showing 2009-2024. \n\n### Expected behaviour\n\nExpected behavior is that it should continue to write the blocks. \n\n### Steps to reproduce\n\nInstall Bitcoin core 28.1.0. \n\n### Relevant log output\n\n[debug.zip](https://github.com/user-attachments/files/25315742/debug.zip)\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\n28.1.0\n\n### Operating system and version\n\nWindows 10\n\n### Machine specifications\n\n8core i7 16gb ram, 14TB ssd",
+      "state": "open",
+      "user": "JPPinto-SS",
+      "created_at": "2026-02-14T15:00:32Z",
+      "updated_at": "2026-02-23T08:06:38Z",
+      "closed_at": null,
+      "comments": 6,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34592",
+      "labels": [
+        "Windows",
+        "Block storage"
+      ],
+      "comment_data": [
+        {
+          "id": 3914443282,
+          "user": "maflcko",
+          "body": "Is this still an issue with a recent version of Bitcoin Core? If yes, what are the steps to reproduce? That is, what is your config + settings + command line args (etc). Also, what is the relevant section of the debug log? No need to zip it up, you can just share it here directly, possibly wrapped in a \n\n```\n<details><summary>debug log</summary>\n\n\\```\n content\n\\```\n\n</details>",
+          "created_at": "2026-02-17T12:28:22Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 379,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3915454621,
+          "user": "JPPinto-SS",
+          "body": "I have installed 30.2 and its still synchronizing with network, it usually throws the error when there is ~1 year left to sync. I will report back if it completes or not. \n\n<img width=\"561\" height=\"50\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/9f2adfe8-27ac-481b-a65e-e30036efcb8d\" />",
+          "created_at": "2026-02-17T15:42:04Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 1,
+            "text_length": 302,
+            "has_nack": false,
+            "has_ack": true
+          }
+        },
+        {
+          "id": 3915534591,
+          "user": "maflcko",
+          "body": "What is the filesystem? FAT32?\n\nI presume the exception comes from `src/flatfile.cpp:    fs::create_directories(path.parent_path());`, which is confusing, because some errors are handled locally in the function and a failure is returned, and other errors are thrown.",
+          "created_at": "2026-02-17T15:55:45Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 266,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3915585265,
+          "user": "JPPinto-SS",
+          "body": "<img width=\"396\" height=\"467\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/78d910a9-9d05-4f5a-aa30-989ac68540a8\" />",
+          "created_at": "2026-02-17T16:05:32Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 130,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 3943243268,
+          "user": "maflcko",
+          "body": "> I have installed 30.2 and its still synchronizing with network, it usually throws the error when there is ~1 year left to sync. I will report back if it completes or not.\n> <img alt=\"Image\" width=\"561\" height=\"50\" src=\"https://private-user-images.githubusercontent.com/77682310/551048839-9f2adfe8-27ac-481b-a65e-e30036efcb8d.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE4MzQwNjUsIm5iZiI6MTc3MTgzMzc2NSwicGF0aCI6Ii83NzY4MjMxMC81NTEwNDg4MzktOWYyYWRmZTgtMjdhYy00ODFiLWE2NWUtZTMwMDM2ZWZjYjhkLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIzVDA4MDI0NVomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWZjMzQ1ZTE5YTY4MmVmNDg3ZmJiYzkzNzVhYmUzYzFhYTZmODFlNmE4OTU3ZGRmZDMwNDZmOGY4ZGFhNWQ4YzAmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.8Olc0cU4piBWHul9aM9azjoF3tDEEfzdVwe4VcX-FgY\">\n\nAny update on this? Also, once the issue happens again, it should not be needed to re-sync from scratch and it should be possible to test if the same error message happens on every re-start.",
+          "created_at": "2026-02-23T08:06:38Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 1,
+            "text_length": 1193,
+            "has_nack": false,
+            "has_ack": true
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 970,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3968865126,
       "number": 34637,
@@ -6472,68 +6623,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 5559,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3968351917,
-      "number": 34634,
-      "title": "rpc shutdown race: [error] libevent: http.c:2842: Assertion TAILQ_FIRST(&evcon->requests) == req failed in evhttp_send",
-      "body": "Diff to reproduce:\n\n```diff\ndiff --git a/src/httpserver.cpp b/src/httpserver.cpp\nindex b84f0da08f..98dc24eb36 100644\n--- a/src/httpserver.cpp\n+++ b/src/httpserver.cpp\n@@ -190,2 +190,3 @@ static void http_request_cb(struct evhttp_request* req, void* arg)\n {\n+        UninterruptibleSleep(std::chrono::milliseconds{100});\n     evhttp_connection* conn{evhttp_request_get_connection(req)};\ndiff --git a/src/init.cpp b/src/init.cpp\nindex e2cdb9c647..f1a820147b 100644\n--- a/src/init.cpp\n+++ b/src/init.cpp\n@@ -1552,2 +1552,4 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)\n \n+    UninterruptibleSleep(std::chrono::milliseconds{60});\n+\n     // ********************************************************* Step 5: verify wallet database integrity\n```\n\nSteps to reproduce (takes about 3-4 tries):\n\n```\nvalgrind --tool=none ./bld-cmake/bin/bitcoind -datadir=/tmp/ -walletdir=wallets_missing -server=1 -printtoconsole=1 -debug=http -regtest -rpcuser=u -rpcpassword=pw & while sleep 0.05 ; do ./bld-cmake/bin/bitcoin-cli -datadir=/tmp/ -regtest -rpcuser=u -rpcpassword=pw getblockcount &> /dev/null ; done\n```\n\nOutput:\n\n```\n...\n2026-02-20T12:30:16Z [http] Waiting for HTTP event thread to exit\n2026-02-20T12:30:16Z [http] Received a POST request for / from 127.0.0.1:51160\n2026-02-20T12:30:16Z [error] libevent: http.c:2842: Assertion TAILQ_FIRST(&evcon->requests) == req failed in evhttp_send\n==2885428== \n==2885428== Process terminating with default action of signal 6 (SIGABRT): dumping core\n==2885428==    at 0x5D3AE5C: __pthread_kill_implementation (in /usr/lib64/libc.so.6)\n==2885428==    by 0x5CE0F0D: raise (in /usr/lib64/libc.so.6)\n==2885428==    by 0x5CC86CF: abort (in /usr/lib64/libc.so.6)\n==2885428==    by 0x57016FC: ??? (in /usr/lib64/libevent_core-2.1.so.7.0.1)\n==2885428==    by 0x571D8B2: event_errx (in /usr/lib64/libevent_core-2.1.so.7.0.1)\n==2885428==    by 0x574AD2C: evhttp_send_reply (in /usr/lib64/libevent_extra-2.1.so.7.0.1)\n==2885428==    by 0x44EDDE8: std::_Function_handler<void (), HTTPRequest::WriteReply(int, std::span<std::byte const, 18446744073709551615ul>)::$_0>::_M_invoke(std::_Any_data const&) (src/httpserver.cpp:596)\n==2885428==    by 0x44EBB87: httpevent_callback_fn(int, short, void*) (std_function.h:593)\n==2885428==    by 0x57183C7: ??? (in /usr/lib64/libevent_core-2.1.so.7.0.1)\n==2885428==    by 0x571A22E: event_base_loop (in /usr/lib64/libevent_core-2.1.so.7.0.1)\n==2885428==    by 0x44EB4CC: ThreadHTTP(event_base*) (src/httpserver.cpp:304)\n==2885428==    by 0x59833E3: ??? (in /usr/lib64/libstdc++.so.6.0.34)\n==2885428== \n[1]+  Aborted                 (core dumped) valgrind --tool=none ./bld-cmake/bin/bitcoind -datadir=/tmp/ -walletdir=wallets_missing -server=1 -printtoconsole=1 -debug=http -regtest -rpcuser=u -rpcpassword=pw\n^C\n",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-02-20T12:34:02Z",
-      "updated_at": "2026-02-20T20:34:44Z",
-      "closed_at": null,
-      "comments": 3,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34634",
-      "labels": [],
-      "comment_data": [
-        {
-          "id": 3934058587,
-          "user": "maflcko",
-          "body": "I initially tried to reproduce https://github.com/bitcoin/bitcoin/issues/34624, but I guess I ran into a separate issue instead?",
-          "created_at": "2026-02-20T12:38:01Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 128,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3937025472,
-          "user": "hodlinator",
-          "body": "This seems to fix the issue - waiting for the `eventBase` dispatch thread to finish processing events *before* we free `eventHTTP`:\n\n```diff\n--- a/src/httpserver.cpp\n+++ b/src/httpserver.cpp\n@@ -473,18 +473,15 @@ void StopHTTPServer()\n         }\n         g_requests.WaitUntilEmpty();\n     }\n-    if (eventHTTP) {\n-        // Schedule a callback to call evhttp_free in the event base thread, so\n-        // that evhttp_free does not need to be called again after the handling\n-        // of unfinished request connections that follows.\n-        event_base_once(eventBase, -1, EV_TIMEOUT, [](evutil_socket_t, short, void*) {\n-            evhttp_free(eventHTTP);\n-            eventHTTP = nullptr;\n-        }, nullptr, nullptr);\n-    }\n     if (eventBase) {\n         LogDebug(BCLog::HTTP, \"Waiting for HTTP event thread to exit\\n\");\n         if (g_thread_http.joinable()) g_thread_http.join();\n+    }\n+    if (eventHTTP) {\n+        evhttp_free(eventHTTP);\n+        eventHTTP = nullptr;\n+    }\n+    if (eventBase) {\n         event_base_free(eventBase);\n         eventBase = nullptr;\n     }\n```",
-          "created_at": "2026-02-20T20:32:24Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 1088,
-            "has_nack": false,
-            "has_ack": true
-          }
-        },
-        {
-          "id": 3937038162,
-          "user": "hodlinator",
-          "body": "(I was curious whether it had anything to do with `ThreadPool` in 4a05825a3f3993b8e402a7c18e2bc04f6d287e96 but it reproduces for the merge-commit before that one).",
-          "created_at": "2026-02-20T20:34:44Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 163,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2926,
         "has_nack": false,
         "has_ack": true
       }
@@ -7623,19 +7712,6 @@
       ],
       "comment_data": [
         {
-          "id": 3906971099,
-          "user": "maflcko",
-          "body": "Is this still an issue with a recent version of Bitcoin Core? If yes, what are the steps to reproduce?\n\n> but on doing the same for master and 28.x on a VM(Ubuntu 24.04.1 LTS on VirtualBox) gave the same strace output as my system but with the correct error message.\n\nThe fact that this stops reproducing as soon as you hop into a vm, and the fact that no one else reproduced this so far, makes me wonder if this is a local issue?",
-          "created_at": "2026-02-16T07:58:40Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 430,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
           "id": 3921043412,
           "user": "110CodingP",
           "body": "This issue seems to be fixed as per [2706758](https://github.com/bitcoin/bitcoin/commit/2706758dc38c7a4e271d9df5ea3104b7135974f3). Feel free to close!",
@@ -7913,84 +7989,6 @@
       }
     },
     {
-      "id": 3941584748,
-      "number": 34592,
-      "title": "Fatal Error: Filename too long.",
-      "body": "### Is there an existing issue for this?\n\n- [x] I have searched the existing issues\n\n### Current behaviour\n\n<img width=\"828\" height=\"637\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/0a607957-b068-4b58-83ca-27e8a8296eef\" />\n\nDir path cannot get any shorter but I think its misleading, there are no files even close to 256 char, might be an issue because its on E:\\ ? Nothing useful in debug.log. Fix the data for core as well, it's still showing 2009-2024. \n\n### Expected behaviour\n\nExpected behavior is that it should continue to write the blocks. \n\n### Steps to reproduce\n\nInstall Bitcoin core 28.1.0. \n\n### Relevant log output\n\n[debug.zip](https://github.com/user-attachments/files/25315742/debug.zip)\n\n### How did you obtain Bitcoin Core\n\nCompiled from source\n\n### What version of Bitcoin Core are you using?\n\n28.1.0\n\n### Operating system and version\n\nWindows 10\n\n### Machine specifications\n\n8core i7 16gb ram, 14TB ssd",
-      "state": "open",
-      "user": "JPPinto-SS",
-      "created_at": "2026-02-14T15:00:32Z",
-      "updated_at": "2026-02-17T17:52:23Z",
-      "closed_at": null,
-      "comments": 5,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34592",
-      "labels": [
-        "Windows",
-        "Block storage"
-      ],
-      "comment_data": [
-        {
-          "id": 3914443282,
-          "user": "maflcko",
-          "body": "Is this still an issue with a recent version of Bitcoin Core? If yes, what are the steps to reproduce? That is, what is your config + settings + command line args (etc). Also, what is the relevant section of the debug log? No need to zip it up, you can just share it here directly, possibly wrapped in a \n\n```\n<details><summary>debug log</summary>\n\n\\```\n content\n\\```\n\n</details>",
-          "created_at": "2026-02-17T12:28:22Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 379,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3915454621,
-          "user": "JPPinto-SS",
-          "body": "I have installed 30.2 and its still synchronizing with network, it usually throws the error when there is ~1 year left to sync. I will report back if it completes or not. \n\n<img width=\"561\" height=\"50\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/9f2adfe8-27ac-481b-a65e-e30036efcb8d\" />",
-          "created_at": "2026-02-17T15:42:04Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 302,
-            "has_nack": false,
-            "has_ack": true
-          }
-        },
-        {
-          "id": 3915534591,
-          "user": "maflcko",
-          "body": "What is the filesystem? FAT32?\n\nI presume the exception comes from `src/flatfile.cpp:    fs::create_directories(path.parent_path());`, which is confusing, because some errors are handled locally in the function and a failure is returned, and other errors are thrown.",
-          "created_at": "2026-02-17T15:55:45Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 266,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3915585265,
-          "user": "JPPinto-SS",
-          "body": "<img width=\"396\" height=\"467\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/78d910a9-9d05-4f5a-aa30-989ac68540a8\" />",
-          "created_at": "2026-02-17T16:05:32Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 130,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 970,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3434544542,
       "number": 33438,
       "title": "ci: add (atleast one) *BSD job to the CI",
@@ -8251,51 +8249,12 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 854937077,
-      "number": 21647,
-      "title": "RPC importprunedfunds doesn't allow importing spending txs, only receiving txs",
-      "body": "I noticed one of my wallets shows that I own funds that I really don't. I identified the spending transaction and tried to import it using 'importprunedfunds' but was told:\r\n\r\n`No addresses in wallet correspond to included transaction`\r\n\r\nIt turns out that 'importprunedfunds' only allows you to import txs which credit an address owned by your wallet. It won't let you import txs which spend from addresses owned by your wallet.\r\n\r\nI made the following change and then was able to import the missing transaction:\r\n\r\n    --- a/src/wallet/rpcdump.cpp\r\n    +++ b/src/wallet/rpcdump.cpp\r\n    @@ -372,7 +372,7 @@ RPCHelpMan importprunedfunds()\r\n         CWalletTx::Confirmation confirm(CWalletTx::Status::CONFIRMED, height, merkleBlock.header.GetHash(), txnIndex);\r\n     \r\n         CTransactionRef tx_ref = MakeTransactionRef(tx);\r\n    -    if (pwallet->IsMine(*tx_ref)) {\r\n    +    if (pwallet->IsMine(*tx_ref) || pwallet->IsFromMe(*tx_ref)) {\r\n             pwallet->AddToWallet(std::move(tx_ref), confirm);\r\n             return NullUniValue;\r\n         }",
-      "state": "open",
-      "user": "dooglus",
-      "created_at": "2021-04-10T00:36:28Z",
-      "updated_at": "2026-02-16T06:50:03Z",
-      "closed_at": null,
-      "comments": 7,
-      "url": "https://github.com/bitcoin/bitcoin/issues/21647",
-      "labels": [
-        "Wallet",
-        "RPC/REST/ZMQ"
-      ],
-      "comment_data": [
-        {
-          "id": 3906200400,
-          "user": "Mterra64",
-          "body": "I have been reviewing this issue to better understand the current behavior of the `importprunedfunds` RPC.\n\nFrom what I understand, the RPC currently allows importing receiving transactions but does not support importing spending transactions. This seems to create an incomplete wallet state representation, especially in scenarios where pruned nodes need to reconstruct historical wallet activity.\n\nWould extending support to spending transactions require additional validation logic to ensure consistency with existing UTXO tracking and wallet state management?\n\nI am currently exploring how wallet transaction metadata is handled internally, particularly how imported transactions are reconciled with the UTXO set.\n\nAny clarification on the intended architectural constraints around `importprunedfunds` would be very helpful.",
-          "created_at": "2026-02-16T03:06:37Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 828,
-            "has_nack": false,
-            "has_ack": true
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1130,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "summary": {
-    "total_prs": 236,
-    "total_issues": 50,
-    "total_comments": 107,
-    "unique_participants": 99
+    "total_prs": 235,
+    "total_issues": 49,
+    "total_comments": 108,
+    "unique_participants": 97
   }
 }
