@@ -1,12 +1,893 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-02-24T01:29:30.156868+00:00",
+  "fetched_at": "2026-02-24T08:39:45.110477+00:00",
   "date_range": {
-    "since": "2026-02-17T01:29:30.156807+00:00",
-    "until": "2026-02-24T01:29:30.156807+00:00"
+    "since": "2026-02-17T08:39:45.110405+00:00",
+    "until": "2026-02-24T08:39:45.110405+00:00"
   },
   "pull_requests": [
+    {
+      "id": 578665495,
+      "number": 21283,
+      "title": "Implement BIP 370 PSBTv2",
+      "body": "BIP 370 PSBTv2 introduces several new fields and different invariants for PSBT. This PR implements those new fields and restructures the PSBT implementation to match PSBTv2 but still remain compatible with PSBTv0.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2021-02-23T18:29:20Z",
+      "updated_at": "2026-02-24T08:31:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/21283",
+      "labels": [
+        "Wallet",
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 238,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1004149182,
+      "number": 25665,
+      "title": "refactor: Add util::Result failure types and ability to merge result values",
+      "body": "Add `util::Result` support for returning more error information and make use of it in [LoadChainstate method](https://github.com/bitcoin/bitcoin/pull/25665/commits/0263614685582fed2290494f5233dbe038fc350c) as an initial application. Followup PRs [#25722](https://github.com/bitcoin/bitcoin/pull/25722) and [#29700](https://github.com/bitcoin/bitcoin/pull/29700) use it more broadly to return errors and warnings from wallet and kernel functions as well.\r\n\r\nThis change adds two major features to the result class:\r\n\r\n- For better error handling, adds the ability to return a value on failure, not just a value on success. This is a key missing feature that makes the result class not useful for functions like `LoadChainstate()` which produce different errors that need to be handled differently [^1].\r\n\r\n[^1]: Ability to return error values was actually present in the original implementation of [#25218](https://github.com/bitcoin/bitcoin/pull/25218), but unfortunately removed in later iterations. See [design notes](https://github.com/bitcoin-core/bitcoin-devwiki/wiki/util::Result-design-notes).\r\n\r\n- For better error reporting, adds the ability to return warning messages and multiple errors, not just a single error string. This provides a way for functions to report errors and warnings in a standard way, and simplifies interfaces:\r\n\r\n    ```diff\r\n    -virtual std::unique_ptr<Wallet> loadWallet(const std::string& name, bilingual_str& error, std::vector<bilingual_str>& warnings) = 0;\r\n    +virtual util::Result<std::unique_ptr<Wallet>> loadWallet(const std::string& name) = 0;\r\n    ```\r\n\r\n    ```diff\r\n    -std::unique_ptr<WalletDatabase> MakeDatabase(const fs::path& path, const DatabaseOptions& options, DatabaseStatus& status, bilingual_str& error);\r\n    +util::Result<std::unique_ptr<WalletDatabase>, DatabaseError> MakeDatabase(const fs::path& path, const DatabaseOptions& options);\r\n   ```\r\n\r\nThis change also makes some more minor improvements:\r\n\r\n- Smaller type size. `util::Result<int>` is 16 bytes, and `util::Result<void>` is 8 bytes. Previously both were 72 bytes.\r\n\r\n- Broader type compatibility. Supports noncopyable and nonmovable success and error types.\r\n\r\n### Comparison with `std::expected`\r\n\r\nCurrently, the `util::Result` class is useful for error reporting—returning translated, user-facing error strings—but not as useful for error handling, where callers need structured failure information to decide how to proceed. By contrast, `std::expected` / `util::Expected` (#34005, #34006) is good for error handling but less helpful for reporting. This PR closes the gap between the two classes.\r\n\r\nWith this PR, `std::expected` remains a good choice for lower-level functions or simple functions that fail in only a few well-defined ways. Meanwhile,\r\n\r\n- `Result` becomes a better choice for operations that can fail in many different ways—loading a wallet, connecting a block, etc.—where callers may want complete error traces, not just low-level errors without context or high-level errors without detail. (Followup [#25722](https://github.com/bitcoin/bitcoin/pull/25722) applies this to wallet-loading functions.) \r\n- `Result` can also be more useful than `expected` when merging status information from multiple calls. (Followup [#29700](https://github.com/bitcoin/bitcoin/pull/29700) uses this to reliably propagate flush and fatal-error status from validation code that can internally trigger flushes or shutdowns.)\r\n- `Result` may also be a better choice than `std::expected` when returning pointer values. (Followup [#26022](https://github.com/bitcoin/bitcoin/pull/26022) adds a `ResultPtr` specialization that avoids double dereferencing.) \r\n- `Result` can be more efficient than `std::expected` when failures are rare but failure objects are large, since failure values are heap-allocated.\r\n\r\nThis PR effectively makes `Result` a superset of `expected`, making the representations compatible and allowing them to be used together.",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2022-07-21T12:46:09Z",
+      "updated_at": "2026-02-24T08:24:42Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/25665",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 4045,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1047758233,
+      "number": 26022,
+      "title": "Add util::ResultPtr class",
+      "body": "<!-- begin based-on -->\n**This is based on #25665.** The non-base commits are:\n\n- [`5142f017eaa` Add util::ResultPtr class](https://github.com/bitcoin/bitcoin/pull/26022/commits/5142f017eaa3b3f6d0109fc9f836e6243349d541)\n- [`8ef747c80fc` Use ResultPtr<unique_ptr> instead of Result<unique_ptr>](https://github.com/bitcoin/bitcoin/pull/26022/commits/8ef747c80fc3e39ecb2bb5856a489cbfc5737f48)<!-- end -->\n\n---\n\nThe `util::ResultPtr` class is a wrapper for `util::Result` providing syntax sugar to make it less awkward to use with returned pointers. Instead of needing to be deferenced twice with `**result` or `(*result)->member`, it only needs to be dereferenced once with `*result` or `result->member`. Also when it is used in a boolean context, instead of evaluating to true when there is no error and the pointer is null, it evaluates to false so it is straightforward to determine whether the result points to something.\n\nThis PR is only partial a solution to #26004 because while it makes it easier to check for null pointer values, it does not make it impossible to return a null pointer value inside a successful result. It would be possible to enforce that successful results always contain non-null pointers by using a `not_null` type (https://github.com/bitcoin/bitcoin/issues/24423) in combination with `ResultPtr`, though.",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2022-09-06T15:57:14Z",
+      "updated_at": "2026-02-24T08:21:15Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/26022",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1358,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1071188902,
+      "number": 26201,
+      "title": "Remove Taproot activation height",
+      "body": "Drop `DEPLOYMENT_TAPROOT` from `consensus.vDeployments`.\r\n\r\nNow that the commit (https://github.com/bitcoin/bitcoin/commit/7c08d81e119570792648fe95bbacddbb1d5f9ae2) which changes taproot to be enforced for all blocks is included in v24.0, it seems a good time to remove no longer needed non-consensus code.\r\n\r\nClarify what is considered a `BuriedDeployment`.\r\n\r\nWe drop taproot from `getdeploymentinfo` RPC, rather than mark it as `buried`, because this is not a buried deployment in the sense of [BIP 90](https://github.com/bitcoin/bips/blob/master/bip-0090.mediawiki). This is because the activation height has been completely removed from the code, rather than hard coded.\r\n\r\nSee discussion in #24737 and #26162.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2022-09-29T11:16:54Z",
+      "updated_at": "2026-02-24T08:17:42Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/26201",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 748,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3319440956,
+      "number": 34659,
+      "title": ".",
+      "body": ".",
+      "state": "closed",
+      "user": "Kamran-Pro-Dev",
+      "created_at": "2026-02-24T08:16:50Z",
+      "updated_at": "2026-02-24T08:17:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34659",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 3,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3264847922,
+      "number": 34544,
+      "title": "wallet: Disallow wallet names that are paths including `..` and `.` elements",
+      "body": "Wallet names including `..` and `.` are unintuitive and can lead to various issues, see #34497\r\n\r\nThis disallows creating or loading wallets that have any path elements that are `..` or `.`, including any present in an absolute path. This does not disallow relative paths altogether but rather limits them to only being subdirectories of the wallets directory.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2026-02-09T23:28:03Z",
+      "updated_at": "2026-02-24T07:59:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34544",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 437,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1512762627,
+      "number": 28463,
+      "title": "p2p: Increase inbound capacity for block-relay only connections",
+      "body": "This is joint work with amitiuttarwar.\r\n\r\nSee issue #28462 for a broader discussion on increasing the number of block-relay-only connections independent of this particular implementation proposal.\r\n\r\nWe suggest to increase the number of inbound slots allocated to block-relay-only peers by increasing the default maximum connections from 125 to 200, with 50% of inbound slots accessible for tx-relaying peers.\r\nThis is a prerequisite for being able to increase the default number of outgoing block-relay-only peers later, because the current inbound capacity of the network is not sufficient.\r\nIn order to account for incoming tx-relaying peers separately from incoming block-relay peers, changes to the inbound eviction logic are necessary.\r\n\r\nSee the next post in this thread for a more detailed explanation and motivation of the changes.",
+      "state": "open",
+      "user": "mzumsande",
+      "created_at": "2023-09-12T20:36:39Z",
+      "updated_at": "2026-02-24T07:52:39Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/28463",
+      "labels": [
+        "P2P",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 904,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3110851566,
+      "number": 34093,
+      "title": "netif: fix compilation warning in QueryDefaultGatewayImpl()",
+      "body": "```\r\nsrc/common/netif.cpp:137:51: error: comparison of integers of different signs: 'int64_t' (aka 'long') and 'unsigned long' [-Werror,-Wsign-compare]\r\n  137 |         for (nlmsghdr* hdr = (nlmsghdr*)response; NLMSG_OK(hdr, recv_result); hdr = NLMSG_NEXT(hdr, recv_result)) {\r\n      |                                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~\r\n/usr/include/netlink/netlink.h:220:31: note: expanded from macro 'NLMSG_OK'\r\n  220 | #define NLMSG_OK(_hdr, _len)            NL_ITEM_OK(_hdr, _len, NLMSG_HDRLEN, _NLMSG_LEN)\r\n      |                                         ^                ~~~~  ~~~~~~~~~~~~\r\n/usr/include/netlink/netlink.h:203:10: note: expanded from macro 'NL_ITEM_OK'\r\n  203 |         ((_len) >= _hlen && _LEN_M(_ptr) >= _hlen && _LEN_M(_ptr) <= (_len))\r\n      |           ~~~~  ^  ~~~~~\r\n1 error generated.\r\n```\r\n\r\nHappens on FreeBSD 15.0, with the default compiler (Clang 19).\r\n\r\nOn FreeBSD 14, `/usr/include/netlink/netlink.h` contains:\r\n```\r\n #define NLMSG_HDRLEN                    ((int)sizeof(struct nlmsghdr))\r\n```\r\n\r\nOn FreeBSD 15, `/usr/include/netlink/netlink.h` contains:\r\n```\r\n #define NLMSG_HDRLEN                    (sizeof(struct nlmsghdr))\r\n```\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2025-12-17T17:45:19Z",
+      "updated_at": "2026-02-24T07:49:39Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34093",
+      "labels": [
+        "Needs backport (30.x)"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 3321,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1566486194,
+      "number": 28690,
+      "title": "build: Introduce internal kernel library",
+      "body": "This PR introduces a new `libbitcoin_kernel` internal library. It completes the internal library design as laid out in [doc/design/libraries.md](https://github.com/bitcoin/bitcoin/blob/master/doc/design/libraries.md). Since the `util` library contains a bunch of modules that are not required by the kernel library, a new `kernel_util` library is introduced as well that only consists of the modules required by the kernel library. The external `libbitcoinkernel` library now re-uses the compiled objects from the internal libraries. \r\n\r\nThere is a trade-off to this. Since we don't manually export symbols from the kernel library yet, this would make the library unusable if `REDUCE_EXPORTS=ON`. For now this means that the patch here introduces a separate source file list for the external library that gets populated by the source files of its static dependents.",
+      "state": "open",
+      "user": "sedited",
+      "created_at": "2023-10-20T11:01:03Z",
+      "updated_at": "2026-02-24T07:49:01Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/28690",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 906,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1640676570,
+      "number": 29060,
+      "title": "Policy: Report debug message why inputs are non standard",
+      "body": "This PR is another attempt at  #13525.\r\n\r\nTransactions that fail `PreChecks` Validation due to non-standard inputs now  returns invalid validation state`TxValidationResult::TX_INPUTS_NOT_STANDARD` along with a debug error message.\r\n\r\nPreviously, the debug error message for non-standard inputs do not specify why the inputs were considered non-standard. \r\nInstead, the same error string, `bad-txns-nonstandard-inputs`, used for all types of non-standard input scriptSigs.\r\n\r\nThis PR updates the `AreInputsStandard`  to include the reason why inputs are non-standard in the debug message.\r\nThis improves the `Precheck` debug message to be more descriptive.\r\n\r\nFurthermore, I have addressed all remaining comments from #13525 in this PR.\r\n",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2023-12-12T13:16:05Z",
+      "updated_at": "2026-02-24T07:42:02Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/29060",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 794,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1655695603,
+      "number": 29136,
+      "title": "wallet: `addhdkey` RPC to add just keys to wallets via new `unused(KEY)` descriptor",
+      "body": "It is sometimes useful for the wallet to have keys that it can sign with but are not (initially) involved in any scripts, e.g. for setting up a multisig. Ryanofsky [suggested](https://github.com/bitcoin/bitcoin/pull/26728#issuecomment-1867721948) A `unused(KEY)` descriptor which allows for a key to be specified, but produces no scripts. These can be imported into the wallet, and subsequently retrieved with `gethdkeys`. Additionally, `listdescriptors` will output these descriptors so that they can be easily backed up.\r\n\r\nIn order to make it easier for people to add HD keys to their wallet, and to generate a new one if they want to rotate their descriptors, an `addhdkey` RPC is also added. Without arguments, it will generate a new HD key and add it to the wallet via a `unused(KEY)` descriptor. If provided a private key, it will construct the descriptor and add it to the wallet.\r\n\r\nSee also: https://github.com/bitcoin/bitcoin/pull/26728#issuecomment-1866961865\r\n\r\nBased on #29130 as `gethdkeys` is useful for testing this.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2023-12-22T23:40:15Z",
+      "updated_at": "2026-02-24T07:38:29Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/29136",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1117,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3210348402,
+      "number": 34410,
+      "title": "test: let connections happen in any order in p2p_private_broadcast.py",
+      "body": "If the following two events happen:\r\n\r\n* (likely) the automatic 10 initial connections are not made to all \r\n  networks\r\n* (unlikely) the network-specific logic kicks in almost immediately.\r\n  It is using exponential distribution with a mean of 5 minutes\r\n  (`rng.rand_exp_duration(EXTRA_NETWORK_PEER_INTERVAL)`).\r\n\r\nSo if both happen, then the 11th connection may not be the expected\r\nprivate broadcast, but a network-specific connection.\r\n\r\nFix this by retrieving the connection type from\r\n`destinations_factory()`. This is more flexible because it allows\r\nconnections to happen in any order and does not break if e.g. the 11th\r\nconnection is not the expected first private broadcast.\r\n\r\nThis also makes the test run faster:\r\nbefore: 19-44 sec \r\nnow: 10-25 sec \r\nbecause for example there is no need to wait for the initial 10\r\nautomatic outbound connections to be made in order to proceed.\r\n\r\nFixes: https://github.com/bitcoin/bitcoin/issues/34387\r\n",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-01-26T12:05:26Z",
+      "updated_at": "2026-02-24T07:37:11Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34410",
+      "labels": [
+        "Tests",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1022,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1681972231,
+      "number": 29256,
+      "title": "log, refactor: Allow log macros to accept context arguments",
+      "body": "Allow `LogDebug()`, `LogTrace()`, `LogInfo()`, `LogWarning()`, and `LogError()` macros to accept context arguments to provide more information in log messages and more control over logging to callers.\r\n\r\nThis functionality is used in followup PRs:\r\n\r\n- [#30342](https://github.com/bitcoin/bitcoin/pull/30342) - To let libbitcoinkernel send output to specfic `BCLog::Logger` instances instead of a global instance, so output can be disambiguated and applications can have more control over logging.\r\n\r\n- [#30343](https://github.com/bitcoin/bitcoin/pull/30343) - To replace custom `WalletLogPrintf` calls with standard logging calls that automatically include wallet names and don't log everything at info level.\r\n\r\nThis PR does not change behavior of current log prints or require them to be updated. It includes tests and documentation covering the new functionality.\r\n\r\n---\r\n\r\nNote: Originally this PR also removed some restrictions around passing category constants to log macros to try to make them more consistent, but these changes were too controversial and have been dropped.",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2024-01-16T22:09:35Z",
+      "updated_at": "2026-02-24T07:34:44Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/29256",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1142,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1940584116,
+      "number": 30343,
+      "title": "wallet, logging: Replace WalletLogPrintf() with LogInfo()",
+      "body": "Make new logging macros `LogDebug()`, `LogTrace()`, `LogInfo()`, `LogWarning()`, and `LogError()` compatible with wallet code and drop custom WalletLogPrintf() function. The new logging macros introduced in #28318 weren't previously useful in wallet code because wallet code prefixes most log messages with the wallet names to be be able to distinguish log output from multiple wallets. Fix this by introducing a new `WalletLogSource` class inheriting from `BCLog::Source` which can include the wallet name in log messages.\n\n---\n\n<!-- begin based-on -->\n**This is based on #29256.** The non-base commits are:\n\n- [`35ab88ce0e7` wallet, logging: Replace WalletLogPrintf() with LogInfo()](https://github.com/bitcoin/bitcoin/pull/30343/commits/35ab88ce0e7116c0a2bee2569ea1bc9eb5afffea)\n- [`f5039574576` wallet, logging: Switch LogInfo to LogWarning/LogError](https://github.com/bitcoin/bitcoin/pull/30343/commits/f5039574576f3128fe904147a53e3fcaab6c0d85)\n- [`aac55f94938` wallet, logging: Switch LogInfo to LogError in AddWalletDescriptor](https://github.com/bitcoin/bitcoin/pull/30343/commits/aac55f94938aa7ac727b840a9766adb848e998ab)<!-- end -->",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2024-06-26T17:57:15Z",
+      "updated_at": "2026-02-24T07:19:59Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/30343",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1201,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2138649533,
+      "number": 31132,
+      "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
+      "body": "_Parts of this PR are isolated in independent smaller PRs to ease review:_\r\n\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34164_\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34165_\r\n* [ ] _https://github.com/bitcoin/bitcoin/pull/34576_\r\n\r\n---\r\n\r\nThis PR parallelizes fetching all input prevouts of a block during block connection, achieving over 3x faster IBD performance in some scenarios[^1][^2][^3][^4][^5].\r\n\r\n### Problem\r\n\r\nCurrently, when fetching inputs in `ConnectBlock`, each input is fetched from the cache sequentially. A cache miss requires a round trip to the disk database to fetch the outpoint and insert it into the cache. Since the database is read-only during `ConnectBlock`, we can fetch all inputs of a block in parallel on multiple threads while connecting.\r\n\r\n### Solution\r\n\r\nWe add a ThreadPool to CoinsViewOverlay to fetch block inputs in parallel. The block is passed to the `CoinsViewOverlay` view before entering `ConnectBlock`, which kicks off the worker threads to begin fetching the inputs. The cache returns fetched coins as they become available via the overridden `FetchCoinFromBase` method. If not available yet, the main thread also fetches coins as it waits.\r\n\r\n### Implementation Details\r\n\r\nThe `CoinsViewOverlay` implements a lock-free MPSC (Multiple Producer, Single Consumer) queue design:\r\n\r\n- **Work Distribution**: Collects all input prevouts into a queue and uses a barrier to start all worker threads simultaneously\r\n- **Synchronization**: Worker threads use an atomic counter to claim which inputs to fetch, and each input has an atomic flag to signal completion to the main thread\r\n- **Main Thread Processing**: The main thread waits for inputs in order and moves their `Coin` into the `cacheCoins` map as they become available.\r\n- **Work Stealing**: If the main thread catches up to the workers, it assists with fetching to maximize parallelism\r\n- **Completion**: All thread futures are waited on in StopFetching, which is called from any mutating method (Flush/Sync/SetBackend/Reset). The ResetGuard going out of scope ensure this happens before the block is destroyed.\r\n\r\n### Safety and Correctness\r\n\r\n- The `CoinsViewOverlay` works on a block that has not been fully validated, but it does not interfere or modify any of the validation during `ConnectBlock`\r\n- It simply fetches inputs in parallel, which must be fetched before a transaction is validated anyways\r\n- **Invalid blocks**: If an invalid block is mined, the temporary cache is reset without being flushed. This is an improvement over the current behavior, where existing inputs are inserted into the main `CoinsTip()` cache when pulled through for an invalid block\r\n\r\n### Performance\r\n\r\nBenchmarks show over 3x faster IBD performance in a cloud environment with network connected storage[^1], 3x faster IBD for an M4 Mac and up to 46% faster with directly connected storage[^2][^3][^4][^5]. The parallelization of expensive disk lookups provides significant speedup.\r\n\r\n[Flamegraphs show how the execution is changed](https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3617315125).\r\n\r\n### Credits\r\n\r\nInspired by [this comment](https://github.com/bitcoin/bitcoin/pull/18941#issuecomment-638553680).\r\n\r\nResolves https://github.com/bitcoin/bitcoin/issues/34121.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3678847806\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3515011880\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3463894000\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3347436866\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3488760623",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2024-10-22T14:40:28Z",
+      "updated_at": "2026-02-24T07:05:33Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31132",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3747,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3299949354,
+      "number": 34617,
+      "title": "fees: wallet: remove block policy fee estimator internals from wallet",
+      "body": "\r\nPart of #34075\r\n\r\n#### Motivation\r\nThe wallet currently knows the block policy estimator's internals from the response returned by `estimateSmartFee`.\r\n`estimateSmartFee` logging, which is supposed to be inside the method, is done in the wallet.\r\nAlso, the source of a wallet transaction fee is saved in the `CBlockPolicyEstimator::FeeReason` enum. This shows that there is tight coupling between the wallet and `CBlockPolicyEstimator`, which results in code that is a bit messy to extend and even read.\r\nIn #34075 the wallet is going to use a response returned via a fee rate estimator manager which does not return all those internals, hence motivating this refactor.\r\nThis PR refactors the interface between the wallet and the fee estimator to improve encapsulation and separate two distinct concerns: the source of a fee rate (where it came from) and the estimator's reason (why the algorithm chose it).\r\n\r\n#### Key Changes\r\n* Separate `FeeSource` from `FeeReason`:\r\n   Introduced a new `FeeSource` enum in `src/util/fees.h` to represent the high-level origin of a fee rate (e.g., `PAYTXFEE`, `FALLBACK`, `FEE_RATE_ESTIMATOR`). The existing `FeeReason` is now strictly scoped to internal `CBlockPolicyEstimator` details.\r\n* Encapsulate `estimateSmartFee` Logging:\r\n   Moved the fee calculation logging logic into `CBlockPolicyEstimator`. This removes the need for the wallet to manage a `FeeCalculation` object just to facilitate logging, especially when the caller passes `nullptr`.\r\n* Refactor `GetMinimumFeeRate`:\r\n   Updated `wallet::GetMinimumFeeRate` to return a `MinimumFeeRateResult` struct. This avoids the use of output parameters and provides a cleaner interface for retrieving the fee rate, source, and target.\r\n* Move `StringForFeeReason`:\r\n   Moved `StringForFeeReason` to `src/policy/fees/block_policy_estimator.cpp` to align with the location of the `FeeReason` enum. The function was also refactored to use a switch statement without a default case to ensure compile-time coverage of all reasons.\r\n* RPC Breaking Change:\r\n   Renamed the `fee_reason` field to `fee_source` in wallet RPCs (such as `send`, `walletcreatefundedpsbt`). This correctly identifies the origin of the fee rate rather than the estimator's internal logic.\r\n* Additional Logging:\r\n   Added logging for transaction fee, size, and source in `CreateTransactionInternal` to improve debugging of fee selection.",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2026-02-18T18:45:18Z",
+      "updated_at": "2026-02-24T07:02:16Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34617",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 2469,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2250366940,
+      "number": 31560,
+      "title": "rpc: allow writing UTXO set to a named pipe, introduce dump_to_sqlite.sh script",
+      "body": "This PR slightly modifies the `dumptxoutset` RPC to allow writing the UTXO set dump into a [named pipe](https://askubuntu.com/a/449192), so that the output data can be consumed by another process, see #31373. Taking use of this with the utxo-to-sqlite.py tool (introduced in #27432), creating an UTXO set in SQLite3 format is possible on the fly and becomes a one-liner with a newly introduced script `dump_to_sqlite.sh`. E.g. for signet:\r\n```\r\n$ ./contrib/utxo-tools/dump_to_sqlite.sh \"./build/src/bitcoin-cli -signet\" ~/utxos.sqlite3\r\nUTXO Snapshot for Signet at block hash 000000ddc3b251483cf1ebb23e2750ba..., contains 5705634 coins\r\n1048576 coins converted [18.38%], 4.474s passed since start\r\n2097152 coins converted [36.76%], 8.793s passed since start\r\n3145728 coins converted [55.13%], 13.146s passed since start\r\n4194304 coins converted [73.51%], 17.478s passed since start\r\n5242880 coins converted [91.89%], 21.832s passed since start\r\n{\r\n  \"coins_written\": 5705634,\r\n  \"base_hash\": \"000000ddc3b251483cf1ebb23e2750ba2490701d0c547241b247a9beb85498d0\",\r\n  \"base_height\": 227678,\r\n  \"path\": \"/tmp/tmp.MFHEVqetv0/utxos.fifo\",\r\n  \"txoutset_hash\": \"f29e524c999487cbd0cfca5201dce67c2c5e5c5eb115c63ad48c2239f23eea4c\",\r\n  \"nchaintx\": 8272649\r\n}\r\nTOTAL: 5705634 coins written to /home/thestack/utxos.sqlite3, snapshot height is 227678.\r\n```\r\nNote that the `dumptxoutset` RPC calculates an UTXO set hash as a first step before any data is emitted, so especially on mainnet it takes quite a while until the conversion starts and something is happening visibly.\r\n\r\nThe new script is quite minimal and PoC-y at this point, there are some potential improvement ideas:\r\n- better error handling (e.g. detect if bitcoin-cli exists, clean up tmpdir if bitcoin-cli execution fails etc.)\r\n- allow to pass through the rollback option (now we always dump at the current height, i.e. \"latest\" parameter)",
+      "state": "open",
+      "user": "theStack",
+      "created_at": "2024-12-24T02:42:27Z",
+      "updated_at": "2026-02-24T06:40:42Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31560",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1968,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2309959380,
+      "number": 31774,
+      "title": "crypto: Use secure_allocator for `AES256_ctx`",
+      "body": "Fixes #31744 \r\n\r\nReuse `secure_allocator` for `AES256_ctx` in the aes 256 encrypters and decrypters and the `iv` of `AES256CBC` encrypters and decrypters. These classes are relevant to `CCrypter`, used for encrypting wallets, and my understanding is that if an attacker knows some or all of the contents of these data structures (`AES256_ctx` & `iv`) they might be able to decrypt a user's wallet.\r\n\r\n Presently the `secure_allocator` tries to protect sensitive data with `mlock()` on POSIX systems and `VirtualLock()` on Windows to prevent memory being paged to disk, and by zero'ing out memory contents on deallocation with `memory_cleanse()` which is similar to `OPENSSL_cleanse()` by scaring compilers away from optimizing `memset` calls on non-Windows systems, and using `SecureZeroMemory()` on Windows.",
+      "state": "open",
+      "user": "davidgumberg",
+      "created_at": "2025-01-31T20:10:56Z",
+      "updated_at": "2026-02-24T06:26:33Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31774",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 854,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2471245988,
+      "number": 32317,
+      "title": "kernel: Separate UTXO set access from validation functions",
+      "body": "The current code makes it hard to call functions for checking the consensus-correctness of a block without having a full UTXO set at hand. This makes implementing features such as Utreexo and non-assumevalid swiftsync, where maintaining a full UTXO set defeats their purpose, through the kernel API difficult. Checks like the coinbase subsidy, or block sigops are only available through `ConnectBlock`, which requires a complete coins cache.\r\n\r\nSolve this by moving accessing coins and the responsibility of spending them out of `ConnectBlock` and into a new separate function called `SpendBlock`. Pass a block's spent coins through the existing `CBlockUndo` data structure to `ConnectBlock`. \r\n\r\nWhile the change is largely a refactor, some smaller behaviour changes were unavoidable. These should be highlighted in the commit messages. The last commit contains the most important part of the coins logic move, the commits before attempt to prepare it piecemeal.\r\n\r\nThis pull request was benchmarked on [benchcoin](https://github.com/bitcoin-dev-tools/benchcoin/pull/162), which showed no performance regression. While discussing this pull request it was noted that pre-fetching and eliminating the need for some additional map lookups might improve performance a bit, but this does not make a measurable difference in the grand scheme of things and was not the motivation for this pull request.\r\n\r\nIn future changes, ConnectBlock could be made even more self contained, accessing the coins from the internal map could be further optimized by consolidating existence checking and spending, and the function eventually exposed in an external kernel API (as done [here](https://github.com/sedited/bitcoin/commit/09e05493010119fc60d310d3e7ffc388de441f9a#diff-f638e65d9278276b2a6ac42ffbbd26d079c3dba752feed5038a25a1ee565d320R947))",
+      "state": "open",
+      "user": "sedited",
+      "created_at": "2025-04-21T13:15:46Z",
+      "updated_at": "2026-02-24T05:51:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32317",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1886,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3311151062,
+      "number": 34646,
+      "title": "Fix two issues in p2p_private_broadcast.py",
+      "body": "_test: move abortprivatebroadcast test at the end_\r\n\r\nThe piece of `p2p_private_broadcast.py` which tests the correctness of\r\n`abortprivatebroadcast` issues a new `sendrawtransaction` call. That\r\ncall schedules up to 3 new connections: peer=13, peer=14 and possibly\r\npeer=15 before it gets aborted.\r\n\r\nThese up to 3 in-the-process-of-opening private broadcast connections\r\nhave `CNode::m_connected` set early - when the `CNode` object is\r\ncreated. Later in the test the mock time is advanced by 20 minutes and\r\nthose \"old\" connections pick a transaction for rebroadcast but that\r\ntriggers `PRIVATE_BROADCAST_MAX_CONNECTION_LIFETIME` immediately:\r\n\r\n```\r\n2026-02-21T13:28:14.209766Z [privbcast] [net.cpp:4006] [CNode] [net] Added connection peer=20\r\n2026-02-21T13:28:14.309792Z (mocktime: 2026-02-21T13:48:14Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending inv (37 bytes) peer=20\r\n2026-02-21T13:28:14.309801Z (mocktime: 2026-02-21T13:48:14Z) [msghand] [net_processing.cpp:5745] [SendMessages] [privatebroadcast] Disconnecting: did not complete the transaction send within 180 seconds, peer=20\r\n```\r\n\r\nThis prematurely stops the private broadcast connection and results in\r\na failure like:\r\n\r\n```\r\nAssertionError: ... not({} == {'ping': 1, 'tx': 1})\r\n```\r\n\r\n---\r\n\r\n_test: don't always assert NUM_PRIVATE_BROADCAST_PER_TX broadcasts_\r\n\r\nIn `p2p_private_broadcast.py` in the function `check_broadcasts()` we\r\nshould assert that the broadcast was done to `broadcasts_to_expect`\r\npeers, not to `NUM_PRIVATE_BROADCAST_PER_TX`. This is because in the\r\n\"Basic\" test we check the first broadcast manually because it is done to\r\n`nodes[1]` and then check the other two by\r\n`check_broadcasts(..., NUM_PRIVATE_BROADCAST_PER_TX - 1, ...)`.\r\nThe first broadcast might not have fully concluded by the time we call\r\n`check_broadcasts()` to check the remaining 2.\r\n\r\nDemanding always `NUM_PRIVATE_BROADCAST_PER_TX` can lead to:\r\n\r\n```\r\nTraceback (most recent call last):\r\n  File \"/home/vd/gh/bitcoin/bitcoin/test/functional/test_framework/test_framework.py\", line 142, in main\r\n    self.run_test()\r\n    ~~~~~~~~~~~~~^^\r\n  File \"/tmp/build/clang22/test/functional/p2p_private_broadcast.py\", line 347, in run_test\r\n    self.check_broadcasts(\"Basic\", txs[0], NUM_PRIVATE_BROADCAST_PER_TX - 1, NUM_INITIAL_CONNECTIONS + 1)\r\n    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"/tmp/build/clang22/test/functional/p2p_private_broadcast.py\", line 313, in check_broadcasts\r\n    assert_greater_than_or_equal(sum(1 for p in peers if \"received\" in p), NUM_PRIVATE_BROADCAST_PER_TX)\r\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"/home/vd/gh/bitcoin/bitcoin/test/functional/test_framework/util.py\", line 94, in assert_greater_than_or_equal\r\n    raise AssertionError(\"%s < %s\" % (str(thing1), str(thing2)))\r\nAssertionError: 2 < 3\r\n```\r\n",
+      "state": "closed",
+      "user": "vasild",
+      "created_at": "2026-02-21T18:06:43Z",
+      "updated_at": "2026-02-24T05:50:54Z",
+      "merged_at": "2026-02-23T21:45:49Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34646",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 2985,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2501800868,
+      "number": 32427,
+      "title": "(RFC) kernel: Replace leveldb-based BlockTreeDB with flat-file based store",
+      "body": "Opening this PR mostly to get concept/approach feedback.\r\n\r\nThis is motivated by the kernel library, where the internal usage of leveldb is a limiting factor to its future use cases. Specifically it is not possible to share leveldb databases between two processes. A notable use-case for the kernel library is accessing and analyzing existing block data. Currently this can only be done by first shutting down the node writing this data. Moving away from leveldb opens the door towards doing this in parallel. A flat file based approach was chosen, since the requirements for persistence here are fairly simple (no deletion, constant-size entries). The change also offers better performance by making node startup faster, and has a smaller on-disk footprint, though this is negligible in the grand scheme of things.\r\n\r\nThe BlockTreeStore introduces a new data format for storing block indexes and headers on disk. The class is very similar to the existing CBlockTreeDB, which stores the same data in a leveldb database. Unlike CBlockTreeDB, the data stored through the BlockTreeStore is directly serialized and written to flat .dat files. The storage schema introduced\r\nis simple. It relies on the assumption that no entry is ever deleted and that no duplicate entries are written. These assumptions hold for the current users of CBlockTreeDB.\r\n\r\nA write ahead ahead log and boolean flags as file existence checks ensure write atomicity. Every data entry is also given a crc32c checksum to detect data corruption.\r\n\r\nThe change also opens the door towards getting rid of having to reindex the block tree due to corruption (though switching from pruned -> un-pruned still requires extra logic). This would simplify a lot of kernel/validation code, as can be seen in this [commit](https://github.com/TheCharlatan/bitcoin/commit/bfb2709e1d116d4e613601c3f0140f099530159d#diff-28f178018e05634ee3f8ddce3f4e0cec334ae69915cecf92be8299c749d8d470). The implementation here should be fairly robust against corruption (no parallel read/writes, no background compaction).\r\n\r\nAn alternative to this pull request, that could allow the same kernel feature, would be closing and opening the leveldb database only when reading and writing. This might incur a (negligible) performance penalty, but more importantly requires careful consideration of how to handle any contentions when opening, which might have complex side effects due to our current locking mode. It would also be possible to introduce an existing database with the required features for just the block tree, but that would introduce reliance on a new dependency and come with its own tradeoffs. For these reasons I chose this approach.",
+      "state": "open",
+      "user": "sedited",
+      "created_at": "2025-05-06T14:27:59Z",
+      "updated_at": "2026-02-24T05:37:34Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32427",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2759,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2527184806,
+      "number": 32554,
+      "title": "bench: replace embedded raw block with configurable block generator",
+      "body": "### Problem\r\n\r\nThe [hardcoded benchmark block 413567](https://mempool.space/block/413567) has several issues:\r\n- embeds 1.1MB of binary data in the repository (we can't remove it from history, but we can, from `HEAD`)\r\n- mined in 2016, predates SegWit v0, Taproot, and modern script types\r\n- benchmarks cannot test different transaction patterns or script mixes\r\n- updating to a newer block (e.g., [#32457](https://github.com/bitcoin/bitcoin/pull/32457)) would still add binary bloat and would remain inflexible\r\n\r\n### Fix\r\n\r\nAdded configurable `bench/block_generator.{h,cpp}` that builds fully valid blocks at runtime providing blocks or raw serialized stream.\r\n\r\n### Reproducer\r\n\r\nYou can run all affected tests and benchmarks with a sanity check:\r\n```bash\r\nrm -rf build && \\\r\ncmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCH=ON && \\\r\ncmake --build build -j$(nproc) && \\\r\nbuild/bin/test_bitcoin -t block_generator_deterministic_seeded_output,block_generator_serialization_roundtrip,block_generator_seed_perturbation,block_generator_multiple_seed_sanity && \\\r\nbuild/bin/bench_bitcoin -sanity-check -filter='DeserializeBlockTest|DeserializeAndCheckBlockTest|LoadExternalBlockFile|WriteBlockBench|ReadBlockBench|ReadRawBlockBench|BlockToJsonVerbosity1|BlockToJsonVerbosity2|BlockToJsonVerbosity3|BlockToJsonVerboseWrite|HexStrBench'\r\n```\r\n---\r\n\r\nThis supersedes #32457 by eliminating the need for any hardcoded block data while enabling flexible benchmark scenarios.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-05-18T21:39:14Z",
+      "updated_at": "2026-02-24T05:30:25Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32554",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 1540,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2597079174,
+      "number": 32763,
+      "title": "wallet: Replace CWalletTx::mapValue and vOrderForm with explicit class members",
+      "body": "`mapValue` and `vOrderForm` are opaque data structures that contain transaction metadata. It is hard to determine what actual data each field contains, and they can ostensibly be misused where metadata is added in the future without developers realizing that such metadata exists.\r\n\r\nIt's much clearer to have all of that metadata live in their own explicit member variables within `CWalletTx`. This PR implements that change.\r\n\r\nSince the serialization format of `CWalletTx` depends on `mapValue` and `vOrderForm`, the serialization remains unchanged, so when serializing these new members, they need to be shoved/extracted from a temporary `mapValue` or `vOrderForm`.\r\n\r\nThis does end up breaking forwards compatibility as unknown fields in `mapValue` and `vOrderForm` are stripped out if the record is rewritten. However, I don't expect that we would continue to use these fields for future metadata, so I think that risk is low.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-06-16T22:37:34Z",
+      "updated_at": "2026-02-24T05:05:17Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32763",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1011,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2607107167,
+      "number": 32784,
+      "title": "wallet: derivehdkey RPC to get xpub at arbitrary path",
+      "body": "Given a (blank) wallet with an `unused(KEY)` descriptor, `derivehdkey \"m/87h/0h/0h\"` gets the xpub or xpriv at any given path.\r\n\r\nThis is particularly useful for multisig setup where it's not desirable to use our default derivations (e.g. 44h).\r\n\r\nI updated the multisig tutorial and the functional test.\r\n\r\nBased on:\r\n- #29136",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-06-20T11:04:39Z",
+      "updated_at": "2026-02-24T04:57:57Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32784",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 381,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2637847621,
+      "number": 32861,
+      "title": "Have createwalletdescriptor auto-detect an unused(KEY)",
+      "body": "The `createwalletdescriptor` was introduced in #29130 to let users add a `tr()` descriptor to an existing SegWit wallet. The new `addhdkey` method from #29136 introduces a new potential workflow: start from a blank wallet, generate an HD and then add only the descriptors you need, e.g.:\r\n\r\n```sh\r\nbitcoin rpc createwallet TaprootMaxi blank=true\r\nbitcoin rpc addhdkey\r\nbitcoin rpc createwalletdescriptor bech32m\r\n```\r\n\r\nBefore this PR the last line would fail, requiring the user to call `gethdkeys` and copy-paste the xpub.\r\n\r\nThis PR makes `createwalletdescriptor` a bit smarter so it just finds the `unused(KEY)` generated by `hdkey` and uses that.\r\n\r\nIf multiple `unused(KEY)` descriptors are present the user still has to pick one.\r\n\r\nA potential followup is to make our [multisig tutorial](https://github.com/bitcoin/bitcoin/blob/master/doc/multisig-tutorial.md) slightly safer to use. Rather than creating a full wallet, the instruction could be changed to start with a blank wallet and only generate the default legacy descriptor. This avoids accidental use of single sig `p2sh-segwit` and `bech32` addresses.\r\n\r\n(I might do that in #32784, which introduces some other improvements to the tutorial. The situation is still not great; ideally the `importdescriptors` RPC is enhanced to detect when an `xpub` is a child of an hd key and then treats it as if an xpriv was imported.)\r\n\r\nBuilds on #29136.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-07-03T08:55:40Z",
+      "updated_at": "2026-02-24T04:43:42Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32861",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 1462,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2647773300,
+      "number": 32895,
+      "title": "wallet: Prepare for future upgrades by recording versions of last client to open and decrypt",
+      "body": "When a wallet is automatically upgraded, we always do so in a way that allows the user to load their wallet in an older version. When the user loads their wallet into an upgraded version again, the wallet may not perform the automatic upgrade and end up with upgraded and non-upgraded material in the wallet.\r\n\r\nIf we write some information about the last client to open the wallet, we would be able to detect these upgrade-downgrade-upgrade situations and perform another upgrade if so. However, in order for this to work, we need to have implemented writing such information into versions prior to the ones which introduce new automatic upgrades.\r\n\r\nWe are already writing the CLIENT_VERSION into all wallets in a \"version\" record, although this record is not updated in the same way across all previous versions. Since v24.0, we are always updating the record when the client version differs, but prior to that, the record would only be updated when the client version is newer. Even so, we can use this record to store the last client version.\r\n\r\nThe first commit decouples the written client version from the node version. This aids in development of new features. The version is entirely decoupled from previous versions by requiring all versions to have bit 30 set, and the initial version being `0 | (1 << 30)`. The versions just need to be at least 299900, and forcing bit 30 to be set was an easy way to achieve this.\r\n\r\nHowever, using version numbers is not as flexible as feature flags, so the second commit introduces the concept of Wallet Client Features. These flags are distinct from the existing Wallet Feature Flags since they are conceptually different. These are written in a separate record, and the wallet client version is incremented to `(1 << 0) | (1 << 30)`.\r\n\r\nLastly, since some upgrades may need private keys and can only occur after the wallet is decrypted, the third commit also adds a last decrypted features flags record to record the features of the last client to decrypt the wallet.\r\n\r\nThe result is that we will now be able to detect a downgrade down to v24.0 and be able to implement in parallel multiple features that require automatic upgrades.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-07-07T20:13:08Z",
+      "updated_at": "2026-02-24T04:33:27Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32895",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2277,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2677577590,
+      "number": 33008,
+      "title": "wallet: support bip388 policy with external signer",
+      "body": "External signers such as Ledger, BitBox02 and Jade, when used with multisig, use [BIP388](https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki) to display (and constrain) descriptor policies to their users.\r\n\r\nAt least in the case of Ledger (no others so far, see https://github.com/bitcoin/bitcoin/pull/33008#issuecomment-3165080503) this requires us to hold on to an hmac, which proves to the device that the user previously reviewed and approved it.\r\n\r\nThis PR adds a new RPC call `registerpolicy` which converts our descriptor(s) into a BIP388 policy (_partially implemented_), calls a new HWI method `register` (_implemented_) and stores the resulting HMAC (_implemented_).\r\n\r\nWhen signing a transaction using HWI's `signtx` it passes the HMAC along with the PSBT (_TODO_).\r\n\r\nFor convenience the HMAC can be retrieved via `getwalletinfo` (_implemented_). This is useful for scenario's where we can't (yet) complete a transaction via HWI calls.\r\n\r\nNote that the HMAC itself is not specified in BIP388 and may be different for different hardware vendors. So we'll store and echo any hex string the device gives us.\r\n\r\nAn alternative approach to directly supporting BIP388 policies would be to pass the involved descriptors to HWI and have it figure out how to derive a policy.\r\n\r\nTesting:\r\n- make a multisig wallet with a Ledger or other [supported device](https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki#reference-implementation)\r\n  - try https://github.com/Sjors/bitcoin/pull/91 if you're feeling adventurous, it includes this PR\r\n- install https://github.com/bitcoin-core/HWI/pull/791 HWI branch\r\n- call `bitcoin rpc registerpolicy`\r\n- call `bitcoin rpc getwalletinfo` to see the hmac\r\n\r\nTODO:\r\n- [ ] derive policy using `Descriptor` class instead regex madness, implement all constraints\r\n- [ ] pass hmac along when signing\r\n\r\nDepends on:\r\n- [ ] HWI `register` command: https://github.com/bitcoin-core/HWI/pull/791\r\n- [ ] HWI optional `--hmac` argument for `signtx` (if set, bypass the current auto-registration workaround)\r\n\r\nPotential followups:\r\n- pass hmac along when displaying an address. This provides some extra assurance to the user. See https://github.com/bitcoin-core/HWI/pull/647\r\n",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-07-18T15:31:45Z",
+      "updated_at": "2026-02-24T04:22:46Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33008",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2277,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3313870475,
+      "number": 34653,
+      "title": "test: improve txospender index tests code",
+      "body": "Fixes #34637.\r\n\r\nWas reviewing #34637 and, while reading the new txospender index\r\ntest code for the first time, found it could use some cleanups. Finding\r\nstuff in there is harder than it should be due to the amount of dup code.\r\n\r\nThe first commit cleans up `rpc_gettxspendingprevout.py` by introducing\r\nhelper functions to avoid repeating the same dicts everywhere, using\r\nfor-loops instead of duplicating the same checks for each node, and\r\nrenaming variables to better reflect what they actually represent.\r\n\r\nThe second commit reorganizes `txospenderindex_initial_sync()`\r\nmoving index initialization after the test setup phase, since the index\r\ndoesn't participate in it anyway. It adds a post-sync check to catch\r\ncases where `Sync()` aborted prematurely.\r\n\r\n\r\nNote:\r\nThis is just a pre-work for deeper index changes I'm cooking.",
+      "state": "open",
+      "user": "furszy",
+      "created_at": "2026-02-22T23:55:06Z",
+      "updated_at": "2026-02-24T04:15:40Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34653",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 879,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2683376326,
+      "number": 33034,
+      "title": "wallet: Store transactions in a separate sqlite table",
+      "body": "The wallet uses SQLite as a key-value store even though SQLite is a powerful relational database engine. This causes us numerous headaches due to the need to serialize multiple fields together, and since record read from the database during loading can come in any order.\r\n\r\nNotably, for transactions, if we were able to load them in the transaction order assigned by the wallet, PRs like #27865 would be a bit simpler and easier to reason about.\r\n\r\nThis PR makes it possible for us to do that by storing transactions in a separate table. This table has a column for each field in `CWalletTx`, which lets us use a SQL statement like `SELECT * FROM transactions ORDER BY pos` which guarantees us the order in which the transactions are loaded into the wallet.\r\n\r\nThe eventual goal is to use SQLite as a relational database with tables that store our keys and other metadata that can reference each other so that the wallet doesn't just use the database as a storage mechanism. But that is still a work in progress.\r\n\r\nThis PR makes use of the last client opened features introduced in #32895 to determine when the old record style needs to be upgraded to the new transactions table. This should give us sufficient upgrade-downgrade-upgrade handling to not lose any funds.\r\n\r\nDepends on #32763, #32895, #32985, #33032, #33033",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-07-21T22:52:54Z",
+      "updated_at": "2026-02-24T04:05:20Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33034",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1377,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2713577873,
+      "number": 33117,
+      "title": "Interfaces: Expose UTXO Snapshot Loading and Add Progress Notifications",
+      "body": "# Add UTXO Snapshot Loading Interface and Progress Notifications\r\n\r\nThis PR implements a complete interface for loading UTXO snapshots through the GUI, including progress notifications to provide user feedback during the loading process.\r\n\r\n---\r\n\r\n## Changes\r\n\r\n### Commit 1: `interfaces: expose UTXO snapshot loading in node interface`\r\n\r\n- Added a new virtual method `loadSnapshot` to the node interface for loading UTXO snapshots.\r\n- Updated the implementation in `interfaces.cpp` to activate the snapshot using the provided file and metadata.\r\n- This change enhances the user's ability to load UTXO snapshots through the GUI.\r\n\r\n### Commit 2: `notifications: Implement snapshot load progress notifications`\r\n\r\n- Added a new signal `SnapshotLoadProgress` for snapshot load progress in the UI interface.\r\n- Updated the notifications interface to include a method for reporting snapshot loading progress.\r\n- Enhanced the `ChainstateManager` to report progress during snapshot loading.\r\n- Implemented the necessary handler in the kernel notifications to relay progress updates.\r\n- This change improves user feedback during the snapshot loading process.\r\n\r\n### Commit 3: `rpc: refactor loadtxoutset to use snapshot interface`\r\n\r\n- Updated the loadtxoutset RPC to call the new snapshot interface instead of directly working with chainstate internals.\r\n- Added getMetadata and getActivationResult methods to the snapshot interface to provide parity with the legacy RPC.\r\n- Improves modularity by consolidating snapshot handling through the interface layer.\r\n\r\n---\r\n\r\n## Technical Details\r\n\r\nThe implementation includes:\r\n\r\n- **UI Interface Enhancement**\r\n  Added `SnapshotLoadProgress` signal to `CClientUIInterface` with corresponding signal declaration and implementation.\r\n\r\n- **Node Interface**\r\n  Added `loadSnapshot` virtual method to the node interface with implementation in `interfaces.cpp`.\r\n\r\n- **Progress Notifications**\r\n  Implemented `snapshotLoadProgress` method in `KernelNotifications` class to relay progress updates to the UI.\r\n\r\n- **Base Interface**\r\n  Added `snapshotLoadProgress` virtual method to the kernel notifications interface.\r\n\r\n---\r\n\r\n## Benefits\r\n\r\n- **User Experience**\r\n  Provides real-time feedback during UTXO snapshot loading operations.\r\n\r\n- **GUI Integration**\r\n  Enables loading UTXO snapshots directly through the Bitcoin Core GUI.\r\n\r\n- **Progress Tracking**\r\n  Users can monitor the progress of snapshot loading operations.\r\n\r\n- **Consistent Interface**\r\n  Follows the existing pattern for progress notifications in the codebase.\r\n\r\n## Testing\r\n\r\n- **Daemon** build and launch `bitcoind` then with `bitcoin-cli` load a snapshot using:\r\n```bash\r\n./bitcoin-cli -rpcclienttimeout=0 -signet loadtxoutset /path/to/utxo-snapsshot.dat\r\n```\r\n- **QT Widgets**: build and run [this](https://github.com/bitcoin-core/gui/pull/870) draft PR in legacy gui repo \r\n- **QML** version: for a modern look build and run [this](https://github.com/bitcoin-core/gui-qml/pull/488) PR in the newly updated gui-qml repo \r\n",
+      "state": "open",
+      "user": "D33r-Gee",
+      "created_at": "2025-08-01T15:31:46Z",
+      "updated_at": "2026-02-24T03:58:12Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33117",
+      "labels": [
+        "interfaces"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 3107,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2803909911,
+      "number": 33324,
+      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
+      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-09-05T23:51:29Z",
+      "updated_at": "2026-02-24T03:23:06Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3232,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2829858173,
+      "number": 33392,
+      "title": "wallet, rpc: add UTXO set check and incremental rescan to importdescriptors",
+      "body": "Fixes [#28898](https://github.com/bitcoin/bitcoin/issues/28898)\r\n\r\nWhen importing descriptors, users may accidentally provide an incorrect birthdate (timestamp). This can cause the wallet to miss relevant historical transactions, leading to incorrect or incomplete balances. Currently, the wallet only relies on rescans starting from the provided timestamp.\r\n\r\nThis PR extends the importdescriptors RPC with a new optional argument:\r\n\r\n`verify_balance` a `bool` which is `false` by defualt.\r\n\r\nIf enabled, the wallet will compare its calculated trusted balance against UTXO set balance (by generating the `scriptpukeys` of the wallet and comparing it with the chains UTXO set `scriptpubkeys` to get the accurate balance belonging to the wallet and comparing it with the wallet trusted balance).\r\n\r\nIf the balances match, import continues as normal.\r\nIf a discrepancy is detected, the wallet will attempt incremental rescans in chunks of recent blocks until the missing history is found. If the wallet is pruned, incremental rescans will not go earlier than the prune boundary.\r\n\r\nAdditional information is returned in the RPC response under an `\"info\" ` object when `verify_balance` is used, they are:\r\n\r\n`utxo_check`: whether the UTXO set matched the wallet balance\r\n`scanned_chunks:` number of incremental rescan chunks attempted\r\n`scanned_blocks`: approximate number of blocks scanned during incremental rescans\r\n\r\nThis helps detect and fix balance mismatches caused by wrong descriptor timestamps.\r\n\r\n**Implementation:**\r\n- Add `FindCoinsByScript()` for scanning UTXO set for coins belonging to output_scripts and expose it to node interface through `findCoinsByScript()`.\r\n- Add `GetWalletUTXOSetBalance()` which calculates the wallet’s total spendable balance by summing all UTXOs in the blockchain’s UTXO set that belong to the wallet’s scriptPubKeys, ignoring immature coinbase outputs.\r\n- Add `std::optional<int64_t> endTime` to `RescanFromTime()` which lets the rescan stop at a specific block height, limiting the scan to a defined time range instead of scanning from startTime all the way to the blockchain tip.\r\n- Add `IncrementalRescan()` this function scans the wallet’s transaction history in chunks of blocks from tip backwards to try and reconcile the wallet’s trusted balance with the actual UTXO-set balance, stopping early if a chunk produces a balance that matches the target. It is used only when there’s a discrepancy between the wallet’s trusted balance and the UTXO-set balance, performing an incremental rescan to identify when the balances align and recording how many chunks were scanned. \r\n\r\n**`importescriptors` with incremental example**\r\n```\r\nbitcoin-cli importdescriptors '[{\r\n    \"desc\": \"wpkh([f5b1c3d7/84h/0h/0h]xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKpJrZT4S9vPz4ZZ6f4a1V4f3ChFy8hRk4M6mh4J4LR6WcJbNf2oyMFGmQH6Eo1QvLKMjR18q3fTq5/0/*)#abcd1234\",\r\n    \"timestamp\": \"now\"\r\n}]' true\r\n```\r\n\r\nExample Output\r\n```\r\n[\r\n  {\r\n    \"info\": {\r\n      \"utxo_check\": true,\r\n      \"scanned_blocks\": 2000,\r\n      \"scanned_chunks\": 2\r\n    }\r\n  }\r\n]\r\n```\r\n\r\n**Benchmarks**\r\nHere's a benchmark result for normal rescan and incremental rescan as suggested by **fjahr**. \r\n\r\n| ns/op        | op/s       | err% | total | benchmark                   |\r\n|-------------:|-----------:|-----:|------:|:----------------------------|\r\n| 13,481.56    | 74,175.41  | 0.9% | 0.01  | BenchmarkIncrementalRescans |\r\n| 13,450.49    | 74,346.72  | 1.4% | 0.01  | BenchmarkIncrementalRescans |\r\n| 13,468.04    | 74,249.85  | 1.5% | 0.01  | BenchmarkIncrementalRescans |\r\n| 2,274,875.00 | 439.58     | 1.7% | 0.03  | BenchmarkRescanFull         |\r\n| 2,301,375.00 | 434.52     | 1.4% | 0.03  | BenchmarkRescanFull         |\r\n| 2,306,334.00 | 433.59     | 3.0% | 0.03  | BenchmarkRescanFull         |\r\n\r\n\r\nHere's the [code](https://github.com/bitcoin/bitcoin/commit/15982b5cdef97d89c5ac68fe4b075abad1f65228)  for the benchmark. Not 100 percent sure if I wrote it correctly. It's my first time writting benchmark, took inspiration from how [src/bench/wallet_balance.cpp](https://github.com/bitcoin/bitcoin/blob/master/src/bench/wallet_balance.cpp) was written.\r\n\r\n\r\nA big thanks to **fjahr** for suggesting this approach [comment](https://github.com/bitcoin/bitcoin/pull/33392#issuecomment-3300319224)",
+      "state": "open",
+      "user": "musaHaruna",
+      "created_at": "2025-09-15T16:17:12Z",
+      "updated_at": "2026-02-24T03:06:12Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33392",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 4366,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2837615883,
+      "number": 33421,
+      "title": "node: add  `BlockTemplateCache`",
+      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify an optional template age limit in `MillisecondsDouble`:\r\n\r\n- If template age limit is `nullopt`, we create a new template and return it without adding it to the cache.\r\n- If a matching template (block template with identical block creation options) exists in the cache and hasn't exceeded the age limit, the cached version is returned.\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned. When evicting stale templates, we assume no duplicates exist since templates are evicted as soon as their age limit is reached or exceeded.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted after each insertion.\r\n\r\n\r\nCache lookup requires an exact match on ALL `BlockAssembler::Options` fields. While some fields (e.g., `test_block_validity`, `print_modified_fee`, `coinbase_output_script`) could be ignored for cache reuse, they mainly differ in tests and benchmarks. We keep the logic simple and accept cache misses in those cases.\r\n\r\n\r\nThe cache enforces at most one template per set of options. When searching for a match in `getCachedTemplate()`, if a template with matching options is found but has exceeded the age limit, it's immediately evicted before returning `nullptr`. This ensures no duplicate options exist in the cache. A `SanityCheck()` method verifies this invariant in tests by checking all cached entries for duplicates.\r\n\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\n`GetBlockTemplate()` uses double-checked locking: it first checks the cache with only `m_mutex` held, then if there's a miss, acquires both `cs_main` and `m_mutex` to create the template. Before creating, it checks again since another thread might have added a template while locks were released. \r\n\r\nThis PR removes an unused `node/context.h` import from miner to prevent a circular dependency when exposing the block template cache to the node context.",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-09-17T18:47:09Z",
+      "updated_at": "2026-02-24T02:55:42Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2508,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3272437576,
+      "number": 34561,
+      "title": "wallet: rpc: manpage: fix example missing `fee_rate` argument",
+      "body": "The function signature for the `send` RPC is:\r\n```\r\nsend [{\"address\":amount,...},{\"data\":\"hex\"},...] ( conf_target \"estimate_mode\" fee_rate options version )\r\n```\r\n\r\nThe last example in the manpage is missing the `fee_rate` arg, but is trying to specify the `options` arg, by index. The parser confuses the intended `options` arg as the missing `fee_rate` arg.\r\n\r\nSee:\r\n```\r\n$ bitcoin-cli -rpcuser=doggman -rpcpassword=donkey -rpcport=18554 -regtest send '{\"bcrt1qusm48zmlzwr32csxdw4ar7atw260h22c9ten9l\": 0.1}' 1 economical '{\"add_to_wallet\": false, \"inputs\": [{\"txid\":\"0b7e1a471dc948b7a6187936b16e6d7d9833629b2f9dd8a392eb89928f63aaad\", \"vout\":0}]}'\r\nerror code: -8\r\nerror message:\r\nCannot specify both conf_target and fee_rate. Please provide either a confirmation target in blocks for automatic fee estimation, or an explicit fee rate.\r\n```\r\nvs\r\n```\r\n$ bitcoin-cli -rpcuser=doggman -rpcpassword=donkey -rpcport=18554 -regtest send '{\"bcrt1qusm48zmlzwr32csxdw4ar7atw260h22c9ten9l\": 0.1}' 1 economical null '{\"add_to_wallet\": false, \"inputs\": [{\"txid\":\"0b7e1a471dc948b7a6187936b16e6d7d9833629b2f9dd8a392eb89928f63aaad\", \"vout\":0}]}'\r\n{\r\n  \"psbt\": \"cHNidP8BAHECAAAAAa2qY4+SieuSo9idL5tiM5h9bW6xNnkYprdIyR1HGn4LAAAAAAD9////AkR2DwQAAAAAFgAUpLDwJu+wFRHLQAgKAb0psk7UVd2AlpgAAAAAABYAFOQ3U4t/E4cVYgZrq9H7q3K0+6lYAAAAAAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wQC4wMA/////wLIF6gEAAAAABYAFLMY1zihXrefAA0DA5nld4MCPjkrAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEfyBeoBAAAAAAWABSzGNc4oV63nwANAwOZ5XeDAj45KwEIawJHMEQCIElTV4pbUrsPR9qHWcioowVv3QVWHizxwevfD0u/I8YyAiBCY3OzF81PSLM00h4ueQkehYuxDFZu7Jk51iejphKnnwEhA0VKdYVSyBpWoxBwTDOupB58Fi3mEBs+u+OOqEYVd2sZACICA98YLWyH7dBCfXVxe7woiLSTgV1mJN8Zc8KgZ77pVSg+GNBMeT5UAACAAQAAgAAAAIABAAAAbAAAAAAA\",\r\n  \"txid\": \"625b71b314a6ac4f738634e29dc007cd5edc0427c1ae96ab706d06a62910cea2\",\r\n  \"hex\": \"02000000000101adaa638f9289eb92a3d89d2f9b6233987d6d6eb1367918a6b748c91d471a7e0b0000000000fdffffff0244760f0400000000160014a4b0f026efb01511cb40080a01bd29b24ed455dd8096980000000000160014e437538b7f13871562066babd1fbab72b4fba9580247304402204953578a5b52bb0f47da8759c8a8a3056fdd05561e2cf1c1ebdf0f4bbf23c6320220426373b317cd4f48b334d21e2e79091e858bb10c566eec9939d627a3a612a79f012103454a758552c81a56a310704c33aea41e7c162de6101b3ebbe38ea84615776b1900000000\",\r\n  \"complete\": true\r\n}\r\n```\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "open",
+      "user": "SomberNight",
+      "created_at": "2026-02-11T16:24:24Z",
+      "updated_at": "2026-02-24T02:36:21Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34561",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 4463,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2901201712,
+      "number": 33585,
+      "title": "cmake: Use builtin support for .manifest files",
+      "body": "Remove some redundant logic from the CMake code:\r\n\r\n* The `WIN32_EXECUTABLE` target property only has an effect when building for `WIN32`. Checking `WIN32` is redundant.\r\n* CMake has builtin support for `.rc` and `.manifest` files. Both may be added to sources unconditionally. They only have an effect when building for `WIN32`.\r\n",
+      "state": "open",
+      "user": "purpleKarrot",
+      "created_at": "2025-10-09T15:44:53Z",
+      "updated_at": "2026-02-24T02:35:54Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33585",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 378,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2902093523,
+      "number": 33593,
+      "title": "guix: Use UCRT runtime for Windows release binaries",
+      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-10-09T21:46:43Z",
+      "updated_at": "2026-02-24T02:28:57Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
+      "labels": [
+        "Windows",
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 213,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3274425083,
+      "number": 34568,
+      "title": "mining: Break compatibility with existing IPC mining clients",
+      "body": "This PR increments the field number of the `Init.makeMining` method and makes the old `makeMining` method return an error, so IPC mining clients not using the latest schema file will get an error and not be able to access the Mining interface.\r\n\r\nNormally, there shouldn't be a need to break compatibility this way, but the mining interface has evolved a lot since it was first introduced, with old clients using the original methods less stable and performant than newer clients. So now is a good time to introduce a cutoff, drop deprecated methods, and stop supporting old clients which can't function as well.\r\n\r\nBumping the field number is also an opportunity to make other improvements that would be awkward to implement compatibly:\r\n- Making Cap'n Proto default parameter and field values match default values of corresponding C++ methods and structs. \r\n- Adding missing Context parameters to Mining.createNewBlock and checkBlock methods so these methods will be executed on separate execution threads and not block the Cap'n Proto event loop thread.\r\n\r\nMore details about these changes are in the commit messages.",
+      "state": "closed",
+      "user": "ryanofsky",
+      "created_at": "2026-02-12T04:10:23Z",
+      "updated_at": "2026-02-24T02:24:00Z",
+      "merged_at": "2026-02-20T10:06:32Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34568",
+      "labels": [
+        "Mining"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1181,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3018324242,
       "number": 33889,
@@ -29,31 +910,6 @@
         "text_length": 1692,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2138649533,
-      "number": 31132,
-      "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
-      "body": "_Parts of this PR are isolated in independent smaller PRs to ease review:_\r\n\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34164_\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34165_\r\n* [ ] _https://github.com/bitcoin/bitcoin/pull/34576_\r\n\r\n---\r\n\r\nThis PR parallelizes fetching all input prevouts of a block during block connection, achieving over 3x faster IBD performance in some scenarios[^1][^2][^3][^4][^5].\r\n\r\n### Problem\r\n\r\nCurrently, when fetching inputs in `ConnectBlock`, each input is fetched from the cache sequentially. A cache miss requires a round trip to the disk database to fetch the outpoint and insert it into the cache. Since the database is read-only during `ConnectBlock`, we can fetch all inputs of a block in parallel on multiple threads while connecting.\r\n\r\n### Solution\r\n\r\nWe add a ThreadPool to CoinsViewOverlay to fetch block inputs in parallel. The block is passed to the `CoinsViewOverlay` view before entering `ConnectBlock`, which kicks off the worker threads to begin fetching the inputs. The cache returns fetched coins as they become available via the overridden `FetchCoinFromBase` method. If not available yet, the main thread also fetches coins as it waits.\r\n\r\n### Implementation Details\r\n\r\nThe `CoinsViewOverlay` implements a lock-free MPSC (Multiple Producer, Single Consumer) queue design:\r\n\r\n- **Work Distribution**: Collects all input prevouts into a queue and uses a barrier to start all worker threads simultaneously\r\n- **Synchronization**: Worker threads use an atomic counter to claim which inputs to fetch, and each input has an atomic flag to signal completion to the main thread\r\n- **Main Thread Processing**: The main thread waits for inputs in order and moves their `Coin` into the `cacheCoins` map as they become available.\r\n- **Work Stealing**: If the main thread catches up to the workers, it assists with fetching to maximize parallelism\r\n- **Completion**: All thread futures are waited on in StopFetching, which is called from any mutating method (Flush/Sync/SetBackend/Reset). The ResetGuard going out of scope ensure this happens before the block is destroyed.\r\n\r\n### Safety and Correctness\r\n\r\n- The `CoinsViewOverlay` works on a block that has not been fully validated, but it does not interfere or modify any of the validation during `ConnectBlock`\r\n- It simply fetches inputs in parallel, which must be fetched before a transaction is validated anyways\r\n- **Invalid blocks**: If an invalid block is mined, the temporary cache is reset without being flushed. This is an improvement over the current behavior, where existing inputs are inserted into the main `CoinsTip()` cache when pulled through for an invalid block\r\n\r\n### Performance\r\n\r\nBenchmarks show over 3x faster IBD performance in a cloud environment with network connected storage[^1], 3x faster IBD for an M4 Mac and up to 46% faster with directly connected storage[^2][^3][^4][^5]. The parallelization of expensive disk lookups provides significant speedup.\r\n\r\n[Flamegraphs show how the execution is changed](https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3617315125).\r\n\r\n### Credits\r\n\r\nInspired by [this comment](https://github.com/bitcoin/bitcoin/pull/18941#issuecomment-638553680).\r\n\r\nResolves https://github.com/bitcoin/bitcoin/issues/34121.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3678847806\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3515011880\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3463894000\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3347436866\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3488760623",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2024-10-22T14:40:28Z",
-      "updated_at": "2026-02-24T00:54:50Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31132",
-      "labels": [
-        "Validation",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3747,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -422,30 +1278,6 @@
       }
     },
     {
-      "id": 3313870475,
-      "number": 34653,
-      "title": "test: improve txospender index tests code",
-      "body": "Fixes #34637.\r\n\r\nWas reviewing #34637 and, while reading the new txospender index\r\ntest code for the first time, found it could use some cleanups. Finding\r\nstuff in there is harder than it should be due to the amount of dup code.\r\n\r\nThe first commit cleans up `rpc_gettxspendingprevout.py` by introducing\r\nhelper functions to avoid repeating the same dicts everywhere, using\r\nfor-loops instead of duplicating the same checks for each node, and\r\nrenaming variables to better reflect what they actually represent.\r\n\r\nThe second commit reorganizes `txospenderindex_initial_sync()`\r\nmoving index initialization after the test setup phase, since the index\r\ndoesn't participate in it anyway. It adds a post-sync check to catch\r\ncases where `Sync()` aborted prematurely.\r\n\r\n\r\nNote:\r\nThis is just a pre-work for deeper index changes I'm cooking.",
-      "state": "open",
-      "user": "furszy",
-      "created_at": "2026-02-22T23:55:06Z",
-      "updated_at": "2026-02-23T23:07:26Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34653",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 879,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3315849712,
       "number": 34656,
       "title": "doc: clarify confusing `git range-diff` add/delete output",
@@ -609,55 +1441,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 465,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3311151062,
-      "number": 34646,
-      "title": "Fix two issues in p2p_private_broadcast.py",
-      "body": "_test: move abortprivatebroadcast test at the end_\r\n\r\nThe piece of `p2p_private_broadcast.py` which tests the correctness of\r\n`abortprivatebroadcast` issues a new `sendrawtransaction` call. That\r\ncall schedules up to 3 new connections: peer=13, peer=14 and possibly\r\npeer=15 before it gets aborted.\r\n\r\nThese up to 3 in-the-process-of-opening private broadcast connections\r\nhave `CNode::m_connected` set early - when the `CNode` object is\r\ncreated. Later in the test the mock time is advanced by 20 minutes and\r\nthose \"old\" connections pick a transaction for rebroadcast but that\r\ntriggers `PRIVATE_BROADCAST_MAX_CONNECTION_LIFETIME` immediately:\r\n\r\n```\r\n2026-02-21T13:28:14.209766Z [privbcast] [net.cpp:4006] [CNode] [net] Added connection peer=20\r\n2026-02-21T13:28:14.309792Z (mocktime: 2026-02-21T13:48:14Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending inv (37 bytes) peer=20\r\n2026-02-21T13:28:14.309801Z (mocktime: 2026-02-21T13:48:14Z) [msghand] [net_processing.cpp:5745] [SendMessages] [privatebroadcast] Disconnecting: did not complete the transaction send within 180 seconds, peer=20\r\n```\r\n\r\nThis prematurely stops the private broadcast connection and results in\r\na failure like:\r\n\r\n```\r\nAssertionError: ... not({} == {'ping': 1, 'tx': 1})\r\n```\r\n\r\n---\r\n\r\n_test: don't always assert NUM_PRIVATE_BROADCAST_PER_TX broadcasts_\r\n\r\nIn `p2p_private_broadcast.py` in the function `check_broadcasts()` we\r\nshould assert that the broadcast was done to `broadcasts_to_expect`\r\npeers, not to `NUM_PRIVATE_BROADCAST_PER_TX`. This is because in the\r\n\"Basic\" test we check the first broadcast manually because it is done to\r\n`nodes[1]` and then check the other two by\r\n`check_broadcasts(..., NUM_PRIVATE_BROADCAST_PER_TX - 1, ...)`.\r\nThe first broadcast might not have fully concluded by the time we call\r\n`check_broadcasts()` to check the remaining 2.\r\n\r\nDemanding always `NUM_PRIVATE_BROADCAST_PER_TX` can lead to:\r\n\r\n```\r\nTraceback (most recent call last):\r\n  File \"/home/vd/gh/bitcoin/bitcoin/test/functional/test_framework/test_framework.py\", line 142, in main\r\n    self.run_test()\r\n    ~~~~~~~~~~~~~^^\r\n  File \"/tmp/build/clang22/test/functional/p2p_private_broadcast.py\", line 347, in run_test\r\n    self.check_broadcasts(\"Basic\", txs[0], NUM_PRIVATE_BROADCAST_PER_TX - 1, NUM_INITIAL_CONNECTIONS + 1)\r\n    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"/tmp/build/clang22/test/functional/p2p_private_broadcast.py\", line 313, in check_broadcasts\r\n    assert_greater_than_or_equal(sum(1 for p in peers if \"received\" in p), NUM_PRIVATE_BROADCAST_PER_TX)\r\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"/home/vd/gh/bitcoin/bitcoin/test/functional/test_framework/util.py\", line 94, in assert_greater_than_or_equal\r\n    raise AssertionError(\"%s < %s\" % (str(thing1), str(thing2)))\r\nAssertionError: 2 < 3\r\n```\r\n",
-      "state": "closed",
-      "user": "vasild",
-      "created_at": "2026-02-21T18:06:43Z",
-      "updated_at": "2026-02-23T21:45:50Z",
-      "merged_at": "2026-02-23T21:45:49Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34646",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 2985,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3210348402,
-      "number": 34410,
-      "title": "test: let connections happen in any order in p2p_private_broadcast.py",
-      "body": "If the following two events happen:\r\n\r\n* (likely) the automatic 10 initial connections are not made to all \r\n  networks\r\n* (unlikely) the network-specific logic kicks in almost immediately.\r\n  It is using exponential distribution with a mean of 5 minutes\r\n  (`rng.rand_exp_duration(EXTRA_NETWORK_PEER_INTERVAL)`).\r\n\r\nSo if both happen, then the 11th connection may not be the expected\r\nprivate broadcast, but a network-specific connection.\r\n\r\nFix this by retrieving the connection type from\r\n`destinations_factory()`. This is more flexible because it allows\r\nconnections to happen in any order and does not break if e.g. the 11th\r\nconnection is not the expected first private broadcast.\r\n\r\nThis also makes the test run faster:\r\nbefore: 19-44 sec \r\nnow: 10-25 sec \r\nbecause for example there is no need to wait for the initial 10\r\nautomatic outbound connections to be made in order to proceed.\r\n\r\nFixes: https://github.com/bitcoin/bitcoin/issues/34387\r\n",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-01-26T12:05:26Z",
-      "updated_at": "2026-02-23T21:39:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34410",
-      "labels": [
-        "Tests",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1022,
         "has_nack": false,
         "has_ack": false
       }
@@ -970,30 +1753,6 @@
       }
     },
     {
-      "id": 3272437576,
-      "number": 34561,
-      "title": "wallet: rpc: manpage: fix example missing `fee_rate` argument",
-      "body": "The function signature for the `send` RPC is:\r\n```\r\nsend [{\"address\":amount,...},{\"data\":\"hex\"},...] ( conf_target \"estimate_mode\" fee_rate options version )\r\n```\r\n\r\nThe last example in the manpage is missing the `fee_rate` arg, but is trying to specify the `options` arg, by index. The parser confuses the intended `options` arg as the missing `fee_rate` arg.\r\n\r\nSee:\r\n```\r\n$ bitcoin-cli -rpcuser=doggman -rpcpassword=donkey -rpcport=18554 -regtest send '{\"bcrt1qusm48zmlzwr32csxdw4ar7atw260h22c9ten9l\": 0.1}' 1 economical '{\"add_to_wallet\": false, \"inputs\": [{\"txid\":\"0b7e1a471dc948b7a6187936b16e6d7d9833629b2f9dd8a392eb89928f63aaad\", \"vout\":0}]}'\r\nerror code: -8\r\nerror message:\r\nCannot specify both conf_target and fee_rate. Please provide either a confirmation target in blocks for automatic fee estimation, or an explicit fee rate.\r\n```\r\nvs\r\n```\r\n$ bitcoin-cli -rpcuser=doggman -rpcpassword=donkey -rpcport=18554 -regtest send '{\"bcrt1qusm48zmlzwr32csxdw4ar7atw260h22c9ten9l\": 0.1}' 1 economical null '{\"add_to_wallet\": false, \"inputs\": [{\"txid\":\"0b7e1a471dc948b7a6187936b16e6d7d9833629b2f9dd8a392eb89928f63aaad\", \"vout\":0}]}'\r\n{\r\n  \"psbt\": \"cHNidP8BAHECAAAAAa2qY4+SieuSo9idL5tiM5h9bW6xNnkYprdIyR1HGn4LAAAAAAD9////AkR2DwQAAAAAFgAUpLDwJu+wFRHLQAgKAb0psk7UVd2AlpgAAAAAABYAFOQ3U4t/E4cVYgZrq9H7q3K0+6lYAAAAAAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wQC4wMA/////wLIF6gEAAAAABYAFLMY1zihXrefAA0DA5nld4MCPjkrAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEfyBeoBAAAAAAWABSzGNc4oV63nwANAwOZ5XeDAj45KwEIawJHMEQCIElTV4pbUrsPR9qHWcioowVv3QVWHizxwevfD0u/I8YyAiBCY3OzF81PSLM00h4ueQkehYuxDFZu7Jk51iejphKnnwEhA0VKdYVSyBpWoxBwTDOupB58Fi3mEBs+u+OOqEYVd2sZACICA98YLWyH7dBCfXVxe7woiLSTgV1mJN8Zc8KgZ77pVSg+GNBMeT5UAACAAQAAgAAAAIABAAAAbAAAAAAA\",\r\n  \"txid\": \"625b71b314a6ac4f738634e29dc007cd5edc0427c1ae96ab706d06a62910cea2\",\r\n  \"hex\": \"02000000000101adaa638f9289eb92a3d89d2f9b6233987d6d6eb1367918a6b748c91d471a7e0b0000000000fdffffff0244760f0400000000160014a4b0f026efb01511cb40080a01bd29b24ed455dd8096980000000000160014e437538b7f13871562066babd1fbab72b4fba9580247304402204953578a5b52bb0f47da8759c8a8a3056fdd05561e2cf1c1ebdf0f4bbf23c6320220426373b317cd4f48b334d21e2e79091e858bb10c566eec9939d627a3a612a79f012103454a758552c81a56a310704c33aea41e7c162de6101b3ebbe38ea84615776b1900000000\",\r\n  \"complete\": true\r\n}\r\n```\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
-      "state": "open",
-      "user": "SomberNight",
-      "created_at": "2026-02-11T16:24:24Z",
-      "updated_at": "2026-02-23T18:20:23Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34561",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 4463,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3277360664,
       "number": 34576,
       "title": "threadpool: add ranged Submit overload",
@@ -1205,30 +1964,6 @@
       }
     },
     {
-      "id": 3110851566,
-      "number": 34093,
-      "title": "netif: fix compilation warning in QueryDefaultGatewayImpl()",
-      "body": "```\r\nsrc/common/netif.cpp:137:51: error: comparison of integers of different signs: 'int64_t' (aka 'long') and 'unsigned long' [-Werror,-Wsign-compare]\r\n  137 |         for (nlmsghdr* hdr = (nlmsghdr*)response; NLMSG_OK(hdr, recv_result); hdr = NLMSG_NEXT(hdr, recv_result)) {\r\n      |                                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~\r\n/usr/include/netlink/netlink.h:220:31: note: expanded from macro 'NLMSG_OK'\r\n  220 | #define NLMSG_OK(_hdr, _len)            NL_ITEM_OK(_hdr, _len, NLMSG_HDRLEN, _NLMSG_LEN)\r\n      |                                         ^                ~~~~  ~~~~~~~~~~~~\r\n/usr/include/netlink/netlink.h:203:10: note: expanded from macro 'NL_ITEM_OK'\r\n  203 |         ((_len) >= _hlen && _LEN_M(_ptr) >= _hlen && _LEN_M(_ptr) <= (_len))\r\n      |           ~~~~  ^  ~~~~~\r\n1 error generated.\r\n```\r\n\r\nHappens on FreeBSD 15.0, with the default compiler (Clang 19).\r\n\r\nOn FreeBSD 14, `/usr/include/netlink/netlink.h` contains:\r\n```\r\n #define NLMSG_HDRLEN                    ((int)sizeof(struct nlmsghdr))\r\n```\r\n\r\nOn FreeBSD 15, `/usr/include/netlink/netlink.h` contains:\r\n```\r\n #define NLMSG_HDRLEN                    (sizeof(struct nlmsghdr))\r\n```\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2025-12-17T17:45:19Z",
-      "updated_at": "2026-02-23T14:57:28Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34093",
-      "labels": [
-        "Needs backport (30.x)"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 3321,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3095820892,
       "number": 34054,
       "title": "net processing: Add ibd check before processing block for txdownloadman",
@@ -1274,28 +2009,6 @@
         "text_length": 716,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2837615883,
-      "number": 33421,
-      "title": "node: add  `BlockTemplateCache`",
-      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify an optional template age limit in `MillisecondsDouble`:\r\n\r\n- If template age limit is `nullopt`, we create a new template and return it without adding it to the cache.\r\n- If a matching template (block template with identical block creation options) exists in the cache and hasn't exceeded the age limit, the cached version is returned.\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned. When evicting stale templates, we assume no duplicates exist since templates are evicted as soon as their age limit is reached or exceeded.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted after each insertion.\r\n\r\n\r\nCache lookup requires an exact match on ALL `BlockAssembler::Options` fields. While some fields (e.g., `test_block_validity`, `print_modified_fee`, `coinbase_output_script`) could be ignored for cache reuse, they mainly differ in tests and benchmarks. We keep the logic simple and accept cache misses in those cases.\r\n\r\n\r\nThe cache enforces at most one template per set of options. When searching for a match in `getCachedTemplate()`, if a template with matching options is found but has exceeded the age limit, it's immediately evicted before returning `nullptr`. This ensures no duplicate options exist in the cache. A `SanityCheck()` method verifies this invariant in tests by checking all cached entries for duplicates.\r\n\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\n`GetBlockTemplate()` uses double-checked locking: it first checks the cache with only `m_mutex` held, then if there's a miss, acquires both `cs_main` and `m_mutex` to create the template. Before creating, it checks again since another thread might have added a template while locks were released. \r\n\r\nThis PR removes an unused `node/context.h` import from miner to prevent a circular dependency when exposing the block template cache to the node context.",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-09-17T18:47:09Z",
-      "updated_at": "2026-02-23T13:45:11Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2508,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -1822,31 +2535,6 @@
       }
     },
     {
-      "id": 578665495,
-      "number": 21283,
-      "title": "Implement BIP 370 PSBTv2",
-      "body": "BIP 370 PSBTv2 introduces several new fields and different invariants for PSBT. This PR implements those new fields and restructures the PSBT implementation to match PSBTv2 but still remain compatible with PSBTv0.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2021-02-23T18:29:20Z",
-      "updated_at": "2026-02-22T12:34:22Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/21283",
-      "labels": [
-        "Wallet",
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 238,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 877751403,
       "number": 24539,
       "title": "Add a \"tx output spender\" index",
@@ -1920,74 +2608,6 @@
       }
     },
     {
-      "id": 1004149182,
-      "number": 25665,
-      "title": "refactor: Add util::Result failure types and ability to merge result values",
-      "body": "Add `util::Result` support for returning more error information and make use of it in [LoadChainstate method](https://github.com/bitcoin/bitcoin/pull/25665/commits/0263614685582fed2290494f5233dbe038fc350c) as an initial application. Followup PRs [#25722](https://github.com/bitcoin/bitcoin/pull/25722) and [#29700](https://github.com/bitcoin/bitcoin/pull/29700) use it more broadly to return errors and warnings from wallet and kernel functions as well.\r\n\r\nThis change adds two major features to the result class:\r\n\r\n- For better error handling, adds the ability to return a value on failure, not just a value on success. This is a key missing feature that makes the result class not useful for functions like `LoadChainstate()` which produce different errors that need to be handled differently [^1].\r\n\r\n[^1]: Ability to return error values was actually present in the original implementation of [#25218](https://github.com/bitcoin/bitcoin/pull/25218), but unfortunately removed in later iterations. See [design notes](https://github.com/bitcoin-core/bitcoin-devwiki/wiki/util::Result-design-notes).\r\n\r\n- For better error reporting, adds the ability to return warning messages and multiple errors, not just a single error string. This provides a way for functions to report errors and warnings in a standard way, and simplifies interfaces:\r\n\r\n    ```diff\r\n    -virtual std::unique_ptr<Wallet> loadWallet(const std::string& name, bilingual_str& error, std::vector<bilingual_str>& warnings) = 0;\r\n    +virtual util::Result<std::unique_ptr<Wallet>> loadWallet(const std::string& name) = 0;\r\n    ```\r\n\r\n    ```diff\r\n    -std::unique_ptr<WalletDatabase> MakeDatabase(const fs::path& path, const DatabaseOptions& options, DatabaseStatus& status, bilingual_str& error);\r\n    +util::Result<std::unique_ptr<WalletDatabase>, DatabaseError> MakeDatabase(const fs::path& path, const DatabaseOptions& options);\r\n   ```\r\n\r\nThis change also makes some more minor improvements:\r\n\r\n- Smaller type size. `util::Result<int>` is 16 bytes, and `util::Result<void>` is 8 bytes. Previously both were 72 bytes.\r\n\r\n- Broader type compatibility. Supports noncopyable and nonmovable success and error types.\r\n\r\n### Comparison with `std::expected`\r\n\r\nCurrently, the `util::Result` class is useful for error reporting—returning translated, user-facing error strings—but not as useful for error handling, where callers need structured failure information to decide how to proceed. By contrast, `std::expected` / `util::Expected` (#34005, #34006) is good for error handling but less helpful for reporting. This PR closes the gap between the two classes.\r\n\r\nWith this PR, `std::expected` remains a good choice for lower-level functions or simple functions that fail in only a few well-defined ways. Meanwhile,\r\n\r\n- `Result` becomes a better choice for operations that can fail in many different ways—loading a wallet, connecting a block, etc.—where callers may want complete error traces, not just low-level errors without context or high-level errors without detail. (Followup [#25722](https://github.com/bitcoin/bitcoin/pull/25722) applies this to wallet-loading functions.) \r\n- `Result` can also be more useful than `expected` when merging status information from multiple calls. (Followup [#29700](https://github.com/bitcoin/bitcoin/pull/29700) uses this to reliably propagate flush and fatal-error status from validation code that can internally trigger flushes or shutdowns.)\r\n- `Result` may also be a better choice than `std::expected` when returning pointer values. (Followup [#26022](https://github.com/bitcoin/bitcoin/pull/26022) adds a `ResultPtr` specialization that avoids double dereferencing.) \r\n- `Result` can be more efficient than `std::expected` when failures are rare but failure objects are large, since failure values are heap-allocated.\r\n\r\nThis PR effectively makes `Result` a superset of `expected`, making the representations compatible and allowing them to be used together.",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2022-07-21T12:46:09Z",
-      "updated_at": "2026-02-22T12:07:37Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/25665",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 4045,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1047758233,
-      "number": 26022,
-      "title": "Add util::ResultPtr class",
-      "body": "<!-- begin based-on -->\n**This is based on #25665.** The non-base commits are:\n\n- [`5142f017eaa` Add util::ResultPtr class](https://github.com/bitcoin/bitcoin/pull/26022/commits/5142f017eaa3b3f6d0109fc9f836e6243349d541)\n- [`8ef747c80fc` Use ResultPtr<unique_ptr> instead of Result<unique_ptr>](https://github.com/bitcoin/bitcoin/pull/26022/commits/8ef747c80fc3e39ecb2bb5856a489cbfc5737f48)<!-- end -->\n\n---\n\nThe `util::ResultPtr` class is a wrapper for `util::Result` providing syntax sugar to make it less awkward to use with returned pointers. Instead of needing to be deferenced twice with `**result` or `(*result)->member`, it only needs to be dereferenced once with `*result` or `result->member`. Also when it is used in a boolean context, instead of evaluating to true when there is no error and the pointer is null, it evaluates to false so it is straightforward to determine whether the result points to something.\n\nThis PR is only partial a solution to #26004 because while it makes it easier to check for null pointer values, it does not make it impossible to return a null pointer value inside a successful result. It would be possible to enforce that successful results always contain non-null pointers by using a `not_null` type (https://github.com/bitcoin/bitcoin/issues/24423) in combination with `ResultPtr`, though.",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2022-09-06T15:57:14Z",
-      "updated_at": "2026-02-22T11:54:51Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/26022",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1358,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1071188902,
-      "number": 26201,
-      "title": "Remove Taproot activation height",
-      "body": "Drop `DEPLOYMENT_TAPROOT` from `consensus.vDeployments`.\r\n\r\nNow that the commit (https://github.com/bitcoin/bitcoin/commit/7c08d81e119570792648fe95bbacddbb1d5f9ae2) which changes taproot to be enforced for all blocks is included in v24.0, it seems a good time to remove no longer needed non-consensus code.\r\n\r\nClarify what is considered a `BuriedDeployment`.\r\n\r\nWe drop taproot from `getdeploymentinfo` RPC, rather than mark it as `buried`, because this is not a buried deployment in the sense of [BIP 90](https://github.com/bitcoin/bips/blob/master/bip-0090.mediawiki). This is because the activation height has been completely removed from the code, rather than hard coded.\r\n\r\nSee discussion in #24737 and #26162.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2022-09-29T11:16:54Z",
-      "updated_at": "2026-02-22T11:44:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/26201",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 748,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 1185011431,
       "number": 26812,
       "title": "test: add end-to-end tests for CConnman and PeerManager",
@@ -2033,30 +2653,6 @@
         "text_length": 876,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 1640676570,
-      "number": 29060,
-      "title": "Policy: Report debug message why inputs are non standard",
-      "body": "This PR is another attempt at  #13525.\r\n\r\nTransactions that fail `PreChecks` Validation due to non-standard inputs now  returns invalid validation state`TxValidationResult::TX_INPUTS_NOT_STANDARD` along with a debug error message.\r\n\r\nPreviously, the debug error message for non-standard inputs do not specify why the inputs were considered non-standard. \r\nInstead, the same error string, `bad-txns-nonstandard-inputs`, used for all types of non-standard input scriptSigs.\r\n\r\nThis PR updates the `AreInputsStandard`  to include the reason why inputs are non-standard in the debug message.\r\nThis improves the `Precheck` debug message to be more descriptive.\r\n\r\nFurthermore, I have addressed all remaining comments from #13525 in this PR.\r\n",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2023-12-12T13:16:05Z",
-      "updated_at": "2026-02-22T10:00:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/29060",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 794,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -2106,30 +2702,6 @@
       }
     },
     {
-      "id": 1940584116,
-      "number": 30343,
-      "title": "wallet, logging: Replace WalletLogPrintf() with LogInfo()",
-      "body": "Make new logging macros `LogDebug()`, `LogTrace()`, `LogInfo()`, `LogWarning()`, and `LogError()` compatible with wallet code and drop custom WalletLogPrintf() function. The new logging macros introduced in #28318 weren't previously useful in wallet code because wallet code prefixes most log messages with the wallet names to be be able to distinguish log output from multiple wallets. Fix this by introducing a new `WalletLogSource` class inheriting from `BCLog::Source` which can include the wallet name in log messages.\n\n---\n\n<!-- begin based-on -->\n**This is based on #29256.** The non-base commits are:\n\n- [`35ab88ce0e7` wallet, logging: Replace WalletLogPrintf() with LogInfo()](https://github.com/bitcoin/bitcoin/pull/30343/commits/35ab88ce0e7116c0a2bee2569ea1bc9eb5afffea)\n- [`f5039574576` wallet, logging: Switch LogInfo to LogWarning/LogError](https://github.com/bitcoin/bitcoin/pull/30343/commits/f5039574576f3128fe904147a53e3fcaab6c0d85)\n- [`aac55f94938` wallet, logging: Switch LogInfo to LogError in AddWalletDescriptor](https://github.com/bitcoin/bitcoin/pull/30343/commits/aac55f94938aa7ac727b840a9766adb848e998ab)<!-- end -->",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2024-06-26T17:57:15Z",
-      "updated_at": "2026-02-22T08:19:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/30343",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1201,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2203477250,
       "number": 31382,
       "title": "kernel: Flush in ChainstateManager destructor",
@@ -2152,30 +2724,6 @@
         "text_length": 549,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2250366940,
-      "number": 31560,
-      "title": "rpc: allow writing UTXO set to a named pipe, introduce dump_to_sqlite.sh script",
-      "body": "This PR slightly modifies the `dumptxoutset` RPC to allow writing the UTXO set dump into a [named pipe](https://askubuntu.com/a/449192), so that the output data can be consumed by another process, see #31373. Taking use of this with the utxo-to-sqlite.py tool (introduced in #27432), creating an UTXO set in SQLite3 format is possible on the fly and becomes a one-liner with a newly introduced script `dump_to_sqlite.sh`. E.g. for signet:\r\n```\r\n$ ./contrib/utxo-tools/dump_to_sqlite.sh \"./build/src/bitcoin-cli -signet\" ~/utxos.sqlite3\r\nUTXO Snapshot for Signet at block hash 000000ddc3b251483cf1ebb23e2750ba..., contains 5705634 coins\r\n1048576 coins converted [18.38%], 4.474s passed since start\r\n2097152 coins converted [36.76%], 8.793s passed since start\r\n3145728 coins converted [55.13%], 13.146s passed since start\r\n4194304 coins converted [73.51%], 17.478s passed since start\r\n5242880 coins converted [91.89%], 21.832s passed since start\r\n{\r\n  \"coins_written\": 5705634,\r\n  \"base_hash\": \"000000ddc3b251483cf1ebb23e2750ba2490701d0c547241b247a9beb85498d0\",\r\n  \"base_height\": 227678,\r\n  \"path\": \"/tmp/tmp.MFHEVqetv0/utxos.fifo\",\r\n  \"txoutset_hash\": \"f29e524c999487cbd0cfca5201dce67c2c5e5c5eb115c63ad48c2239f23eea4c\",\r\n  \"nchaintx\": 8272649\r\n}\r\nTOTAL: 5705634 coins written to /home/thestack/utxos.sqlite3, snapshot height is 227678.\r\n```\r\nNote that the `dumptxoutset` RPC calculates an UTXO set hash as a first step before any data is emitted, so especially on mainnet it takes quite a while until the conversion starts and something is happening visibly.\r\n\r\nThe new script is quite minimal and PoC-y at this point, there are some potential improvement ideas:\r\n- better error handling (e.g. detect if bitcoin-cli exists, clean up tmpdir if bitcoin-cli execution fails etc.)\r\n- allow to pass through the rollback option (now we always dump at the current height, i.e. \"latest\" parameter)",
-      "state": "open",
-      "user": "theStack",
-      "created_at": "2024-12-24T02:42:27Z",
-      "updated_at": "2026-02-22T06:02:23Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31560",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1968,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -2274,78 +2822,6 @@
       }
     },
     {
-      "id": 2471245988,
-      "number": 32317,
-      "title": "kernel: Separate UTXO set access from validation functions",
-      "body": "The current code makes it hard to call functions for checking the consensus-correctness of a block without having a full UTXO set at hand. This makes implementing features such as Utreexo and non-assumevalid swiftsync, where maintaining a full UTXO set defeats their purpose, through the kernel API difficult. Checks like the coinbase subsidy, or block sigops are only available through `ConnectBlock`, which requires a complete coins cache.\r\n\r\nSolve this by moving accessing coins and the responsibility of spending them out of `ConnectBlock` and into a new separate function called `SpendBlock`. Pass a block's spent coins through the existing `CBlockUndo` data structure to `ConnectBlock`. \r\n\r\nWhile the change is largely a refactor, some smaller behaviour changes were unavoidable. These should be highlighted in the commit messages. The last commit contains the most important part of the coins logic move, the commits before attempt to prepare it piecemeal.\r\n\r\nThis pull request was benchmarked on [benchcoin](https://github.com/bitcoin-dev-tools/benchcoin/pull/162), which showed no performance regression. While discussing this pull request it was noted that pre-fetching and eliminating the need for some additional map lookups might improve performance a bit, but this does not make a measurable difference in the grand scheme of things and was not the motivation for this pull request.\r\n\r\nIn future changes, ConnectBlock could be made even more self contained, accessing the coins from the internal map could be further optimized by consolidating existence checking and spending, and the function eventually exposed in an external kernel API (as done [here](https://github.com/sedited/bitcoin/commit/09e05493010119fc60d310d3e7ffc388de441f9a#diff-f638e65d9278276b2a6ac42ffbbd26d079c3dba752feed5038a25a1ee565d320R947))",
-      "state": "open",
-      "user": "sedited",
-      "created_at": "2025-04-21T13:15:46Z",
-      "updated_at": "2026-02-22T02:48:40Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32317",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1886,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2501800868,
-      "number": 32427,
-      "title": "(RFC) kernel: Replace leveldb-based BlockTreeDB with flat-file based store",
-      "body": "Opening this PR mostly to get concept/approach feedback.\r\n\r\nThis is motivated by the kernel library, where the internal usage of leveldb is a limiting factor to its future use cases. Specifically it is not possible to share leveldb databases between two processes. A notable use-case for the kernel library is accessing and analyzing existing block data. Currently this can only be done by first shutting down the node writing this data. Moving away from leveldb opens the door towards doing this in parallel. A flat file based approach was chosen, since the requirements for persistence here are fairly simple (no deletion, constant-size entries). The change also offers better performance by making node startup faster, and has a smaller on-disk footprint, though this is negligible in the grand scheme of things.\r\n\r\nThe BlockTreeStore introduces a new data format for storing block indexes and headers on disk. The class is very similar to the existing CBlockTreeDB, which stores the same data in a leveldb database. Unlike CBlockTreeDB, the data stored through the BlockTreeStore is directly serialized and written to flat .dat files. The storage schema introduced\r\nis simple. It relies on the assumption that no entry is ever deleted and that no duplicate entries are written. These assumptions hold for the current users of CBlockTreeDB.\r\n\r\nA write ahead ahead log and boolean flags as file existence checks ensure write atomicity. Every data entry is also given a crc32c checksum to detect data corruption.\r\n\r\nThe change also opens the door towards getting rid of having to reindex the block tree due to corruption (though switching from pruned -> un-pruned still requires extra logic). This would simplify a lot of kernel/validation code, as can be seen in this [commit](https://github.com/TheCharlatan/bitcoin/commit/bfb2709e1d116d4e613601c3f0140f099530159d#diff-28f178018e05634ee3f8ddce3f4e0cec334ae69915cecf92be8299c749d8d470). The implementation here should be fairly robust against corruption (no parallel read/writes, no background compaction).\r\n\r\nAn alternative to this pull request, that could allow the same kernel feature, would be closing and opening the leveldb database only when reading and writing. This might incur a (negligible) performance penalty, but more importantly requires careful consideration of how to handle any contentions when opening, which might have complex side effects due to our current locking mode. It would also be possible to introduce an existing database with the required features for just the block tree, but that would introduce reliance on a new dependency and come with its own tradeoffs. For these reasons I chose this approach.",
-      "state": "open",
-      "user": "sedited",
-      "created_at": "2025-05-06T14:27:59Z",
-      "updated_at": "2026-02-22T01:57:19Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32427",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2759,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 2527184806,
-      "number": 32554,
-      "title": "bench: replace embedded raw block with configurable block generator",
-      "body": "### Problem\r\n\r\nThe [hardcoded benchmark block 413567](https://mempool.space/block/413567) has several issues:\r\n- embeds 1.1MB of binary data in the repository (we can't remove it from history, but we can, from `HEAD`)\r\n- mined in 2016, predates SegWit v0, Taproot, and modern script types\r\n- benchmarks cannot test different transaction patterns or script mixes\r\n- updating to a newer block (e.g., [#32457](https://github.com/bitcoin/bitcoin/pull/32457)) would still add binary bloat and would remain inflexible\r\n\r\n### Fix\r\n\r\nAdded configurable `bench/block_generator.{h,cpp}` that builds fully valid blocks at runtime providing blocks or raw serialized stream.\r\n\r\n### Reproducer\r\n\r\nYou can run all affected tests and benchmarks with a sanity check:\r\n```bash\r\nrm -rf build && \\\r\ncmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCH=ON && \\\r\ncmake --build build -j$(nproc) && \\\r\nbuild/bin/test_bitcoin -t block_generator_deterministic_seeded_output,block_generator_serialization_roundtrip,block_generator_seed_perturbation,block_generator_multiple_seed_sanity && \\\r\nbuild/bin/bench_bitcoin -sanity-check -filter='DeserializeBlockTest|DeserializeAndCheckBlockTest|LoadExternalBlockFile|WriteBlockBench|ReadBlockBench|ReadRawBlockBench|BlockToJsonVerbosity1|BlockToJsonVerbosity2|BlockToJsonVerbosity3|BlockToJsonVerboseWrite|HexStrBench'\r\n```\r\n---\r\n\r\nThis supersedes #32457 by eliminating the need for any hardcoded block data while enabling flexible benchmark scenarios.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-05-18T21:39:14Z",
-      "updated_at": "2026-02-22T01:23:50Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32554",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 1540,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2540992851,
       "number": 32606,
       "title": "p2p: Drop unsolicited CMPCTBLOCK from non-HB peer",
@@ -2394,28 +2870,6 @@
       }
     },
     {
-      "id": 2637847621,
-      "number": 32861,
-      "title": "Have createwalletdescriptor auto-detect an unused(KEY)",
-      "body": "The `createwalletdescriptor` was introduced in #29130 to let users add a `tr()` descriptor to an existing SegWit wallet. The new `addhdkey` method from #29136 introduces a new potential workflow: start from a blank wallet, generate an HD and then add only the descriptors you need, e.g.:\r\n\r\n```sh\r\nbitcoin rpc createwallet TaprootMaxi blank=true\r\nbitcoin rpc addhdkey\r\nbitcoin rpc createwalletdescriptor bech32m\r\n```\r\n\r\nBefore this PR the last line would fail, requiring the user to call `gethdkeys` and copy-paste the xpub.\r\n\r\nThis PR makes `createwalletdescriptor` a bit smarter so it just finds the `unused(KEY)` generated by `hdkey` and uses that.\r\n\r\nIf multiple `unused(KEY)` descriptors are present the user still has to pick one.\r\n\r\nA potential followup is to make our [multisig tutorial](https://github.com/bitcoin/bitcoin/blob/master/doc/multisig-tutorial.md) slightly safer to use. Rather than creating a full wallet, the instruction could be changed to start with a blank wallet and only generate the default legacy descriptor. This avoids accidental use of single sig `p2sh-segwit` and `bech32` addresses.\r\n\r\n(I might do that in #32784, which introduces some other improvements to the tutorial. The situation is still not great; ideally the `importdescriptors` RPC is enhanced to detect when an `xpub` is a child of an hd key and then treats it as if an xpriv was imported.)\r\n\r\nBuilds on #29136.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-07-03T08:55:40Z",
-      "updated_at": "2026-02-21T22:57:45Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32861",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 1462,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2640910930,
       "number": 32875,
       "title": "index: handle case where pindex_prev equals chain tip in NextSyncBlock()",
@@ -2440,28 +2894,6 @@
       }
     },
     {
-      "id": 2803909911,
-      "number": 33324,
-      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
-      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-09-05T23:51:29Z",
-      "updated_at": "2026-02-21T17:58:27Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3232,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2809021284,
       "number": 33343,
       "title": "help: enrich help text for `-loadblock`",
@@ -2481,30 +2913,6 @@
         "text_length": 139,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2829858173,
-      "number": 33392,
-      "title": "wallet, rpc: add UTXO set check and incremental rescan to importdescriptors",
-      "body": "Fixes [#28898](https://github.com/bitcoin/bitcoin/issues/28898)\r\n\r\nWhen importing descriptors, users may accidentally provide an incorrect birthdate (timestamp). This can cause the wallet to miss relevant historical transactions, leading to incorrect or incomplete balances. Currently, the wallet only relies on rescans starting from the provided timestamp.\r\n\r\nThis PR extends the importdescriptors RPC with a new optional argument:\r\n\r\n`verify_balance` a `bool` which is `false` by defualt.\r\n\r\nIf enabled, the wallet will compare its calculated trusted balance against UTXO set balance (by generating the `scriptpukeys` of the wallet and comparing it with the chains UTXO set `scriptpubkeys` to get the accurate balance belonging to the wallet and comparing it with the wallet trusted balance).\r\n\r\nIf the balances match, import continues as normal.\r\nIf a discrepancy is detected, the wallet will attempt incremental rescans in chunks of recent blocks until the missing history is found. If the wallet is pruned, incremental rescans will not go earlier than the prune boundary.\r\n\r\nAdditional information is returned in the RPC response under an `\"info\" ` object when `verify_balance` is used, they are:\r\n\r\n`utxo_check`: whether the UTXO set matched the wallet balance\r\n`scanned_chunks:` number of incremental rescan chunks attempted\r\n`scanned_blocks`: approximate number of blocks scanned during incremental rescans\r\n\r\nThis helps detect and fix balance mismatches caused by wrong descriptor timestamps.\r\n\r\n**Implementation:**\r\n- Add `FindCoinsByScript()` for scanning UTXO set for coins belonging to output_scripts and expose it to node interface through `findCoinsByScript()`.\r\n- Add `GetWalletUTXOSetBalance()` which calculates the wallet’s total spendable balance by summing all UTXOs in the blockchain’s UTXO set that belong to the wallet’s scriptPubKeys, ignoring immature coinbase outputs.\r\n- Add `std::optional<int64_t> endTime` to `RescanFromTime()` which lets the rescan stop at a specific block height, limiting the scan to a defined time range instead of scanning from startTime all the way to the blockchain tip.\r\n- Add `IncrementalRescan()` this function scans the wallet’s transaction history in chunks of blocks from tip backwards to try and reconcile the wallet’s trusted balance with the actual UTXO-set balance, stopping early if a chunk produces a balance that matches the target. It is used only when there’s a discrepancy between the wallet’s trusted balance and the UTXO-set balance, performing an incremental rescan to identify when the balances align and recording how many chunks were scanned. \r\n\r\n**`importescriptors` with incremental example**\r\n```\r\nbitcoin-cli importdescriptors '[{\r\n    \"desc\": \"wpkh([f5b1c3d7/84h/0h/0h]xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKpJrZT4S9vPz4ZZ6f4a1V4f3ChFy8hRk4M6mh4J4LR6WcJbNf2oyMFGmQH6Eo1QvLKMjR18q3fTq5/0/*)#abcd1234\",\r\n    \"timestamp\": \"now\"\r\n}]' true\r\n```\r\n\r\nExample Output\r\n```\r\n[\r\n  {\r\n    \"info\": {\r\n      \"utxo_check\": true,\r\n      \"scanned_blocks\": 2000,\r\n      \"scanned_chunks\": 2\r\n    }\r\n  }\r\n]\r\n```\r\n\r\n**Benchmarks**\r\nHere's a benchmark result for normal rescan and incremental rescan as suggested by **fjahr**. \r\n\r\n| ns/op        | op/s       | err% | total | benchmark                   |\r\n|-------------:|-----------:|-----:|------:|:----------------------------|\r\n| 13,481.56    | 74,175.41  | 0.9% | 0.01  | BenchmarkIncrementalRescans |\r\n| 13,450.49    | 74,346.72  | 1.4% | 0.01  | BenchmarkIncrementalRescans |\r\n| 13,468.04    | 74,249.85  | 1.5% | 0.01  | BenchmarkIncrementalRescans |\r\n| 2,274,875.00 | 439.58     | 1.7% | 0.03  | BenchmarkRescanFull         |\r\n| 2,301,375.00 | 434.52     | 1.4% | 0.03  | BenchmarkRescanFull         |\r\n| 2,306,334.00 | 433.59     | 3.0% | 0.03  | BenchmarkRescanFull         |\r\n\r\n\r\nHere's the [code](https://github.com/bitcoin/bitcoin/commit/15982b5cdef97d89c5ac68fe4b075abad1f65228)  for the benchmark. Not 100 percent sure if I wrote it correctly. It's my first time writting benchmark, took inspiration from how [src/bench/wallet_balance.cpp](https://github.com/bitcoin/bitcoin/blob/master/src/bench/wallet_balance.cpp) was written.\r\n\r\n\r\nA big thanks to **fjahr** for suggesting this approach [comment](https://github.com/bitcoin/bitcoin/pull/33392#issuecomment-3300319224)",
-      "state": "open",
-      "user": "musaHaruna",
-      "created_at": "2025-09-15T16:17:12Z",
-      "updated_at": "2026-02-21T16:51:11Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33392",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 4366,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -2575,31 +2983,6 @@
         "text_length": 1289,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 2902093523,
-      "number": 33593,
-      "title": "guix: Use UCRT runtime for Windows release binaries",
-      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-10-09T21:46:43Z",
-      "updated_at": "2026-02-21T14:37:45Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
-      "labels": [
-        "Windows",
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 213,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -2816,31 +3199,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1375,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1512762627,
-      "number": 28463,
-      "title": "p2p: Increase inbound capacity for block-relay only connections",
-      "body": "This is joint work with amitiuttarwar.\r\n\r\nSee issue #28462 for a broader discussion on increasing the number of block-relay-only connections independent of this particular implementation proposal.\r\n\r\nWe suggest to increase the number of inbound slots allocated to block-relay-only peers by increasing the default maximum connections from 125 to 200, with 50% of inbound slots accessible for tx-relaying peers.\r\nThis is a prerequisite for being able to increase the default number of outgoing block-relay-only peers later, because the current inbound capacity of the network is not sufficient.\r\nIn order to account for incoming tx-relaying peers separately from incoming block-relay peers, changes to the inbound eviction logic are necessary.\r\n\r\nSee the next post in this thread for a more detailed explanation and motivation of the changes.",
-      "state": "open",
-      "user": "mzumsande",
-      "created_at": "2023-09-12T20:36:39Z",
-      "updated_at": "2026-02-21T10:14:56Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/28463",
-      "labels": [
-        "P2P",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 904,
         "has_nack": false,
         "has_ack": false
       }
@@ -3319,30 +3677,6 @@
       }
     },
     {
-      "id": 3264847922,
-      "number": 34544,
-      "title": "wallet: Disallow wallet names that are paths including `..` and `.` elements",
-      "body": "Wallet names including `..` and `.` are unintuitive and can lead to various issues, see #34497\r\n\r\nThis disallows creating or loading wallets that have any path elements that are `..` or `.`, including any present in an absolute path. This does not disallow relative paths altogether but rather limits them to only being subdirectories of the wallets directory.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2026-02-09T23:28:03Z",
-      "updated_at": "2026-02-20T15:07:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34544",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 437,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3266545660,
       "number": 34547,
       "title": "lint: modernise lint tooling",
@@ -3386,30 +3720,6 @@
         "text_length": 6134,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3274425083,
-      "number": 34568,
-      "title": "mining: Break compatibility with existing IPC mining clients",
-      "body": "This PR increments the field number of the `Init.makeMining` method and makes the old `makeMining` method return an error, so IPC mining clients not using the latest schema file will get an error and not be able to access the Mining interface.\r\n\r\nNormally, there shouldn't be a need to break compatibility this way, but the mining interface has evolved a lot since it was first introduced, with old clients using the original methods less stable and performant than newer clients. So now is a good time to introduce a cutoff, drop deprecated methods, and stop supporting old clients which can't function as well.\r\n\r\nBumping the field number is also an opportunity to make other improvements that would be awkward to implement compatibly:\r\n- Making Cap'n Proto default parameter and field values match default values of corresponding C++ methods and structs. \r\n- Adding missing Context parameters to Mining.createNewBlock and checkBlock methods so these methods will be executed on separate execution threads and not block the Cap'n Proto event loop thread.\r\n\r\nMore details about these changes are in the commit messages.",
-      "state": "closed",
-      "user": "ryanofsky",
-      "created_at": "2026-02-12T04:10:23Z",
-      "updated_at": "2026-02-20T13:42:53Z",
-      "merged_at": "2026-02-20T10:06:32Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34568",
-      "labels": [
-        "Mining"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1181,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -3528,30 +3838,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 373,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1566486194,
-      "number": 28690,
-      "title": "build: Introduce internal kernel library",
-      "body": "This PR introduces a new `libbitcoin_kernel` internal library. It completes the internal library design as laid out in [doc/design/libraries.md](https://github.com/bitcoin/bitcoin/blob/master/doc/design/libraries.md). Since the `util` library contains a bunch of modules that are not required by the kernel library, a new `kernel_util` library is introduced as well that only consists of the modules required by the kernel library. The external `libbitcoinkernel` library now re-uses the compiled objects from the internal libraries. \r\n\r\nThere is a trade-off to this. Since we don't manually export symbols from the kernel library yet, this would make the library unusable if `REDUCE_EXPORTS=ON`. For now this means that the patch here introduces a separate source file list for the external library that gets populated by the source files of its static dependents.",
-      "state": "open",
-      "user": "sedited",
-      "created_at": "2023-10-20T11:01:03Z",
-      "updated_at": "2026-02-20T11:25:22Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/28690",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 906,
         "has_nack": false,
         "has_ack": false
       }
@@ -3746,30 +4032,6 @@
         "text_length": 190,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3299949354,
-      "number": 34617,
-      "title": "fees: wallet: remove block policy fee estimator internals from wallet",
-      "body": "\r\nPart of #34075\r\n\r\n#### Motivation\r\nThe wallet currently knows the block policy estimator's internals from the response returned by `estimateSmartFee`.\r\n`estimateSmartFee` logging, which is supposed to be inside the method, is done in the wallet.\r\nAlso, the source of a wallet transaction fee is saved in the `CBlockPolicyEstimator::FeeReason` enum. This shows that there is tight coupling between the wallet and `CBlockPolicyEstimator`, which results in code that is a bit messy to extend and even read.\r\nIn #34075 the wallet is going to use a response returned via a fee rate estimator manager which does not return all those internals, hence motivating this refactor.\r\nThis PR refactors the interface between the wallet and the fee estimator to improve encapsulation and separate two distinct concerns: the source of a fee rate (where it came from) and the estimator's reason (why the algorithm chose it).\r\n\r\n#### Key Changes\r\n* Separate `FeeSource` from `FeeReason`:\r\n   Introduced a new `FeeSource` enum in `src/util/fees.h` to represent the high-level origin of a fee rate (e.g., `PAYTXFEE`, `FALLBACK`, `FEE_RATE_ESTIMATOR`). The existing `FeeReason` is now strictly scoped to internal `CBlockPolicyEstimator` details.\r\n* Encapsulate `estimateSmartFee` Logging:\r\n   Moved the fee calculation logging logic into `CBlockPolicyEstimator`. This removes the need for the wallet to manage a `FeeCalculation` object just to facilitate logging, especially when the caller passes `nullptr`.\r\n* Refactor `GetMinimumFeeRate`:\r\n   Updated `wallet::GetMinimumFeeRate` to return a `MinimumFeeRateResult` struct. This avoids the use of output parameters and provides a cleaner interface for retrieving the fee rate, source, and target.\r\n* Move `StringForFeeReason`:\r\n   Moved `StringForFeeReason` to `src/policy/fees/block_policy_estimator.cpp` to align with the location of the `FeeReason` enum. The function was also refactored to use a switch statement without a default case to ensure compile-time coverage of all reasons.\r\n* RPC Breaking Change:\r\n   Renamed the `fee_reason` field to `fee_source` in wallet RPCs (such as `send`, `walletcreatefundedpsbt`). This correctly identifies the origin of the fee rate rather than the estimator's internal logic.\r\n* Additional Logging:\r\n   Added logging for transaction fee, size, and source in `CreateTransactionInternal` to improve debugging of fee selection.",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2026-02-18T18:45:18Z",
-      "updated_at": "2026-02-20T08:59:36Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34617",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 2469,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -5599,57 +5861,33 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
+    }
+  ],
+  "issues": [
     {
-      "id": 3173345068,
-      "number": 34281,
-      "title": "build: Temporarily remove confusing and brittle `-fdebug-prefix-map`",
-      "body": "The compiler option `-fdebug-prefix-map` is unconditionally set by the build system. This is problematic for many reasons:\r\n\r\n* Users and devs have no easy way to disable it without modifying the build system source code\r\n* The mapping is broken since the cmake migration, and requires manual fixups such as https://github.com/bitcoin/bitcoin/issues/31204 or https://github.com/bitcoin/bitcoin/issues/31957\r\n\r\nFix all issues by temporarily removing it.\r\n\r\nThough, the option is kept for the guix build, so that no change in behavior is observed for the release binaries.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/31957\r\nFixes https://github.com/bitcoin/bitcoin/issues/31204\r\n\r\n\r\nThe option can be added back in the future, if there is any need to. Though, adding it back should ideally work out of the box, or at least provide easy workarounds for all commonly used tooling.",
-      "state": "closed",
-      "user": "maflcko",
-      "created_at": "2026-01-14T12:31:05Z",
-      "updated_at": "2026-02-17T07:08:05Z",
-      "merged_at": "2026-01-26T13:56:01Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34281",
+      "id": 3885262280,
+      "number": 34476,
+      "title": "Private broadcast tracking",
+      "body": "_A meta issue to track the pull requests related to private broadcast_\n\n# Initial\n* 🪓 🔥 ⛔ First attempt that tried to put the transaction in the mempool ([#27509](https://github.com/bitcoin/bitcoin/pull/27509))\n* 🟢 ✔️ 🥳 Implement the ability to broadcast a transaction via a short lived privacy connection and use that for the `sendrawtransaction` RPC ([#29415](https://github.com/bitcoin/bitcoin/pull/29415))\n\n# Followups and extensions\n\n## Wallet\n\n* [ ] https://github.com/bitcoin/bitcoin/pull/33671\n* [ ] https://github.com/bitcoin/bitcoin/pull/34359\n* [ ] https://github.com/bitcoin/bitcoin/pull/34457\n* [ ] https://github.com/bitcoin/bitcoin/pull/34533\n\n## Other\n\n* [x] https://github.com/bitcoin/bitcoin/pull/34329\n* [ ] https://github.com/bitcoin/bitcoin/pull/34322\n\n# Fixes and improvements\n\n* [x] https://github.com/bitcoin/bitcoin/pull/34300\n* [x] https://github.com/bitcoin/bitcoin/pull/34267\n* [ ] https://github.com/bitcoin/bitcoin/pull/34410\n* [ ] https://github.com/bitcoin/bitcoin/pull/34271\n* [x] https://github.com/bitcoin/bitcoin/pull/34511\n* [x] https://github.com/bitcoin/bitcoin/pull/34646\n",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-02-02T10:49:23Z",
+      "updated_at": "2026-02-24T07:39:17Z",
+      "closed_at": null,
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34476",
       "labels": [
-        "Build system"
+        "Tracking Issue"
       ],
+      "comment_data": [],
       "drama_signals": {
         "drama_keywords": 0,
         "positive_keywords": 1,
-        "text_length": 952,
+        "text_length": 1139,
         "has_nack": false,
         "has_ack": true
       }
     },
-    {
-      "id": 3284402582,
-      "number": 34590,
-      "title": "test: accept multiple execve error strings in rpc_signer",
-      "body": "Summary\r\n\r\nRelax the rpc_signer.py test to accept multiple POSIX execve failure messages when the signer command is missing.\r\n\r\nMotivation\r\n\r\nThe exact errno text for execve failures can vary across environments (e.g. \"No such file or directory\" vs \"Not a directory\", and may include errno numbers). Matching a single exact string makes the test brittle.\r\nKeep the check strict (matching the \"execve failed:\" prefix) while allowing expected POSIX variants.\r\n\r\nRefs #31506.\r\n\r\nHow tested:\r\nexport DYLD_LIBRARY_PATH=\"...\"\r\npython3 build/test/functional/test_runner.py rpc_signer.py\r\n",
-      "state": "closed",
-      "user": "SakshiKasat18",
-      "created_at": "2026-02-14T11:26:24Z",
-      "updated_at": "2026-02-17T05:35:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34590",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 638,
-        "has_nack": false,
-        "has_ack": false
-      }
-    }
-  ],
-  "issues": [
     {
       "id": 3980625672,
       "number": 34658,
@@ -6636,30 +6874,6 @@
       }
     },
     {
-      "id": 3885262280,
-      "number": 34476,
-      "title": "Private broadcast tracking",
-      "body": "_A meta issue to track the pull requests related to private broadcast_\n\n# Initial\n* 🪓 🔥 ⛔ First attempt that tried to put the transaction in the mempool ([#27509](https://github.com/bitcoin/bitcoin/pull/27509))\n* 🟢 ✔️ 🥳 Implement the ability to broadcast a transaction via a short lived privacy connection and use that for the `sendrawtransaction` RPC ([#29415](https://github.com/bitcoin/bitcoin/pull/29415))\n\n# Followups and extensions\n\n## Wallet\n\n* [ ] https://github.com/bitcoin/bitcoin/pull/33671\n* [ ] https://github.com/bitcoin/bitcoin/pull/34359\n* [ ] https://github.com/bitcoin/bitcoin/pull/34457\n* [ ] https://github.com/bitcoin/bitcoin/pull/34533\n\n## Other\n\n* [x] https://github.com/bitcoin/bitcoin/pull/34329\n* [ ] https://github.com/bitcoin/bitcoin/pull/34322\n\n# Fixes and improvements\n\n* [x] https://github.com/bitcoin/bitcoin/pull/34300\n* [x] https://github.com/bitcoin/bitcoin/pull/34267\n* [ ] https://github.com/bitcoin/bitcoin/pull/34410\n* [ ] https://github.com/bitcoin/bitcoin/pull/34271\n* [x] https://github.com/bitcoin/bitcoin/pull/34511\n* [ ] https://github.com/bitcoin/bitcoin/pull/34646\n",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-02-02T10:49:23Z",
-      "updated_at": "2026-02-21T18:17:15Z",
-      "closed_at": null,
-      "comments": 3,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34476",
-      "labels": [
-        "Tracking Issue"
-      ],
-      "comment_data": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1139,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3730153407,
       "number": 34076,
       "title": "tapscript with time-locked musig2",
@@ -7280,32 +7494,6 @@
         "Questions and Help"
       ],
       "comment_data": [
-        {
-          "id": 3910191268,
-          "user": "l0rinc",
-          "body": "> to cache most of the chainstate in memory\n\nYeah, especially for a HDD through a USB 2.\n\n> the version i use now, is v30.99.0-0ffb20dee178\n\nThat's very recent, basically a month old: https://github.com/bitcoin/bitcoin/commit/0ffb20dee17858e0f13b23fce3dd0ec06cbeb9a2",
-          "created_at": "2026-02-16T19:17:59Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 266,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3913039660,
-          "user": "l0rinc",
-          "body": "Did it improve? Expect that when the in-memory data gets dumped again (after the 10 GB dbcache gets filled), the process will \"freeze\" for a long time - should still be a lot faster than dumping every time the 450 MB dbcache gets full.",
-          "created_at": "2026-02-17T08:26:35Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 235,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
         {
           "id": 3914772345,
           "user": "kosuodhmwa",
@@ -8409,9 +8597,9 @@
     }
   ],
   "summary": {
-    "total_prs": 236,
+    "total_prs": 245,
     "total_issues": 48,
-    "total_comments": 119,
-    "unique_participants": 95
+    "total_comments": 117,
+    "unique_participants": 97
   }
 }
