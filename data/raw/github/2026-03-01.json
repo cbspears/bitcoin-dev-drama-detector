@@ -1,12 +1,204 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-03-01T01:49:35.396801+00:00",
+  "fetched_at": "2026-03-01T08:24:26.618870+00:00",
   "date_range": {
-    "since": "2026-02-22T01:49:35.396726+00:00",
-    "until": "2026-03-01T01:49:35.396726+00:00"
+    "since": "2026-02-22T08:24:26.618809+00:00",
+    "until": "2026-03-01T08:24:26.618809+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3308893519,
+      "number": 34639,
+      "title": "iwyu: Document or remove some `pragma: export` and other improvements",
+      "body": "This PR is a prerequisite for https://github.com/bitcoin/bitcoin/pull/34448. It was split into a separate PR to limit the scope and minimize potential merge conflicts.\r\n\r\nThe first commit improves the accuracy of IWYU suggestions within our heavily templated code. Note that, for now, the `serialize.h` header itself is excluded from IWYU inspection because it lacks a corresponding source file.\r\n\r\nThe remaining commits follow the Developer Notes [guidance](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu):\r\n> Use `IWYU pragma: export` very sparingly, as this enforces transitive inclusion of headers and undermines the specific purpose of IWYU.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2026-02-20T17:54:01Z",
+      "updated_at": "2026-03-01T07:25:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34639",
+      "labels": [
+        "Refactoring",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 750,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3328427974,
+      "number": 34677,
+      "title": "kernel: Chainparams and headerssync updates pre-31.0",
+      "body": "Update chainparams and headerssync params per the release process.\r\n\r\nAlso added new assumeutxo snapshots for each network. I've uploaded snapshots to https://achow101.com/files/utxo-snapshots/",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2026-02-26T00:33:30Z",
+      "updated_at": "2026-03-01T06:41:30Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34677",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 246,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3309768200,
+      "number": 34641,
+      "title": "node: scale default `-dbcache` with system RAM",
+      "body": "### Problem\r\n\r\n`-dbcache` controls how much RAM Bitcoin Core uses for the in-memory view of the UTXO set, while the authoritative chainstate remains on disk.\r\nThe default is still the fixed `450 MiB` value, chosen almost a decade ago, even though chainstate size and typical hardware profiles have changed significantly since then.\r\n\r\nIn practice, a fixed `450 MiB` default is often too conservative on modern systems, where larger cache sizes can reduce flush churn and disk roundtrips during validation, especially in IBD. At the same time, memory pressure remains important on smaller systems.\r\n\r\n### Historical changes\r\n\r\n| Date       | dbcache change | PR                                                                                                                                                                                                    |\r\n|------------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|\r\n| 2016-07-06 | 100 -> 300     | [#8273: Bump -dbcache default to 300MiB](https://github.com/bitcoin/bitcoin/commit/32cab91278651d07a11132b7636dc3d21144e616#diff-d102b6032635ce90158c1e6e614f03b50e4449aa46ce23370da5387a658342fdR25) |\r\n| 2017-04-05 | 300 -> 450     | [#10133: Clean up calculations of pcoinsTip memory usage](https://github.com/bitcoin/bitcoin/pull/10133/changes#diff-d102b6032635ce90158c1e6e614f03b50e4449aa46ce23370da5387a658342fdR31)             |\r\n\r\n### IRC\r\n\r\nThe discussion converged on avoiding a single new fixed `-dbcache` value and moving to RAM-aware defaults instead, balancing performance gains on modern hardware against OOM risk on lower-memory systems.\r\n\r\n<details>\r\n<summary>IRC log links</summary>\r\n\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-17\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-18\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-19\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-26\r\n\r\n</details>\r\n\r\n### Node provider defaults\r\n\r\n* [RaspiBlitz](https://x.com/RaspiBlitz/status/2026625309563388353) sets a higher dbcache during IBD (when no other apps are running), then lowers it afterward.\r\n* [Start9](https://x.com/start9labs/status/2026651195167944775) can set the default dynamically based on total RAM; currently creates a user task to lower dbcache after IBD if it was increased.\r\n* [MyNode](https://x.com/mynodebtc/status/2026694281541374418) automatically adjusts based on system memory (4 GB RAM → 1 GB cache, 8 GB RAM → 2.5 GB cache, 16 GB RAM → 4 GB cache) and also scales max mempool size.\r\n* [Umbrel](https://x.com/lukechilds/status/2026899284474356081) used to default to 50% RAM during IBD then reduce to 200 MiB post-IBD, but removed that logic because dedicating that much RAM caused issues when users ran other apps; now ships Core defaults.\r\n\r\n### Containerization\r\n\r\nContainer memory constraints may or may not be reflected by RAM detection.\r\nWe have considered adding container-detection but decided against it. Startup logs show detected/assumed system memory so users can set `-dbcache` explicitly when needed.\r\n\r\n### Fix\r\n\r\nMeasuring `-reindex-chainstate` on different machines indicates that 450-1024-2048 jumps are all very relevant after which the effects taper off.\r\n\r\nReplace the fixed default with a RAM-aware policy:\r\n```math\r\n\\text{default\\_dbcache}=\\mathrm{clamp}\\left(100\\,\\mathrm{MiB},\\ 0.25\\cdot\\left(\\text{system RAM}-2\\,\\mathrm{GiB}\\right),\\ 2\\,\\mathrm{GiB}\\right)\r\n```\r\n\r\nIf system RAM cannot be determined, assume 4 GiB on 64-bit builds and 2 GiB on 32-bit builds.\r\nManual `-dbcache` values are unchanged and still override the automatic default.\r\n\r\n### Warning threshold update\r\n\r\nOversized `-dbcache` warnings are kept and aligned with the new policy - warn if:\r\n- `dbcache > default-dbcache` when `RAM < fallback RAM` (4 GiB on 64-bit, 2 GiB on 32-bit)\r\n- `dbcache` > `75% of total RAM`, otherwise\r\n\r\n### Performance measurements\r\n\r\n#### reindex-chainstate\r\n\r\n<img width=\"2384\" height=\"1181\" alt=\"image\" src=\"https://github.com/user-attachments/assets/6ca5036c-47a8-4047-811d-582f7c0f8d4e\" />\r\n\r\nMachine | 450 MiB | 1000 MiB | 1536 MiB | 2000 MiB | 3000 MiB\r\n-- | -- | -- | -- | -- | --\r\nM4 Max 16c, 64Gi, SSD | 5h 37m | 3h 12m | — | **2h 17m** | 1h 57m\r\ni7-7700 HDD 8c, 62Gi, HDD | 13h 09m | 10h 24m | — | **8h 42m** | 8h 30m\r\nrpi5-8 4c, 7.7Gi, SSD | 52h 06m | — | **36h 24m** | — | —\r\nrpi5-16 4c, 15Gi, SSD | 13h 35m | 12h 10m | — | **10h 54m** | 10h 45m\r\ni9-9900K 16c, 62Gi, SSD | 6h 07m | 5h 28m | — | **5h 05m** | 4h 57m\r\nXeon E5 Win 8c, 31Gi, SSD | 10h 28m | 9h 30m | — | **8h 36m** | 8h 24m\r\numbrel N150 4c, 15Gi, SSD | 9h 20m | 8h 19m | — | **7h 52m** | 7h 45m\r\n\r\n---\r\n\r\n<details><summary>N150 (Umbrel) - 1.18x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        33619.332 s               [User: 61450.140 s, System: 5671.449 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 1000 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n\r\n  Time (abs ≡):        29948.973 s               [User: 51470.950 s, System: 3405.477 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 2000 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        28352.766 s               [User: 46633.422 s, System: 2298.085 s]\r\n```\r\n\r\n> 2026-02-20 | reindex-chainstate | 936639 blocks | dbcache 3000 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        27910.440 s               [User: 44917.351 s, System: 2090.958 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>Rpi5 (16) - 1.24x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        48933.904 s               [User: 94560.562 s, System: 7823.574 s]\r\n```\r\n\r\n> 2026-02-24 | reindex-chainstate | 936639 blocks | dbcache 1000 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        43856.539 s               [User: 78451.084 s, System: 5183.434 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 2000 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        39259.025 s               [User: 69044.492 s, System: 3227.006 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 936639 blocks | dbcache 3000 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        38756.884 s               [User: 65947.478 s, System: 2887.489 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>Rpi5 (8) - 1.43x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 1536 2000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | rpi5-8 | aarch64 | Cortex-A76 | 4 cores | 7.7Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        187564.724 s               [User: 98927.942 s, System: 19100.209 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 1000 | rpi5-8 | aarch64 | Cortex-A76 | 4 cores | 7.7Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        132856.721 s               [User: 77471.886 s, System: 13535.639 s]\r\n```\r\n\r\n> 2026-02-22 | reindex-chainstate | 936639 blocks | dbcache 1536 | rpi5-8 | aarch64 | Cortex-A76 | 4 cores | 7.7Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1536 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        131061.887 s               [User: 71355.478 s, System: 12038.086 s]\r\n```\r\n\r\n> 2026-02-27 | reindex-chainstate | 936639 blocks | dbcache 2000 | rpi5-8 | aarch64 | Cortex-A76 | 4 cores | 7.7Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        125837.682 s               [User: 69422.152 s, System: 11621.279 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>Apple M4 Max - 2.46x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=900000; \\\r\n  DATA_DIR=\"$HOME/Library/Application Support/Bitcoin\"; LOG_DIR=\"$HOME/bitcoin-reindex-logs\"; mkdir -p \"$LOG_DIR\"; \\\r\n  COMMA_COMMITS=${COMMITS// /,}; \\\r\n  (echo \"\"; for c in $(echo $COMMITS); do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(sysctl -n machdep.cpu.brand_string) | $(nproc) cores | $(printf '%.1fGiB' \"$(( $(sysctl -n hw.memsize)/1024/1024/1024 ))\") RAM | SSD | $(sw_vers -productName) $(sw_vers -productVersion) $(sw_vers -buildVersion) | $(xcrun clang --version | head -1)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$LOG_DIR/rdx-$(echo \"$COMMITS\" | sed -E 's/([a-f0-9]{8})[a-f0-9]+ ?/\\1-/g;s/-$//')-$STOP-$DBCACHE-appleclang.json\" \\\r\n    --parameter-list COMMIT \"$COMMA_COMMITS\" \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null || true; rm -f \\\"$DATA_DIR\\\"/debug.log; git checkout {COMMIT}; git reset --hard && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja -C build bitcoind -j2 && \\\r\n      ./build/bin/bitcoind -datadir=\\\"$DATA_DIR\\\" -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20\" \\\r\n    --conclude \"killall bitcoind 2>/dev/null || true; sleep 5; grep -q 'height=0' \\\"$DATA_DIR\\\"/debug.log && grep -q 'Disabling script verification at block #1' \\\"$DATA_DIR\\\"/debug.log && grep -q \\\"height=$STOP\\\" \\\"$DATA_DIR\\\"/debug.log || { echo 'debug.log assertions failed'; exit 1; }; \\\r\n                cp \\\"$DATA_DIR\\\"/debug.log \\\"$LOG_DIR\\\"/debug-{COMMIT}-\\$(date +%s).log 2>/dev/null || true\" \\\r\n    \"./build/bin/bitcoind -datadir=\\\"$DATA_DIR\\\" -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-21 | reindex-chainstate | 900000 blocks | dbcache 450 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.2 25C56 | Apple clang version 17.0.0 (clang-1700.6.3.2)\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        20261.315 s               [User: 18768.521 s, System: 4271.673 s]\r\n```\r\n\r\n> 2026-02-27 | reindex-chainstate | 900000 blocks | dbcache 1000 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.3 25D125 | Apple clang version 17.0.0 (clang-1700.6.3.2)\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        11574.620 s               [User: 12147.446 s, System: 2417.914 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 900000 blocks | dbcache 2000 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.3 25D125 | Apple clang version 17.0.0 (clang-1700.6.3.2)\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        8226.676 s               [User: 9083.949 s, System: 1179.971 s]\r\n```\r\n\r\n> 2026-02-21 | reindex-chainstate | 900000 blocks | dbcache 3000 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.2 25C56 | Apple clang version 17.0.0 (clang-1700.6.3.2)\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        7064.184 s               [User: 7701.391 s, System: 668.060 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>i7 HDD - 1.51x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-21 | reindex-chainstate | 936639 blocks | dbcache 450 | i7-hdd | x86_64 | Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz | 8 cores | 62Gi RAM | HDD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        47384.896 s               [User: 54460.024 s, System: 3388.557 s]\r\n```\r\n\r\n> 2026-02-24 | reindex-chainstate | 936639 blocks | dbcache 1000 | i7-hdd | x86_64 | Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz | 8 cores | 62Gi RAM | HDD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        37486.190 s               [User: 46563.682 s, System: 2189.609 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 2000 | i7-hdd | x86_64 | Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz | 8 cores | 62Gi RAM | HDD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        31379.903 s               [User: 41546.866 s, System: 1383.556 s]\r\n```\r\n\r\n> 2026-02-21 | reindex-chainstate | 936639 blocks | dbcache 3000 | i7-hdd | x86_64 | Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz | 8 cores | 62Gi RAM | HDD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        30633.603 s               [User: 39511.869 s, System: 1116.371 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>Windows Xeon - 1.24x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"5401e673d56198f2c0bad366581e70d5d9cd765c\"; \\\r\n  STOP=933339; \\\r\n  HOST=x86_64-w64-mingw32; \\\r\n  XPACK=\"/home/win/xpack-mingw-w64-gcc-15.2.0-2\"; \\\r\n  BASE_DIR=\"/mnt/c/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  WIN_DATA_DIR='C:\\\\my_storage\\\\BitcoinData'; \\\r\n  export PATH=\"$XPACK/bin:$PATH\"; \\\r\n  mkdir -p \"$LOG_DIR\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | win64-gcc15\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-win64.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"taskkill.exe /IM bitcoind.exe /F 2>/dev/null; rm -f ./build/bin/bitcoind.exe; rm -f $DATA_DIR/debug.log; git clean -fxd -e depends/built -e depends/sources -e depends/$HOST; git reset --hard {COMMIT} && \\\r\n      make -C depends HOST=$HOST NO_QT=1 NO_ZMQ=1 CC=\\\"$XPACK/bin/x86_64-w64-mingw32-gcc\\\" CXX=\\\"$XPACK/bin/x86_64-w64-mingw32-g++\\\" -j\\$(nproc) && \\\r\n      cmake -B build -G Ninja --toolchain depends/$HOST/toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=OFF -DWITH_ZMQ=OFF -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF && \\\r\n      ninja -C build bitcoind -j\\$(nproc) && \\\r\n      ./build/bin/bitcoind.exe -datadir=\\\"$WIN_DATA_DIR\\\" -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"taskkill.exe /IM bitcoind.exe /F 2>/dev/null; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n      cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-\\$(date +%s).log\" \\\r\n    \"./build/bin/bitcoind.exe -datadir=\\\"$WIN_DATA_DIR\\\" -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\"; \\\r\ndone\r\n```\r\n\r\n> 5401e673d5 Merge bitcoin/bitcoin#33604: p2p: Allow block downloads from peers without snapshot block after assumeutxo validation\r\n\r\n> 2026-02-10 | reindex-chainstate | 933339 blocks | dbcache 450 | WIN-A2EHOAU4JET | x86_64 | Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz | 8 cores | 31Gi RAM | win64-gcc15\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind.exe -datadir=\"C:\\\\my_storage\\\\BitcoinData\" -stopatheight=933339 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 5401e673d56198f2c0bad366581e70d5d9cd765c)\r\n  Time (abs ≡):        37691.648 s               [User: 0.000 s, System: 0.001 s]\r\n```\r\n\r\n> 2026-02-24 | reindex-chainstate | 933339 blocks | dbcache 1000 | WIN-A2EHOAU4JET | x86_64 | Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz | 8 cores | 31Gi RAM | win64-gcc15\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind.exe -datadir=\"C:\\\\my_storage\\\\BitcoinData\" -stopatheight=933339 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 5401e673d56198f2c0bad366581e70d5d9cd765c)\r\n  Time (abs ≡):        34250.996 s               [User: 0.002 s, System: 0.000 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 933339 blocks | dbcache 2000 | WIN-A2EHOAU4JET | x86_64 | Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz | 8 cores | 31Gi RAM | win64-gcc15\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind.exe -datadir=\"C:\\\\my_storage\\\\BitcoinData\" -stopatheight=933339 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 5401e673d56198f2c0bad366581e70d5d9cd765c)\r\n  Time (abs ≡):        31001.091 s               [User: 0.000 s, System: 0.002 s]\r\n```\r\n\r\n> 2026-02-21 | reindex-chainstate | 933339 blocks | dbcache 3000 | WIN-A2EHOAU4JET | x86_64 | Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz | 8 cores | 31Gi RAM | win64-gcc15\r\n\r\n```bash\r\nBenchmark 2: ./build/bin/bitcoind.exe -datadir=\"C:\\\\my_storage\\\\BitcoinData\" -stopatheight=933339 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 5401e673d56198f2c0bad366581e70d5d9cd765c)\r\n  Time (abs ≡):        30276.311 s               [User: 0.001 s, System: 0.000 s]\r\n```\r\n</details>\r\n\r\n<details><summary>i9 - 1.20x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\                                                                                                                                        \r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\                                                   \r\n  STOP=936639; CC=gcc; CXX=g++; \\                                                                         \r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\                                                                                             \r\n    --sort command \\                                                                                      \r\n    --runs 1 \\                                                                                            \r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\                                                             \r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 5401e673d5 Merge bitcoin/bitcoin#33604: p2p: Allow block downloads from peers without snapshot block after assumeutxo validation\r\n\r\n> 2026-02-26 | reindex-chainstate | 936639 blocks | dbcache 450 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        22076.658 s               [User: 53940.221 s, System: 3111.267 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 936639 blocks | dbcache 1000 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        19724.533 s               [User: 45709.253 s, System: 2066.725 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 936639 blocks | dbcache 2000 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        18302.184 s               [User: 40157.899 s, System: 1250.246 s]\r\n``` \r\n\r\n> 2026-02-27 | reindex-chainstate | 936639 blocks | dbcache 3000 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        17858.670 s               [User: 38277.112 s, System: 1008.751 s]\r\n```\r\n\r\n</details>\r\n\r\n### Quick reference (64 bit)\r\n\r\n| System RAM | Automatic default | Warning fires above |\r\n|------------|-------------------|---------------------|\r\n| 1 GiB      | 100 MiB           | 100 MiB             |\r\n| 2 GiB      | 100 MiB           | 100 MiB             |\r\n| 4 GiB      | 512 MiB           | 3071 MiB            |\r\n| 8 GiB      | 1536 MiB          | 6143 MiB            |\r\n| 16 GiB     | 2048 MiB          | 12287 MiB           |\r\n| 32 GiB     | 2048 MiB          | 24575 MiB           |\r\n\r\n<img width=\"1384\" height=\"589\" alt=\"image\" src=\"https://github.com/user-attachments/assets/3bb9585d-7d03-4406-97fb-729ebd6dcc0b\" />\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-02-20T23:00:45Z",
+      "updated_at": "2026-03-01T06:26:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34641",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 34708,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3332706834,
+      "number": 34684,
+      "title": "refactor: Enable -Wswitch in exhaustive switch'es, Enable -Wcovered-switch-default",
+      "body": "The compiler flag `-Wswitch` is enabled. However, it can not fire when a `default:` case exists. Fix that by removing the default case where a switch is already handling all cases exhaustively.\r\n\r\nAlso, apply the comment according to the dev notes.\r\n\r\nCan be reviewed via `--ignore-all-space`\r\n\r\n",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-02-26T20:05:21Z",
+      "updated_at": "2026-03-01T06:24:20Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34684",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 379,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3335956636,
+      "number": 34692,
+      "title": "Bump dbcache to 1GB",
+      "body": "Alternative to #34641\r\n\r\nThis increases the default `dbcache` value from `450MB` to `1024MB` if:\r\n- `dbcache` is unset\r\n- The system is 64 bit\r\n- At least 4GB of RAM is detected\r\n\r\nOtherwise fallback to previous `450MB` default.\r\n\r\nThis should be simple enough to get into v31. The bump to 1GB shows significant performance increases in #34641. It also alleviates concerns of too high default for steady state, and of lowering the current dbcache for systems with less RAM.",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2026-02-27T14:25:14Z",
+      "updated_at": "2026-03-01T06:20:52Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34692",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 493,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1940584116,
+      "number": 30343,
+      "title": "wallet, logging: Replace WalletLogPrintf() with LogInfo()",
+      "body": "Make new logging macros `LogDebug()`, `LogTrace()`, `LogInfo()`, `LogWarning()`, and `LogError()` compatible with wallet code and drop custom WalletLogPrintf() function. The new logging macros introduced in #28318 weren't previously useful in wallet code because wallet code prefixes most log messages with the wallet names to be be able to distinguish log output from multiple wallets. Fix this by introducing a new `WalletLogSource` class inheriting from `BCLog::Source` which can include the wallet name in log messages.\n\n---\n\n<!-- begin based-on -->\n**This is based on #29256.** The non-base commits are:\n\n- [`35ab88ce0e7` wallet, logging: Replace WalletLogPrintf() with LogInfo()](https://github.com/bitcoin/bitcoin/pull/30343/commits/35ab88ce0e7116c0a2bee2569ea1bc9eb5afffea)\n- [`f5039574576` wallet, logging: Switch LogInfo to LogWarning/LogError](https://github.com/bitcoin/bitcoin/pull/30343/commits/f5039574576f3128fe904147a53e3fcaab6c0d85)\n- [`aac55f94938` wallet, logging: Switch LogInfo to LogError in AddWalletDescriptor](https://github.com/bitcoin/bitcoin/pull/30343/commits/aac55f94938aa7ac727b840a9766adb848e998ab)<!-- end -->",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2024-06-26T17:57:15Z",
+      "updated_at": "2026-03-01T04:13:02Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/30343",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1201,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 304070624,
+      "number": 16545,
+      "title": "refactor: Implement missing error checking for ArgsManager flags",
+      "body": "Trigger startup errors if bitcoin is configured with bad setting values according to flags. Also raise internal errors if settings are registered and retrieved with inconsistent flags.\n\nThis change has no effect on behavior because the new ArgsManager flags added here are not used outside of tests yet.\n\nIt'll probably be easier to start applying type checking flags to _new_ options than _existing_ options. But for examples of how type checking flags can make sense applied to existing options, see the new [example_options unit test](https://github.com/ryanofsky/bitcoin/blob/pr/argcheck/src/test/argsman_tests.cpp#L27) added in this PR.\n\n---\n\nFollowups:\n\n- Support for flag combinations is possible and is added in commit c919f51c044f0e80ecd301f9c9d396ddff2331ba ([branch](https://github.com/ryanofsky/bitcoin/commits/pr/argcomb))\n- ALLOW_LIST flags are added and enforced in [#17580](https://github.com/bitcoin/bitcoin/pull/17580)\n- Bad IsArgSet usages with ALLOW_LIST are removed in [#30529](https://github.com/bitcoin/bitcoin/pull/30529) and prevented in [#17783](https://github.com/bitcoin/bitcoin/pull/17783)\n- Confusing and ignored multiple assignments in config files are disallowed in [#17493](https://github.com/bitcoin/bitcoin/pull/17493)\n- Confusing reverse-precedence settings merging code is removed in [#17581](https://github.com/bitcoin/bitcoin/pull/17581)\n- Type flags added in this PR implement runtime part of a change to add more compile-time checking in [#22978](https://github.com/bitcoin/bitcoin/pull/22978)\n",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2019-08-04T14:13:12Z",
+      "updated_at": "2026-03-01T02:58:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/16545",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1600,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1717651443,
+      "number": 29409,
+      "title": "multiprocess: Add capnp wrapper for Chain interface",
+      "body": "Changes making it possible to call `interface::Chain` over a socket.\r\n\r\nNote: The changes in this PR allow a `bitcoin-node` process to be controlled over a socket. The socket can either be an UNIX socket created by specifying the `-ipcbind` option, or it can be a socketpair created by a controlling process and passed to `bitcoin-node` via the `-ipcfd=<n>` with a file descriptor number. This PR is a dependency of #10102 which allows the wallet code to run in a separate process and use the `Chain` interface.\r\n\r\n---\r\n\r\nThis PR is part of the [process separation project](https://github.com/bitcoin/bitcoin/issues/28722).",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2024-02-08T13:54:40Z",
+      "updated_at": "2026-03-01T01:51:23Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/29409",
+      "labels": [
+        "interfaces",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 675,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3251388923,
       "number": 34521,
@@ -154,55 +346,6 @@
       }
     },
     {
-      "id": 3332706834,
-      "number": 34684,
-      "title": "refactor: Enable -Wswitch in exhaustive switch'es, Enable -Wcovered-switch-default",
-      "body": "The compiler flag `-Wswitch` is enabled. However, it can not fire when a `default:` case exists. Fix that by removing the default case where a switch is already handling all cases exhaustively.\r\n\r\nAlso, apply the comment according to the dev notes.\r\n\r\nCan be reviewed via `--ignore-all-space`\r\n\r\n",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-02-26T20:05:21Z",
-      "updated_at": "2026-02-28T18:46:54Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34684",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 379,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3308893519,
-      "number": 34639,
-      "title": "iwyu: Document or remove some `pragma: export` and other improvements",
-      "body": "This PR is a prerequisite for https://github.com/bitcoin/bitcoin/pull/34448. It was split into a separate PR to limit the scope and minimize potential merge conflicts.\r\n\r\nThe first commit improves the accuracy of IWYU suggestions within our heavily templated code. Note that, for now, the `serialize.h` header itself is excluded from IWYU inspection because it lacks a corresponding source file.\r\n\r\nThe remaining commits follow the Developer Notes [guidance](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu):\r\n> Use `IWYU pragma: export` very sparingly, as this enforces transitive inclusion of headers and undermines the specific purpose of IWYU.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2026-02-20T17:54:01Z",
-      "updated_at": "2026-02-28T17:41:42Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34639",
-      "labels": [
-        "Refactoring",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 750,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 1071188902,
       "number": 26201,
       "title": "Remove Taproot BIP 9 deployment",
@@ -247,30 +390,6 @@
       }
     },
     {
-      "id": 3328427974,
-      "number": 34677,
-      "title": "kernel: Chainparams and headerssync updates pre-31.0",
-      "body": "Update chainparams and headerssync params per the release process.\r\n\r\nAlso added new assumeutxo snapshots for each network. I've uploaded snapshots to https://achow101.com/files/utxo-snapshots/",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2026-02-26T00:33:30Z",
-      "updated_at": "2026-02-28T17:32:02Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34677",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 246,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3277360664,
       "number": 34576,
       "title": "threadpool: add ranged Submit overload",
@@ -290,30 +409,6 @@
         "text_length": 612,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3335956636,
-      "number": 34692,
-      "title": "Bump dbcache to 1GB",
-      "body": "Alternative to #34641\r\n\r\nThis increases the default `dbcache` value from `450MB` to `1024MB` if:\r\n- `dbcache` is unset\r\n- The system is 64 bit\r\n- At least 4GB of RAM is detected\r\n\r\nOtherwise fallback to previous `450MB` default.\r\n\r\nThis should be simple enough to get into v31. The bump to 1GB shows significant performance increases in #34641. It also alleviates concerns of too high default for steady state, and of lowering the current dbcache for systems with less RAM.",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2026-02-27T14:25:14Z",
-      "updated_at": "2026-02-28T17:06:26Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34692",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 493,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -435,28 +530,6 @@
         "text_length": 258,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3309768200,
-      "number": 34641,
-      "title": "node: scale default `-dbcache` with system RAM",
-      "body": "### Problem\r\n\r\n`-dbcache` controls how much RAM Bitcoin Core uses for the in-memory view of the UTXO set, while the authoritative chainstate remains on disk.\r\nThe default is still the fixed `450 MiB` value, chosen almost a decade ago, even though chainstate size and typical hardware profiles have changed significantly since then.\r\n\r\nIn practice, a fixed `450 MiB` default is often too conservative on modern systems, where larger cache sizes can reduce flush churn and disk roundtrips during validation, especially in IBD. At the same time, memory pressure remains important on smaller systems.\r\n\r\n### Historical changes\r\n\r\n| Date       | dbcache change | PR                                                                                                                                                                                                    |\r\n|------------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|\r\n| 2016-07-06 | 100 -> 300     | [#8273: Bump -dbcache default to 300MiB](https://github.com/bitcoin/bitcoin/commit/32cab91278651d07a11132b7636dc3d21144e616#diff-d102b6032635ce90158c1e6e614f03b50e4449aa46ce23370da5387a658342fdR25) |\r\n| 2017-04-05 | 300 -> 450     | [#10133: Clean up calculations of pcoinsTip memory usage](https://github.com/bitcoin/bitcoin/pull/10133/changes#diff-d102b6032635ce90158c1e6e614f03b50e4449aa46ce23370da5387a658342fdR31)             |\r\n\r\n### IRC\r\n\r\nThe discussion converged on avoiding a single new fixed `-dbcache` value and moving to RAM-aware defaults instead, balancing performance gains on modern hardware against OOM risk on lower-memory systems.\r\n\r\n<details>\r\n<summary>IRC log links</summary>\r\n\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-17\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-18\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-19\r\n* https://bitcoin-irc.chaincode.com/bitcoin-core-dev/2026-02-26\r\n\r\n</details>\r\n\r\n### Node provider defaults\r\n\r\n* [RaspiBlitz](https://x.com/RaspiBlitz/status/2026625309563388353) sets a higher dbcache during IBD (when no other apps are running), then lowers it afterward.\r\n* [Start9](https://x.com/start9labs/status/2026651195167944775) can set the default dynamically based on total RAM; currently creates a user task to lower dbcache after IBD if it was increased.\r\n* [MyNode](https://x.com/mynodebtc/status/2026694281541374418) automatically adjusts based on system memory (4 GB RAM → 1 GB cache, 8 GB RAM → 2.5 GB cache, 16 GB RAM → 4 GB cache) and also scales max mempool size.\r\n* [Umbrel](https://x.com/lukechilds/status/2026899284474356081) used to default to 50% RAM during IBD then reduce to 200 MiB post-IBD, but removed that logic because dedicating that much RAM caused issues when users ran other apps; now ships Core defaults.\r\n\r\n### Containerization\r\n\r\nContainer memory constraints may or may not be reflected by RAM detection.\r\nWe have considered adding container-detection but decided against it. Startup logs show detected/assumed system memory so users can set `-dbcache` explicitly when needed.\r\n\r\n### Fix\r\n\r\nMeasuring `-reindex-chainstate` on different machines indicates that 450-1024-2048 jumps are all very relevant after which the effects taper off.\r\n\r\nReplace the fixed default with a RAM-aware policy:\r\n```math\r\n\\text{default\\_dbcache}=\\mathrm{clamp}\\left(100\\,\\mathrm{MiB},\\ 0.25\\cdot\\left(\\text{system RAM}-2\\,\\mathrm{GiB}\\right),\\ 2\\,\\mathrm{GiB}\\right)\r\n```\r\n\r\nIf system RAM cannot be determined, assume 4 GiB on 64-bit builds and 2 GiB on 32-bit builds.\r\nManual `-dbcache` values are unchanged and still override the automatic default.\r\n\r\n### Warning threshold update\r\n\r\nOversized `-dbcache` warnings are kept and aligned with the new policy - warn if:\r\n- `dbcache > default-dbcache` when `RAM < fallback RAM` (4 GiB on 64-bit, 2 GiB on 32-bit)\r\n- `dbcache` > `75% of total RAM`, otherwise\r\n\r\n### Performance measurements\r\n\r\n#### reindex-chainstate\r\n\r\n<img width=\"2384\" height=\"1181\" alt=\"image\" src=\"https://github.com/user-attachments/assets/6ca5036c-47a8-4047-811d-582f7c0f8d4e\" />\r\n\r\nMachine | 450 MiB | 1000 MiB | 1536 MiB | 2000 MiB | 3000 MiB\r\n-- | -- | -- | -- | -- | --\r\nM4 Max 16c, 64Gi, SSD | 5h 37m | 3h 12m | — | **2h 17m** | 1h 57m\r\ni7-7700 HDD 8c, 62Gi, HDD | 13h 09m | 10h 24m | — | **8h 42m** | 8h 30m\r\nrpi5-8 4c, 7.7Gi, SSD | 52h 06m | — | **36h 24m** | — | —\r\nrpi5-16 4c, 15Gi, SSD | 13h 35m | 12h 10m | — | **10h 54m** | 10h 45m\r\ni9-9900K 16c, 62Gi, SSD | 6h 07m | 5h 28m | — | **5h 05m** | 4h 57m\r\nXeon E5 Win 8c, 31Gi, SSD | 10h 28m | 9h 30m | — | **8h 36m** | 8h 24m\r\numbrel N150 4c, 15Gi, SSD | 9h 20m | 8h 19m | — | **7h 52m** | 7h 45m\r\n\r\n---\r\n\r\n<details><summary>N150 (Umbrel) - 1.18x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        33619.332 s               [User: 61450.140 s, System: 5671.449 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 1000 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n\r\n  Time (abs ≡):        29948.973 s               [User: 51470.950 s, System: 3405.477 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 2000 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        28352.766 s               [User: 46633.422 s, System: 2298.085 s]\r\n```\r\n\r\n> 2026-02-20 | reindex-chainstate | 936639 blocks | dbcache 3000 | umbrel | x86_64 | Intel(R) N150 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        27910.440 s               [User: 44917.351 s, System: 2090.958 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>Rpi5 (16) - 1.24x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        48933.904 s               [User: 94560.562 s, System: 7823.574 s]\r\n```\r\n\r\n> 2026-02-24 | reindex-chainstate | 936639 blocks | dbcache 1000 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        43856.539 s               [User: 78451.084 s, System: 5183.434 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 2000 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        39259.025 s               [User: 69044.492 s, System: 3227.006 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 936639 blocks | dbcache 3000 | rpi5-16-2 | aarch64 | Cortex-A76 | 4 cores | 15Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        38756.884 s               [User: 65947.478 s, System: 2887.489 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>Rpi5 (8) - 1.43x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 1536 2000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-19 | reindex-chainstate | 936639 blocks | dbcache 450 | rpi5-8 | aarch64 | Cortex-A76 | 4 cores | 7.7Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        187564.724 s               [User: 98927.942 s, System: 19100.209 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 1000 | rpi5-8 | aarch64 | Cortex-A76 | 4 cores | 7.7Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        132856.721 s               [User: 77471.886 s, System: 13535.639 s]\r\n```\r\n\r\n> 2026-02-22 | reindex-chainstate | 936639 blocks | dbcache 1536 | rpi5-8 | aarch64 | Cortex-A76 | 4 cores | 7.7Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1536 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        131061.887 s               [User: 71355.478 s, System: 12038.086 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>Apple M4 Max - 2.46x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=900000; \\\r\n  DATA_DIR=\"$HOME/Library/Application Support/Bitcoin\"; LOG_DIR=\"$HOME/bitcoin-reindex-logs\"; mkdir -p \"$LOG_DIR\"; \\\r\n  COMMA_COMMITS=${COMMITS// /,}; \\\r\n  (echo \"\"; for c in $(echo $COMMITS); do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(sysctl -n machdep.cpu.brand_string) | $(nproc) cores | $(printf '%.1fGiB' \"$(( $(sysctl -n hw.memsize)/1024/1024/1024 ))\") RAM | SSD | $(sw_vers -productName) $(sw_vers -productVersion) $(sw_vers -buildVersion) | $(xcrun clang --version | head -1)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$LOG_DIR/rdx-$(echo \"$COMMITS\" | sed -E 's/([a-f0-9]{8})[a-f0-9]+ ?/\\1-/g;s/-$//')-$STOP-$DBCACHE-appleclang.json\" \\\r\n    --parameter-list COMMIT \"$COMMA_COMMITS\" \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null || true; rm -f \\\"$DATA_DIR\\\"/debug.log; git checkout {COMMIT}; git reset --hard && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja -C build bitcoind -j2 && \\\r\n      ./build/bin/bitcoind -datadir=\\\"$DATA_DIR\\\" -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20\" \\\r\n    --conclude \"killall bitcoind 2>/dev/null || true; sleep 5; grep -q 'height=0' \\\"$DATA_DIR\\\"/debug.log && grep -q 'Disabling script verification at block #1' \\\"$DATA_DIR\\\"/debug.log && grep -q \\\"height=$STOP\\\" \\\"$DATA_DIR\\\"/debug.log || { echo 'debug.log assertions failed'; exit 1; }; \\\r\n                cp \\\"$DATA_DIR\\\"/debug.log \\\"$LOG_DIR\\\"/debug-{COMMIT}-\\$(date +%s).log 2>/dev/null || true\" \\\r\n    \"./build/bin/bitcoind -datadir=\\\"$DATA_DIR\\\" -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-21 | reindex-chainstate | 900000 blocks | dbcache 450 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.2 25C56 | Apple clang version 17.0.0 (clang-1700.6.3.2)\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        20261.315 s               [User: 18768.521 s, System: 4271.673 s]\r\n```\r\n\r\n> 2026-02-27 | reindex-chainstate | 900000 blocks | dbcache 1000 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.3 25D125 | Apple clang version 17.0.0 (clang-1700.6.3.2)\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        11574.620 s               [User: 12147.446 s, System: 2417.914 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 900000 blocks | dbcache 2000 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.3 25D125 | Apple clang version 17.0.0 (clang-1700.6.3.2)\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        8226.676 s               [User: 9083.949 s, System: 1179.971 s]\r\n```\r\n\r\n> 2026-02-21 | reindex-chainstate | 900000 blocks | dbcache 3000 | M4-Max.local | arm64 | Apple M4 Max | 16 cores | 64.0GiB RAM | SSD | macOS 26.2 25C56 | Apple clang version 17.0.0 (clang-1700.6.3.2)\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind -datadir=\"/Users/lorinc/Library/Application Support/Bitcoin\" -stopatheight=900000 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        7064.184 s               [User: 7701.391 s, System: 668.060 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>i7 HDD - 1.51x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\\r\n  STOP=936639; CC=gcc; CXX=g++; \\\r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 097c18239b Merge bitcoin/bitcoin#34385: subprocess: Fix `-Wunused-private-field` when building with clang-cl on Windows\r\n\r\n> 2026-02-21 | reindex-chainstate | 936639 blocks | dbcache 450 | i7-hdd | x86_64 | Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz | 8 cores | 62Gi RAM | HDD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        47384.896 s               [User: 54460.024 s, System: 3388.557 s]\r\n```\r\n\r\n> 2026-02-24 | reindex-chainstate | 936639 blocks | dbcache 1000 | i7-hdd | x86_64 | Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz | 8 cores | 62Gi RAM | HDD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        37486.190 s               [User: 46563.682 s, System: 2189.609 s]\r\n```\r\n\r\n> 2026-02-25 | reindex-chainstate | 936639 blocks | dbcache 2000 | i7-hdd | x86_64 | Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz | 8 cores | 62Gi RAM | HDD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        31379.903 s               [User: 41546.866 s, System: 1383.556 s]\r\n```\r\n\r\n> 2026-02-21 | reindex-chainstate | 936639 blocks | dbcache 3000 | i7-hdd | x86_64 | Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz | 8 cores | 62Gi RAM | HDD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        30633.603 s               [User: 39511.869 s, System: 1116.371 s]\r\n```\r\n\r\n</details>\r\n\r\n<details><summary>Windows Xeon - 1.24x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\\r\n  COMMITS=\"5401e673d56198f2c0bad366581e70d5d9cd765c\"; \\\r\n  STOP=933339; \\\r\n  HOST=x86_64-w64-mingw32; \\\r\n  XPACK=\"/home/win/xpack-mingw-w64-gcc-15.2.0-2\"; \\\r\n  BASE_DIR=\"/mnt/c/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  WIN_DATA_DIR='C:\\\\my_storage\\\\BitcoinData'; \\\r\n  export PATH=\"$XPACK/bin:$PATH\"; \\\r\n  mkdir -p \"$LOG_DIR\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | win64-gcc15\"; echo \"\") && \\\r\n  hyperfine \\\r\n    --sort command \\\r\n    --runs 1 \\\r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-win64.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\\r\n    --prepare \"taskkill.exe /IM bitcoind.exe /F 2>/dev/null; rm -f ./build/bin/bitcoind.exe; rm -f $DATA_DIR/debug.log; git clean -fxd -e depends/built -e depends/sources -e depends/$HOST; git reset --hard {COMMIT} && \\\r\n      make -C depends HOST=$HOST NO_QT=1 NO_ZMQ=1 CC=\\\"$XPACK/bin/x86_64-w64-mingw32-gcc\\\" CXX=\\\"$XPACK/bin/x86_64-w64-mingw32-g++\\\" -j\\$(nproc) && \\\r\n      cmake -B build -G Ninja --toolchain depends/$HOST/toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=OFF -DWITH_ZMQ=OFF -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF && \\\r\n      ninja -C build bitcoind -j\\$(nproc) && \\\r\n      ./build/bin/bitcoind.exe -datadir=\\\"$WIN_DATA_DIR\\\" -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"taskkill.exe /IM bitcoind.exe /F 2>/dev/null; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n      cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-\\$(date +%s).log\" \\\r\n    \"./build/bin/bitcoind.exe -datadir=\\\"$WIN_DATA_DIR\\\" -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\"; \\\r\ndone\r\n```\r\n\r\n> 5401e673d5 Merge bitcoin/bitcoin#33604: p2p: Allow block downloads from peers without snapshot block after assumeutxo validation\r\n\r\n> 2026-02-10 | reindex-chainstate | 933339 blocks | dbcache 450 | WIN-A2EHOAU4JET | x86_64 | Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz | 8 cores | 31Gi RAM | win64-gcc15\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind.exe -datadir=\"C:\\\\my_storage\\\\BitcoinData\" -stopatheight=933339 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 5401e673d56198f2c0bad366581e70d5d9cd765c)\r\n  Time (abs ≡):        37691.648 s               [User: 0.000 s, System: 0.001 s]\r\n```\r\n\r\n> 2026-02-24 | reindex-chainstate | 933339 blocks | dbcache 1000 | WIN-A2EHOAU4JET | x86_64 | Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz | 8 cores | 31Gi RAM | win64-gcc15\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind.exe -datadir=\"C:\\\\my_storage\\\\BitcoinData\" -stopatheight=933339 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 5401e673d56198f2c0bad366581e70d5d9cd765c)\r\n  Time (abs ≡):        34250.996 s               [User: 0.002 s, System: 0.000 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 933339 blocks | dbcache 2000 | WIN-A2EHOAU4JET | x86_64 | Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz | 8 cores | 31Gi RAM | win64-gcc15\r\n\r\n```bash\r\nBenchmark 1: ./build/bin/bitcoind.exe -datadir=\"C:\\\\my_storage\\\\BitcoinData\" -stopatheight=933339 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 5401e673d56198f2c0bad366581e70d5d9cd765c)\r\n  Time (abs ≡):        31001.091 s               [User: 0.000 s, System: 0.002 s]\r\n```\r\n\r\n> 2026-02-21 | reindex-chainstate | 933339 blocks | dbcache 3000 | WIN-A2EHOAU4JET | x86_64 | Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz | 8 cores | 31Gi RAM | win64-gcc15\r\n\r\n```bash\r\nBenchmark 2: ./build/bin/bitcoind.exe -datadir=\"C:\\\\my_storage\\\\BitcoinData\" -stopatheight=933339 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 5401e673d56198f2c0bad366581e70d5d9cd765c)\r\n  Time (abs ≡):        30276.311 s               [User: 0.001 s, System: 0.000 s]\r\n```\r\n</details>\r\n\r\n<details><summary>i9 - 1.20x faster</summary>\r\n\r\n```bash\r\nfor DBCACHE in 450 1000 2000 3000; do \\                                                                                                                                        \r\n  COMMITS=\"097c18239b58a8ee03794b3ebc6e722a0da30d8d\"; \\                                                   \r\n  STOP=936639; CC=gcc; CXX=g++; \\                                                                         \r\n  BASE_DIR=\"/mnt/my_storage\"; DATA_DIR=\"$BASE_DIR/BitcoinData\"; LOG_DIR=\"$BASE_DIR/logs\"; \\\r\n  (echo \"\"; for c in $COMMITS; do git fetch -q origin $c && git log -1 --pretty='%h %s' $c || exit 1; done) && \\\r\n  (echo \"\" && echo \"$(date -I) | reindex-chainstate | ${STOP} blocks | dbcache ${DBCACHE} | $(hostname) | $(uname -m) | $(lscpu | grep 'Model name' | head -1 | cut -d: -f2 | xargs) | $(nproc) cores | $(free -h | awk '/^Mem:/{print $2}') RAM | $(lsblk -no ROTA $(df --output=source $BASE_DIR | tail -1) | grep -q 1 && echo HDD || echo SSD)\"; echo \"\") && \\\r\n  hyperfine \\                                                                                             \r\n    --sort command \\                                                                                      \r\n    --runs 1 \\                                                                                            \r\n    --export-json \"$BASE_DIR/rdx-$(sed -E 's/(\\w{8})\\w+ ?/\\1-/g;s/-$//'<<<\"$COMMITS\")-$STOP-$DBCACHE-$CC.json\" \\\r\n    --parameter-list COMMIT ${COMMITS// /,} \\                                                             \r\n    --prepare \"killall -9 bitcoind 2>/dev/null; rm -f ./build/bin/bitcoind; git clean -fxd; git reset --hard {COMMIT} && \\\r\n      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_IPC=OFF && ninja -C build bitcoind -j1 && \\\r\n      ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=1000 -printtoconsole=0; sleep 20; rm -f $DATA_DIR/debug.log\" \\\r\n    --conclude \"killall bitcoind || true; sleep 5; grep -q 'height=0' $DATA_DIR/debug.log && grep -q 'Disabling script verification at block #1' $DATA_DIR/debug.log && grep -q 'height=$STOP' $DATA_DIR/debug.log && grep 'Bitcoin Core version' $DATA_DIR/debug.log | grep -q \"$(printf %.12s {COMMIT})\"; \\\r\n                cp $DATA_DIR/debug.log $LOG_DIR/debug-{COMMIT}-$(date +%s).log\" \\\r\n    \"COMPILER=$CC ./build/bin/bitcoind -datadir=$DATA_DIR -stopatheight=$STOP -dbcache=$DBCACHE -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0\";\r\ndone\r\n```\r\n\r\n> 5401e673d5 Merge bitcoin/bitcoin#33604: p2p: Allow block downloads from peers without snapshot block after assumeutxo validation\r\n\r\n> 2026-02-26 | reindex-chainstate | 936639 blocks | dbcache 450 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=450 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        22076.658 s               [User: 53940.221 s, System: 3111.267 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 936639 blocks | dbcache 1000 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=1000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        19724.533 s               [User: 45709.253 s, System: 2066.725 s]\r\n```\r\n\r\n> 2026-02-26 | reindex-chainstate | 936639 blocks | dbcache 2000 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=2000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        18302.184 s               [User: 40157.899 s, System: 1250.246 s]\r\n``` \r\n\r\n> 2026-02-27 | reindex-chainstate | 936639 blocks | dbcache 3000 | i9-ssd | x86_64 | Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz | 16 cores | 62Gi RAM | SSD\r\n\r\n```bash\r\nBenchmark 1: COMPILER=gcc ./build/bin/bitcoind -datadir=/mnt/my_storage/BitcoinData -stopatheight=936639 -dbcache=3000 -reindex-chainstate -blocksonly -connect=0 -printtoconsole=0 (COMMIT = 097c18239b58a8ee03794b3ebc6e722a0da30d8d)\r\n  Time (abs ≡):        17858.670 s               [User: 38277.112 s, System: 1008.751 s]\r\n```\r\n\r\n</details>\r\n\r\n### Quick reference (64 bit)\r\n\r\n| System RAM | Automatic default | Warning fires above |\r\n|------------|-------------------|---------------------|\r\n| 1 GiB      | 100 MiB           | 100 MiB             |\r\n| 2 GiB      | 100 MiB           | 100 MiB             |\r\n| 4 GiB      | 512 MiB           | 3071 MiB            |\r\n| 8 GiB      | 1536 MiB          | 6143 MiB            |\r\n| 16 GiB     | 2048 MiB          | 12287 MiB           |\r\n| 32 GiB     | 2048 MiB          | 24575 MiB           |\r\n\r\n<img width=\"1384\" height=\"589\" alt=\"image\" src=\"https://github.com/user-attachments/assets/3bb9585d-7d03-4406-97fb-729ebd6dcc0b\" />\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-02-20T23:00:45Z",
-      "updated_at": "2026-02-28T15:16:19Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34641",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 34239,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -884,30 +957,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1142,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1940584116,
-      "number": 30343,
-      "title": "wallet, logging: Replace WalletLogPrintf() with LogInfo()",
-      "body": "Make new logging macros `LogDebug()`, `LogTrace()`, `LogInfo()`, `LogWarning()`, and `LogError()` compatible with wallet code and drop custom WalletLogPrintf() function. The new logging macros introduced in #28318 weren't previously useful in wallet code because wallet code prefixes most log messages with the wallet names to be be able to distinguish log output from multiple wallets. Fix this by introducing a new `WalletLogSource` class inheriting from `BCLog::Source` which can include the wallet name in log messages.\n\n---\n\n<!-- begin based-on -->\n**This is based on #29256.** The non-base commits are:\n\n- [`35ab88ce0e7` wallet, logging: Replace WalletLogPrintf() with LogInfo()](https://github.com/bitcoin/bitcoin/pull/30343/commits/35ab88ce0e7116c0a2bee2569ea1bc9eb5afffea)\n- [`f5039574576` wallet, logging: Switch LogInfo to LogWarning/LogError](https://github.com/bitcoin/bitcoin/pull/30343/commits/f5039574576f3128fe904147a53e3fcaab6c0d85)\n- [`aac55f94938` wallet, logging: Switch LogInfo to LogError in AddWalletDescriptor](https://github.com/bitcoin/bitcoin/pull/30343/commits/aac55f94938aa7ac727b840a9766adb848e998ab)<!-- end -->",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2024-06-26T17:57:15Z",
-      "updated_at": "2026-02-28T06:54:06Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/30343",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1201,
         "has_nack": false,
         "has_ack": false
       }
@@ -1558,30 +1607,6 @@
       }
     },
     {
-      "id": 304070624,
-      "number": 16545,
-      "title": "refactor: Implement missing error checking for ArgsManager flags",
-      "body": "Trigger startup errors if bitcoin is configured with bad setting values according to flags. Also raise internal errors if settings are registered and retrieved with inconsistent flags.\n\nThis change has no effect on behavior because the new ArgsManager flags added here are not used outside of tests yet.\n\nIt'll probably be easier to start applying type checking flags to _new_ options than _existing_ options. But for examples of how type checking flags can make sense applied to existing options, see the new [example_options unit test](https://github.com/ryanofsky/bitcoin/blob/pr/argcheck/src/test/argsman_tests.cpp#L27) added in this PR.\n\n---\n\nFollowups:\n\n- Support for flag combinations is possible and is added in commit c919f51c044f0e80ecd301f9c9d396ddff2331ba ([branch](https://github.com/ryanofsky/bitcoin/commits/pr/argcomb))\n- ALLOW_LIST flags are added and enforced in [#17580](https://github.com/bitcoin/bitcoin/pull/17580)\n- Bad IsArgSet usages with ALLOW_LIST are removed in [#30529](https://github.com/bitcoin/bitcoin/pull/30529) and prevented in [#17783](https://github.com/bitcoin/bitcoin/pull/17783)\n- Confusing and ignored multiple assignments in config files are disallowed in [#17493](https://github.com/bitcoin/bitcoin/pull/17493)\n- Confusing reverse-precedence settings merging code is removed in [#17581](https://github.com/bitcoin/bitcoin/pull/17581)\n- Type flags added in this PR implement runtime part of a change to add more compile-time checking in [#22978](https://github.com/bitcoin/bitcoin/pull/22978)\n",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2019-08-04T14:13:12Z",
-      "updated_at": "2026-02-27T20:08:15Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/16545",
-      "labels": [
-        "Utils/log/libs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1600,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3226824452,
       "number": 34457,
       "title": "wallet: add private broadcast support for wallet transactions",
@@ -1624,31 +1649,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 597,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1717651443,
-      "number": 29409,
-      "title": "multiprocess: Add capnp wrapper for Chain interface",
-      "body": "Changes making it possible to call `interface::Chain` over a socket.\r\n\r\nNote: The changes in this PR allow a `bitcoin-node` process to be controlled over a socket. The socket can either be an UNIX socket created by specifying the `-ipcbind` option, or it can be a socketpair created by a controlling process and passed to `bitcoin-node` via the `-ipcfd=<n>` with a file descriptor number. This PR is a dependency of #10102 which allows the wallet code to run in a separate process and use the `Chain` interface.\r\n\r\n---\r\n\r\nThis PR is part of the [process separation project](https://github.com/bitcoin/bitcoin/issues/28722).",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2024-02-08T13:54:40Z",
-      "updated_at": "2026-02-27T19:47:05Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/29409",
-      "labels": [
-        "interfaces",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 675,
         "has_nack": false,
         "has_ack": false
       }
@@ -5220,102 +5220,6 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 2203477250,
-      "number": 31382,
-      "title": "kernel: Flush in ChainstateManager destructor",
-      "body": "This simplifies the shutdown code a bit and reduces the amount of extra logic required in kernel/bitcoinkernel.cpp to tear down the chainman.\r\n\r\nMoving the second flush out of the Shutdown function into the ChainstateManager destructor, should be safe since there should be no new events created after the first flush. Tweak the chainman tests to actually exercise this new tear down behaviour.\r\n\r\n---\r\n\r\nThis PR is part of the [libbitcoinkernel project](https://github.com/bitcoin/bitcoin/issues/27587)",
-      "state": "closed",
-      "user": "sedited",
-      "created_at": "2024-11-27T13:18:50Z",
-      "updated_at": "2026-02-22T06:43:58Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31382",
-      "labels": [
-        "Validation",
-        "Up for grabs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 549,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2272618048,
-      "number": 31644,
-      "title": "leveldb: show non-default options during init",
-      "body": "To help with to debugging and traceability (in alignment with displaying other non-default args such as `Command-line arg: dbcache=\"10000\"`) we can extend the LevelDB opening log with an additional debug message for the used non-default settings.\r\n\r\nTo avoid showing booleans as e.g. `create_if_missing=1`, I've added a local `ToString` lambda for `bool`.\r\nI wanted to use `util::Join` at the end, but couldn't find any way that I liked.\r\n\r\nExample output after the change:\r\n```bash\r\n2025-10-15T02:39:45Z Opened LevelDB successfully\r\n2025-10-15T02:39:45Z [leveldb] startup options: options.compression=NoCompression, options.create_if_missing=true, options.max_file_size=33554432, options.paranoid_checks=true, options.write_buffer_size=524288, readoptions.fill_cache=false, readoptions.verify_checksums=true, writeoptions.sync=true\r\n```",
-      "state": "closed",
-      "user": "l0rinc",
-      "created_at": "2025-01-12T17:30:54Z",
-      "updated_at": "2026-02-22T05:56:36Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31644",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 883,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2349932670,
-      "number": 31929,
-      "title": "http: Make server shutdown more robust",
-      "body": "- Log HTTP request pointers to be able to discover which one is stuck.\r\n- Instead of hanging indefinitely, use timeouts and abort when HTTP connections take unreasonably long to close.\r\n- Ensure we always free libevent HTTP.\r\n\r\nShould help debug #31894.",
-      "state": "closed",
-      "user": "hodlinator",
-      "created_at": "2025-02-21T15:32:53Z",
-      "updated_at": "2026-02-22T04:24:11Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31929",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 292,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2466171613,
-      "number": 32297,
-      "title": "bitcoin-cli: Add -ipcconnect option",
-      "body": "This implements an idea from sipa in https://github.com/bitcoin/bitcoin/issues/28722#issuecomment-2807026958 to allow `bitcoin-cli` to connect to the node via IPC instead of TCP, if the ENABLE_IPC cmake option is enabled and the node has been started with `-ipcbind`.\r\n\r\nThis feature can be tested with:\r\n\r\n```\r\nbuild/bin/bitcoin-node -regtest -ipcbind=unix -debug=ipc\r\nbuild/bin/bitcoin-cli -regtest -ipcconnect=unix -getinfo\r\n```\r\n\r\nThe -ipconnect parameter can also be omitted, since this change also makes `bitcoin-cli` prefer IPC over HTTP by default, and falling back to HTTP if an IPC connection can't be established.\r\n\r\n---\r\n\r\nThis PR is part of the [process separation project](https://github.com/bitcoin/bitcoin/issues/28722).",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2025-04-17T13:55:32Z",
-      "updated_at": "2026-02-22T03:01:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32297",
-      "labels": [
-        "RPC/REST/ZMQ",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 2,
-        "text_length": 772,
-        "has_nack": false,
-        "has_ack": true
-      }
     }
   ],
   "issues": [
@@ -6947,19 +6851,6 @@
       "labels": [],
       "comment_data": [
         {
-          "id": 3940013120,
-          "user": "w0xlt",
-          "body": "`BlockUntilSyncedToCurrentChain()` wouldn't catch this. After `Sync()`, both `best_block_index` and `chain_tip` are at block 151, so it takes the early return without draining the queue:\n\n```cpp\n  if (best_block_index->GetAncestor(chain_tip->nHeight) == chain_tip) {\n      return true;  // skips SyncWithValidationInterfaceQueue()\n  }\n```\n\nThe issue looks to be that 51 `BlockConnected` callbacks (for blocks mined between `Init()` and `Sync()`) are still pending in the validation interface queue. When the scheduler delivers the stale callbacks and `BlockConnected` sees `best_block_index=151` but receives a notification for `pindex=101`, it interprets this as: \"_I'm at 151, but I need to  process block 101 — I must have missed something, let me rewind to block 100 and re-index from there._\" That rewind erases the spending entries for blocks 101-151.\n\n```cpp\nif (best_block_index != pindex->pprev && !Rewind(best_block_index, pindex->pprev)) {\n```\n\nOn Linux the scheduler seems to drain those callbacks before `Sync()` sets `m_synced = true`. But the error can be deterministically triggered by firing a stale `BlockConnected` directly after `Sync()`:\n\n<details>\n  <summary>diff</summary>\n\n```diff\ndiff --git a/src/test/txospenderindex_tests.cpp b/src/test/txospenderindex_tests.cpp\nindex 889ef7ff8a..fef331afe4 100644\n--- a/src/test/txospenderindex_tests.cpp\n+++ b/src/test/txospenderindex_tests.cpp\n@@ -4,7 +4,10 @@\n \n #include <chainparams.h>\n #include <index/txospenderindex.h>\n+#include <kernel/types.h>\n+#include <node/blockstorage.h>\n #include <test/util/setup_common.h>\n+#include <test/util/validation.h>\n #include <util/time.h>\n #include <validation.h>\n \n@@ -54,6 +57,24 @@ BOOST_FIXTURE_TEST_CASE(txospenderindex_initial_sync, TestChain100Setup)\n     BOOST_CHECK(!txospenderindex.BlockUntilSyncedToCurrentChain());\n \n     txospenderindex.Sync();\n+\n+    // Simulate a stale BlockConnected callback: fire BlockConnected for block\n+    // 101, which Sync() already indexed. Since m_synced is now true, this\n+    // triggers Rewind(tip, 100), erasing spending entries for blocks 101-tip.\n+    // This reproduces the race in issue #34637 deterministically.\n+    {\n+        const CBlockIndex* stale_pindex;\n+        {\n+            LOCK(cs_main);\n+            stale_pindex = m_node.chainman->ActiveChain()[101];\n+        }\n+        CBlock stale_block;\n+        m_node.chainman->ActiveChainstate().m_blockman.ReadBlock(stale_block, *stale_pindex);\n+        auto shared_block = std::make_shared<CBlock>(stale_block);\n+        ValidationInterfaceTest::BlockConnected(\n+            kernel::ChainstateRole{}, txospenderindex, shared_block, stale_pindex);\n+    }\n+\n     for (size_t i = 0; i < spent.size(); i++) {\n         const auto tx_spender{txospenderindex.FindSpender(spent[i])};\n         BOOST_REQUIRE(tx_spender.has_value());\n```\n</details>\n\nAdding `SyncWithValidationInterfaceQueue()` after `Sync()` to unconditionally drain the stale callbacks before querying the index should work, as observed by @hodlinator .\n\n<details>\n  <summary>diff</summary>\n\n```diff\ndiff --git a/src/test/txospenderindex_tests.cpp b/src/test/txospenderindex_tests.cpp\nindex 889ef7ff8a..4aaa5513de 100644\n--- a/src/test/txospenderindex_tests.cpp\n+++ b/src/test/txospenderindex_tests.cpp\n@@ -54,6 +54,12 @@ BOOST_FIXTURE_TEST_CASE(txospenderindex_initial_sync, TestChain100Setup)\n     BOOST_CHECK(!txospenderindex.BlockUntilSyncedToCurrentChain());\n \n     txospenderindex.Sync();\n+\n+    // Drain stale BlockConnected callbacks that were enqueued for blocks created\n+    // between Init() and Sync(). After Sync() sets m_synced = true, these\n+    // callbacks can trigger unnecessary rewinds until fully processed.\n+    m_node.validation_signals->SyncWithValidationInterfaceQueue();\n+\n     for (size_t i = 0; i < spent.size(); i++) {\n         const auto tx_spender{txospenderindex.FindSpender(spent[i])};\n         BOOST_REQUIRE(tx_spender.has_value());\n```\n</details>",
-          "created_at": "2026-02-22T03:08:41Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 3952,
-            "has_nack": false,
-            "has_ack": true
-          }
-        },
-        {
           "id": 3941987689,
           "user": "furszy",
           "body": "Oh, just realized your comment w0xlt. I have been cooking some deep index changes to completely eradicate the underlying problem with `BlockUntilSyncedToCurrentChain()`, not only to fix the test. Still in draft and not ready [branch](https://github.com/furszy/bitcoin-core/tree/2026_index_fix_inconsistent_state_and_extra_disk_reads).\n\nBut.. I got sidetracked today by the new txospender tests code and ended up cleaning them up. They weren't easy to read or work with. So I pushed #34653 to make our future selves' and future devs' lives easier (hopefully).\n\nThis isn’t blocking the direct test fix you are suggesting. I will happily ACK that too. Just sharing an update that there is more here, and will be pushing a new PR \"soon\".\n",
@@ -7422,48 +7313,12 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 3973731534,
-      "number": 34648,
-      "title": ".",
-      "body": ".",
-      "state": "closed",
-      "user": "godmakesthebeautifulworld12345-oss",
-      "created_at": "2026-02-22T06:35:41Z",
-      "updated_at": "2026-02-22T06:35:50Z",
-      "closed_at": "2026-02-22T06:35:48Z",
-      "comments": 1,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34648",
-      "labels": [],
-      "comment_data": [
-        {
-          "id": 3940288638,
-          "user": "DrahtBot",
-          "body": "\nLLM spam detection (✨ experimental): SPAM. The report contains only a single-word title with no body or actionable details, providing no context, purpose, or reproducible information and therefore appears to be a placeholder or irrelevant submission rather than a legitimate issue.\n\n♻️ Automatically wiping, closing, and locking for now based on heuristics.\nGenerally, please focus on creating high-quality, original content that demonstrates a clear\nunderstanding of the project's requirements and goals.\n",
-          "created_at": "2026-02-22T06:35:48Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 507,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 3,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "summary": {
-    "total_prs": 223,
-    "total_issues": 39,
-    "total_comments": 90,
-    "unique_participants": 86
+    "total_prs": 219,
+    "total_issues": 38,
+    "total_comments": 88,
+    "unique_participants": 85
   }
 }
