@@ -1,12 +1,276 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-03-01T08:24:26.618870+00:00",
+  "fetched_at": "2026-03-01T16:20:54.752720+00:00",
   "date_range": {
-    "since": "2026-02-22T08:24:26.618809+00:00",
-    "until": "2026-03-01T08:24:26.618809+00:00"
+    "since": "2026-02-22T16:20:54.752664+00:00",
+    "until": "2026-03-01T16:20:54.752664+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3088060609,
+      "number": 34038,
+      "title": "logging: replace -loglevel with -trace, various API improvements",
+      "body": "Various API improvements:\r\n                                                                                                    \r\nFor users:      \r\n\r\n  - A new -trace option controls trace-level logging, using the same syntax as -debug. So `-debug=net` enables debug logs for net, `-trace=net` adds trace logs too. This replaces the `-loglevel` option, which had different syntax and had to be combined with `-debug` to take effect.\r\n - The logging RPC gains trace support: a new trace parameter enables trace-level logging per category, and the output now distinguishes excluded/debug/trace categories. (`-deprecatedrpc=logging` preserves the old format.)\r\n\r\nFor developers:\r\n\r\n  - `STDLOCK()` macro for `StdMutex`, enabling clang thread-safety analysis to catch annotation gaps.\r\n  - `util::log::NO_RATE_LIMIT` lets you write LogInfo(util::log::NO_RATE_LIMIT, \"...\") instead of using the internal `LogPrintLevel` function.\r\n  - Cleaner internals: `LogPrintLevel` moves to a `detail_` namespace, `GetLogCategory` moves into `Logger`, and more\r\n  files switch from `logging.h` to the lighter `util/log.h` (continuing the separation started in #34465).",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2025-12-10T05:56:20Z",
+      "updated_at": "2026-03-01T12:59:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34038",
+      "labels": [
+        "Needs release note"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1215,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3091431534,
+      "number": 34049,
+      "title": "rpc: Disallow captures in RPCMethodImpl",
+      "body": "When defining `RPCHelpMan` objects, we usually return a lambda, and mostly we define those via `[&](...) { ... }` which explicitly captures any parameters or local variables by reference. If we were to actually use any of those captures (we don't), we would invoke undefined behaviour. So instead, convert all the `[&]` to `[]` to avoid capturing, and as part of `RPCHelpMan` check that the function we provide is convertible to a bare function pointer, so that any attempts to capture anything (even if it's by-copy, which is safe) results in an error.\r\n\r\nWhile we're at it, rename `RPCHelpMan` to `RPCMethod`, reflecting it's greater responsibility since #19386.",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2025-12-11T03:25:25Z",
+      "updated_at": "2026-03-01T12:53:22Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34049",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 704,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3102178109,
+      "number": 34075,
+      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
+      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-12-15T11:53:35Z",
+      "updated_at": "2026-03-01T12:47:20Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 1,
+        "text_length": 8927,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3340662818,
+      "number": 34705,
+      "title": "kernel: Use fs:: namespace and unicode path in kernel tests",
+      "body": "Add support for unicode characters in paths to the kernel tests by using our fs:: wrappers for std::filesystem calls and adding the windows application manifest to the binary. This exercises their handling through the kernel API.",
+      "state": "open",
+      "user": "sedited",
+      "created_at": "2026-03-01T12:15:36Z",
+      "updated_at": "2026-03-01T12:46:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34705",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 289,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1071188902,
+      "number": 26201,
+      "title": "Remove Taproot BIP 9 deployment",
+      "body": "Drop `DEPLOYMENT_TAPROOT` from `consensus.vDeployments`.\r\n\r\nNow that the commit (https://github.com/bitcoin/bitcoin/commit/7c08d81e119570792648fe95bbacddbb1d5f9ae2) which changes taproot to be enforced for all blocks is included in v24.0, it seems a good time to remove no longer needed non-consensus code.\r\n\r\nClarify what is considered a `BuriedDeployment`.\r\n\r\nWe drop taproot from `getdeploymentinfo` RPC, rather than mark it as `buried`, because this is not a buried deployment in the sense of [BIP 90](https://github.com/bitcoin/bips/blob/master/bip-0090.mediawiki). This is because the activation height has been completely removed from the code, unlike the hardcoded `DEPLOYMENT_SEGWIT` height which is still relied on.[^1]\r\n\r\nSee discussion in #24737 and #26162.\r\n\r\n[^1]: `DEPLOYMENT_SEGWIT` is used in `IsBlockMutated` to determine if witness data is allowed, it's used for [BIP147](https://github.com/bitcoin/bips/blob/master/bip-0147.mediawiki), to trigger `NeedsRedownload()` for users who upgraded after a decade, and for a few other things.",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2022-09-29T11:16:54Z",
+      "updated_at": "2026-03-01T12:38:00Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/26201",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 0,
+        "text_length": 1085,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2005623544,
+      "number": 30595,
+      "title": "kernel: Introduce C header API",
+      "body": "This is a first attempt at introducing a C header for the libbitcoinkernel library that may be used by external applications for interfacing with Bitcoin Core's validation logic. It currently is limited to operations on blocks. This is a conscious choice, since it already offers a lot of powerful functionality, but sits just on the cusp of still being reviewable scope-wise while giving some pointers on how the rest of the API could look like.\r\n\r\nThe current design was informed by the development of some tools using the C header:\r\n\r\n* A re-implementation (part of this pull request) of [bitcoin-chainstate](https://github.com/bitcoin/bitcoin/blob/master/src/bitcoin-chainstate.cpp).\r\n* A re-implementation of the python [block linearize](https://github.com/bitcoin/bitcoin/tree/master/contrib/linearize) scripts: https://github.com/TheCharlatan/bitcoin/tree/kernelLinearize \r\n* A silent payment scanner: https://github.com/josibake/silent-payments-scanner\r\n* An electrs index builder: https://github.com/josibake/electrs/commits/electrs-kernel-integration\r\n* A rust bitcoin node: https://github.com/TheCharlatan/kernel-node\r\n* A reindexer: https://github.com/TheCharlatan/bitcoin/tree/kernelApi_Reindexer\r\n\r\nThe library has also been used by other developers already:\r\n\r\n* A historical block analysis tool: https://github.com/ismaelsadeeq/mining-analysis\r\n* A swiftsync hints generator: https://github.com/theStack/swiftsync-hints-gen\r\n* Fast script validation in floresta: https://github.com/vinteumorg/Floresta/pull/456\r\n* A swiftsync node implementation: https://github.com/2140-dev/swiftsync/tree/master/node\r\n\r\nNext to the C++ header also made available in this pull request, bindings for other languages are available here: \r\n\r\n* Rust: https://github.com/TheCharlatan/rust-bitcoinkernel\r\n* Python: https://github.com/stickies-v/py-bitcoinkernel \r\n* Go: https://github.com/stringintech/go-bitcoinkernel\r\n* Java: https://github.com/yuvicc/java-bitcoinkernel\r\n\r\nThe rust bindings include unit and fuzz tests for the API.\r\n\r\nThe header currently exposes logic for enabling the following functionality:\r\n* Feature-parity with the now deprecated libbitcoin-consensus\r\n* Optimized sha256 implementations that were not available to previous users of libbitcoin-consensus thanks to a static kernel context\r\n* Full support for logging as well as control over categories and severity\r\n* Feature parity with the existing experimental bitcoin-chainstate\r\n* Traversing the block index as well as using block index entries for reading block and undo data.\r\n* Running the chainstate in memory\r\n* Reindexing (both full and chainstate-only)\r\n* Interrupting long-running functions\r\n\r\nThe pull request introduces a new kernel-only test binary that purely relies on the kernel C header and the C++ standard library. This is intentionally done to show its capabilities without relying on other code inside the project. This may be relaxed to include some of the existing utilities, or even be merged into the existing test suite.\r\n\r\nThe complete docs for the API as well as some usage examples are hosted on [thecharlatan.ch/kernel-docs](https://thecharlatan.ch/kernel-docs/index.html). The docs are generated from the following repository (which also holds the examples): [github.com/TheCharlatan/kernel-docs](https://github.com/TheCharlatan/kernel-docs).\r\n\r\n#### How can I review this PR?\r\n\r\nScrutinize the commit messages, run the tests, write your own little applications using the library, let your favorite code sanitizer loose on it, hook it up to your fuzzing infrastructure, profile the difference between the existing bitcoin-chainstate and the bitcoin-chainstate introduced here, be nitty on the documentation, police the C interface, opine on your own API design philosophy.\r\n\r\nTo get a feeling for the API, read through the tests, or one of the examples.\r\n\r\nTo configure this PR for making the shared library and the bitcoin-chainstate and test_kernel utilities available:\r\n```\r\ncmake -B build -DBUILD_KERNEL_LIB=ON -DBUILD_UTIL_CHAINSTATE=ON\r\n```\r\n\r\nOnce compiled the library is part of the build artifacts that can be installed with:\r\n```\r\ncmake --install build\r\n```\r\n\r\n#### Why a C header (and not a C++ header)\r\n\r\n* Shipping a shared library with a C++ header is hard, because of name mangling and an unstable ABI.\r\n* Mature and well-supported tooling for integrating C exists for nearly every popular language.\r\n* C offers a reasonably stable ABI\r\n\r\nAlso see https://github.com/bitcoin/bitcoin/pull/30595#issuecomment-2285719575.\r\n\r\n#### What about versioning?\r\n\r\nThe header and library are still experimental and I would expect this to remain so for some time, so best not to worry about versioning yet.\r\n\r\n#### Potential future additions\r\n\r\nIn future, the C header could be expanded to support (some of these have been roughly implemented):\r\n\r\n* Handling transactions, block headers, coins cache, utxo set, meta data, and the mempool\r\n* Adapters for an abstract coins store\r\n* Adapters for an abstract block store\r\n* Adapters for an abstract block tree store\r\n* Allocators and buffers for more efficient memory usage\r\n* An \"[io-less](https://sans-io.readthedocs.io/how-to-sans-io.html)\" interface\r\n* Hooks for an external mempool, or external policy rules\r\n\r\n#### Current drawbacks\r\n\r\n* For external applications to read the block index of an existing Bitcoin Core node, Bitcoin Core needs to shut down first, since leveldb does not support reading across multiple processes. Other than migrating away from leveldb, there does not seem to be a solution for this problem. Such a migration is implemented in #32427.\r\n* The fatal error handling through the notifications is awkward. This is partly improved through #29642.\r\n* Handling shared pointers in the interfaces is unfortunate. They make ownership and freeing of the resources fuzzy and poison the interfaces with additional types and complexity. However, they seem to be an artifact of the current code that interfaces with the validation engine. The validation engine itself does not seem to make extensive use of these shared pointers.\r\n* If multiple instances of the same type of objects are used, there is no mechanism for distinguishing the log messages produced by each of them. A potential solution is #30342.\r\n* The background leveldb compaction thread may not finish in time leading to a non-clean exit. There seems to be nothing we can do about this, outside of patching leveldb.",
+      "state": "closed",
+      "user": "sedited",
+      "created_at": "2024-08-06T09:18:27Z",
+      "updated_at": "2026-03-01T12:15:58Z",
+      "merged_at": "2025-11-04T15:38:51Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/30595",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 6484,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3220617054,
+      "number": 34435,
+      "title": "refactor: use `_MiB`/`_GiB` consistently for byte conversions",
+      "body": "### Problem\r\nByte-size conversions in the codebase currently show up in many equivalent formats (multiplication/division chains, shifts, hex/binary literals), which creates a maintenance burden and makes review error-prone - especially considering the architectural differences of `size_t`.\r\nInspired by https://github.com/bitcoin/bitcoin/pull/34305#discussion_r2734720002, it seemed appropriate to unify `Mebibyte` usage across the codebase and add `Gibibyte` support with 32/64 bit `size_t` validation.\r\n\r\n### Fix\r\nThis PR refactors those call sites to use `\"\"_MiB` (existing) and `\"\"_GiB` (new), and adds the encountered value/pattern replacements to unit tests to make review straightforward, and to ensure the conversions remain valid.\r\nThe literals are overflow-checked when converting to `size_t`, and unit tests cover the 32-bit boundary cases.\r\n\r\nConcretely, it replaces patterns such as:\r\n* `1024*1024`, `1<<20`, `0x100000`, `1048576`, `/ 1024 / 1024`, `* (1.0 / 1024 / 1024)` → `1_MiB` or `double(1_MiB)`\r\n* `1024*1024*1024`, `1<<30`, `0x40000000`, `1024_MiB`, `>> 30` → `1_GiB`\r\n\r\n### Note\r\nIn the few places where arithmetic involves signed values, the result is identical to the previous code assuming those quantities never become negative.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-28T21:26:10Z",
+      "updated_at": "2026-03-01T10:32:13Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34435",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1317,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3223998841,
+      "number": 34448,
+      "title": "ci, iwyu: Fix warnings in `src/util` and treat them as errors",
+      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2026-01-29T15:38:39Z",
+      "updated_at": "2026-03-01T10:18:20Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34448",
+      "labels": [
+        "Refactoring",
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 305,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3226824452,
+      "number": 34457,
+      "title": "wallet: add private broadcast support for wallet transactions",
+      "body": "## Summary\r\n\r\nExtends the private broadcast feature (#29415) to wallet transactions. When `-privatebroadcast=1` is enabled, wallet RPCs (`sendtoaddress`, `send`, `sendall`, `sendmany`) now broadcast transactions through short-lived Tor/I2P connections instead of announcing to all connected peers.\r\n\r\nEDIT: The per-transaction private_broadcast flag in mapValue of the original proposal has been removed (rationale: https://github.com/bitcoin/bitcoin/pull/34533#pullrequestreview-3829186494). \r\n\r\n<details>\r\n  <summary>Previous approach</summary>\r\n  \r\n## Key Changes\r\n\r\n**Centralized availability check** (commit 1)\r\n- Moves the Tor/I2P reachability check from `sendrawtransaction` RPC to `BroadcastTransaction()`\r\n- All broadcast callers now get consistent error handling\r\n\r\n**Wallet integration** (commit 2)\r\n- `CommitTransaction()`: Uses private broadcast when enabled, fails loudly if Tor/I2P unavailable\r\n- `ResubmitWalletTransactions()`: Rebroadcasts using the original broadcast method\r\n- Persists a `private_broadcast` flag in the wallet transaction's `mapValue`\r\n\r\n**Functional tests** (commits 3-4)\r\n- Tests wallet send via SOCKS5 proxy\r\n- Tests flag persistence across restarts\r\n- Tests error handling when Tor/I2P unavailable\r\n\r\n## Behavior Matrix\r\n\r\n| Scenario | TX Flag | Node Setting | Expected Behavior | Tested |\r\n|----------|---------------|--------------|-------------------|--------|\r\n| New tx | Private | - | Via SOCKS5, flag set | Test 1 ✓ |\r\n| Resubmit | Private | Public | Skip | Test 2 ✓ |\r\n| Resubmit | Public | Private | Skip | Test 3 ✓ |\r\n| Resubmit | Private | Private | Rebroadcast | Test 3 ✓ |\r\n| New tx | Private | - (no Tor) | RPC error | Test 4 ✓ |\r\n| Resubmit | Private | Private (no Tor) | Log error | Test 4 ✓ |\r\n\r\n**Why skip on mode mismatch?** Rebroadcasting via a different method than originally used may allow correlation of transaction to origin, or may indicate origin has `-privatebroadcast` enabled.\r\n\r\n</details>",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2026-01-30T08:06:34Z",
+      "updated_at": "2026-03-01T10:11:09Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34457",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2021,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3340382450,
+      "number": 34704,
+      "title": "validation: Explicitly move blocks to validation signals",
+      "body": "This enforces behaviour that is currently already implicit: The destructor for blocks runs mostly in the [scheduler thread](https://bitcoin-dev-tools.github.io/benchcoin/results/pr-176/20472174834/mainnet-default-instrumented-head-flamegraph.svg?x=2762391536960&y=684). The change should make it a bit clearer what the ownership semantics for these validation signals are.\r\n\r\n`BlockConnected` already takes a reference to a block that is moved to a dedicated connect trace. Once `connect trace` is iterated through, it is not reused. Similarly `BlockDisconnected` currently takes a reference to a block that is discarded after the call to it.\r\n\r\n",
+      "state": "open",
+      "user": "sedited",
+      "created_at": "2026-03-01T09:07:28Z",
+      "updated_at": "2026-03-01T09:07:50Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34704",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 703,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3308270443,
+      "number": 34638,
+      "title": "guix: Update storage requirement for HOSTS and added warning for Guix overhead",
+      "body": "This is an alternative to #33889\r\n\r\nThe lasttime the storage requirements were updated is 4 years ago in #22075 and do not match the current needs of a Guix build. This PR updates the storage requirements to align with recent builds.\r\n\r\nThe current code is quite off for certain hosts (the total equals out overall), but the check also ignores the output directory which takes up an additional 5 GiB of disk space:\r\n\r\n<details>\r\n\r\nComparing real usage against the script's estimates:\r\n\r\n| Host                  | Real KiB  | Estimate KiB | Delta          |\r\n| --------------------- | --------- | ------------ | -------------- |\r\n| `aarch64-linux-gnu`   | 3,875,896 | 6,400,000    | **-2,524,104** |\r\n| `arm-linux-gnueabihf` | 2,983,008 | 6,400,000    | **-3,416,992** |\r\n| `riscv64-linux-gnu`   | 5,712,668 | 6,400,000    | -687,332       |\r\n| `x86_64-linux-gnu`    | 3,978,648 | 6,400,000    | **-2,421,352** |\r\n| `powerpc64-linux-gnu` | 4,026,948 | 6,400,000    | -2,373,052     |\r\n| `x86_64-w64-mingw32`  | 8,022,644 | 7,600,000    | +422,644       |\r\n| `x86_64-apple-darwin` | 2,714,848 | 440,000      | **+2,274,848** |\r\n| `arm64-apple-darwin`  | 2,659,824 | 440,000      | **+2,219,824** |\r\n| `output dir ` | 5,500,000 | 0 | **+5,500,000**|\r\n\r\n\r\n</details>\r\n\r\nThis PR makes the following changes: \r\n- Updates the required KiB per category to current needs + 10% margin\r\n- it adds an extra category for `riscv64` (was way off * category )\r\n- adds output directory storage requirements \r\n\r\nThis all totals to 42 GiB (using all hosts) :\r\n<details>\r\n\r\nOutput for #34550 on Guix 1.5.0 \r\n\r\n| Host                  |  Real KiB | Estimate      | Margin     |\r\n| --------------------- | ---------------- | ------------- | ---------- |\r\n| `aarch64-linux-gnu`   | ~3,880,000       | 4,400,000     | +13%       |\r\n| `arm-linux-gnueabihf` | ~3,041,000       | 4,400,000     | +45%       |\r\n| `powerpc64-linux-gnu` | ~4,089,000       | 4,400,000     | +8%        |\r\n| `x86_64-linux-gnu`    | ~3,985,000       | 4,400,000     | +10%       |\r\n| `riscv64-linux-gnu`   | ~5,767,000       | 6,300,000     | +9%        |\r\n| `x86_64-w64-mingw32`  | ~8,074,000       | 9,000,000     | +11%       |\r\n| `x86_64-apple-darwin` | ~2,726,000       | 3,000,000     | +10%       |\r\n| `arm64-apple-darwin`  | ~2,726,000       | 3,000,000     | +10%       |\r\n| **output**            | ~4,929,000 | 5,500,000 | +10% |\r\n\r\nOutput for #34627 on Guix 1.4.0 \r\n\r\n| Host                  |  Real KiB | Estimate      | Margin     |\r\n| --------------------- | ---------------- | ------------- | ---------- |\r\n| `aarch64-linux-gnu`   | ~3,934,232       | 4,400,000     | +12%       |\r\n| `arm-linux-gnueabihf` | ~3,040,552       | 4,400,000     | +45%       |\r\n| `powerpc64-linux-gnu` | ~4,084,480       | 4,400,000     | +8%        |\r\n| `x86_64-linux-gnu`    | ~4,036,900       | 4,400,000     | +9%       |\r\n| `riscv64-linux-gnu`   | ~5,764,512       | 6,300,000     | +9%        |\r\n| `x86_64-w64-mingw32`  | ~8,087,164       | 9,000,000     | +11%       |\r\n| `x86_64-apple-darwin` | ~2,762,992       | 3,000,000     | +9%       |\r\n| `arm64-apple-darwin`  | ~2,707,800       | 3,000,000     | +11%       |\r\n| **output**            | ~5,048,228 | 5,500,000 | +9% |\r\n\r\n</details>\r\n\r\nAdditionally, maybe more controversial (happy to drop), I've added a second check to warm users if they do not have enough free space to store the guix overhead (`/gnu` store) which is an additional 8,7 GiB.  This check only warns and does not stop the build. \r\n\r\n<details> <summary> New warning message:</summary>\r\n\r\n```terminal\r\nFound macOS SDK at '/root/SDK/Xcode-26.1.1-17B100-extracted-SDK-with-libcxx-head\r\ners', using...\r\n\r\nWARN: Available disk space (42 GiB) may be insufficient for the\r\n      estimated total of 51 GiB (build directories, output,\r\n      and Guix environment overhead).\r\n\r\nThe build will proceed, but may fail mid-way if disk space runs out.\r\n\r\nChecking that we can connect to the guix-daemon...\r\n```\r\n</details>\r\n\r\nNB.\r\nCould not find a good reason for the change  in disk usage, even older V29 build take up roughly the same size as recent builds.",
+      "state": "open",
+      "user": "janb84",
+      "created_at": "2026-02-20T15:00:28Z",
+      "updated_at": "2026-03-01T08:33:17Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34638",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 4198,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3308893519,
       "number": 34639,
@@ -341,28 +605,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1331,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1071188902,
-      "number": 26201,
-      "title": "Remove Taproot BIP 9 deployment",
-      "body": "Drop `DEPLOYMENT_TAPROOT` from `consensus.vDeployments`.\r\n\r\nNow that the commit (https://github.com/bitcoin/bitcoin/commit/7c08d81e119570792648fe95bbacddbb1d5f9ae2) which changes taproot to be enforced for all blocks is included in v24.0, it seems a good time to remove no longer needed non-consensus code.\r\n\r\nClarify what is considered a `BuriedDeployment`.\r\n\r\nWe drop taproot from `getdeploymentinfo` RPC, rather than mark it as `buried`, because this is not a buried deployment in the sense of [BIP 90](https://github.com/bitcoin/bips/blob/master/bip-0090.mediawiki). This is because the activation height has been completely removed from the code, unlike the hardcoded `DEPLOYMENT_SEGWIT` height which is still relied on.[^1]\r\n\r\nSee discussion in #24737 and #26162.\r\n\r\n[^1]: `DEPLOYMENT_SEGWIT` is used in `IsBlockMutated` to determine if witness data is allowed, it's used for [BIP147](https://github.com/bitcoin/bips/blob/master/bip-0147.mediawiki), to trigger `NeedsRedownload()` for users who upgraded after a decade, and for a few other things.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2022-09-29T11:16:54Z",
-      "updated_at": "2026-02-28T17:38:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/26201",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 0,
-        "text_length": 1085,
         "has_nack": false,
         "has_ack": false
       }
@@ -1299,54 +1541,6 @@
       }
     },
     {
-      "id": 3088060609,
-      "number": 34038,
-      "title": "logging: replace -loglevel with -trace, various API improvements",
-      "body": "Various API improvements:\r\n                                                                                                    \r\nFor users:      \r\n\r\n  - A new -trace option controls trace-level logging, using the same syntax as -debug. So `-debug=net` enables debug logs for net, `-trace=net` adds trace logs too. This replaces the `-loglevel` option, which had different syntax and had to be combined with `-debug` to take effect.\r\n - The logging RPC gains trace support: a new trace parameter enables trace-level logging per category, and the output now distinguishes excluded/debug/trace categories. (`-deprecatedrpc=logging` preserves the old format.)\r\n\r\nFor developers:\r\n\r\n  - `STDLOCK()` macro for `StdMutex`, enabling clang thread-safety analysis to catch annotation gaps.\r\n  - `util::log::NO_RATE_LIMIT` lets you write LogInfo(util::log::NO_RATE_LIMIT, \"...\") instead of using the internal `LogPrintLevel` function.\r\n  - Cleaner internals: `LogPrintLevel` moves to a `detail_` namespace, `GetLogCategory` moves into `Logger`, and more\r\n  files switch from `logging.h` to the lighter `util/log.h` (continuing the separation started in #34465).",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2025-12-10T05:56:20Z",
-      "updated_at": "2026-02-27T23:26:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34038",
-      "labels": [
-        "Needs release note"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1215,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3102178109,
-      "number": 34075,
-      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
-      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-12-15T11:53:35Z",
-      "updated_at": "2026-02-27T23:09:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 1,
-        "text_length": 8927,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3320837654,
       "number": 34661,
       "title": "ipc mining: Prevent ``Assertion `m_node.chainman' failed`` errors on early startup",
@@ -1512,30 +1706,6 @@
       }
     },
     {
-      "id": 3220617054,
-      "number": 34435,
-      "title": "refactor: use `_MiB`/`_GiB` consistently for byte conversions",
-      "body": "### Problem\r\nByte-size conversions in the codebase currently show up in many equivalent formats (multiplication/division chains, shifts, hex/binary literals), which creates a maintenance burden and makes review error-prone - especially considering the architectural differences of `size_t`.\r\nInspired by https://github.com/bitcoin/bitcoin/pull/34305#discussion_r2734720002, it seemed appropriate to unify `Mebibyte` usage across the codebase and add `Gibibyte` support with 32/64 bit `size_t` validation.\r\n\r\n### Fix\r\nThis PR refactors those call sites to use `\"\"_MiB` (existing) and `\"\"_GiB` (new), and adds the encountered value/pattern replacements to unit tests to make review straightforward, and to ensure the conversions remain valid.\r\nThe literals are overflow-checked when converting to `size_t`, and unit tests cover the 32-bit boundary cases.\r\n\r\nConcretely, it replaces patterns such as:\r\n* `1024*1024`, `1<<20`, `0x100000`, `1048576`, `/ 1024 / 1024`, `* (1.0 / 1024 / 1024)` → `1_MiB` or `double(1_MiB)`\r\n* `1024*1024*1024`, `1<<30`, `0x40000000`, `1024_MiB`, `>> 30` → `1_GiB`\r\n\r\n### Note\r\nIn the few places where arithmetic involves signed values, the result is identical to the previous code assuming those quantities never become negative.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-28T21:26:10Z",
-      "updated_at": "2026-02-27T20:29:45Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34435",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1317,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2540992851,
       "number": 32606,
       "title": "p2p: Drop unsolicited CMPCTBLOCK from non-HB peer",
@@ -1579,56 +1749,6 @@
         "text_length": 10027,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3223998841,
-      "number": 34448,
-      "title": "ci, iwyu: Fix warnings in `src/util` and treat them as errors",
-      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2026-01-29T15:38:39Z",
-      "updated_at": "2026-02-27T20:14:18Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34448",
-      "labels": [
-        "Refactoring",
-        "Utils/log/libs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 305,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3226824452,
-      "number": 34457,
-      "title": "wallet: add private broadcast support for wallet transactions",
-      "body": "## Summary\r\n\r\nExtends the private broadcast feature (#29415) to wallet transactions. When `-privatebroadcast=1` is enabled, wallet RPCs (`sendtoaddress`, `send`, `sendall`, `sendmany`) now broadcast transactions through short-lived Tor/I2P connections instead of announcing to all connected peers.\r\n\r\nEDIT: The per-transaction private_broadcast flag in mapValue of the original proposal has been removed (rationale: https://github.com/bitcoin/bitcoin/pull/34533#pullrequestreview-3829186494). \r\n\r\n<details>\r\n  <summary>Previous approach</summary>\r\n  \r\n## Key Changes\r\n\r\n**Centralized availability check** (commit 1)\r\n- Moves the Tor/I2P reachability check from `sendrawtransaction` RPC to `BroadcastTransaction()`\r\n- All broadcast callers now get consistent error handling\r\n\r\n**Wallet integration** (commit 2)\r\n- `CommitTransaction()`: Uses private broadcast when enabled, fails loudly if Tor/I2P unavailable\r\n- `ResubmitWalletTransactions()`: Rebroadcasts using the original broadcast method\r\n- Persists a `private_broadcast` flag in the wallet transaction's `mapValue`\r\n\r\n**Functional tests** (commits 3-4)\r\n- Tests wallet send via SOCKS5 proxy\r\n- Tests flag persistence across restarts\r\n- Tests error handling when Tor/I2P unavailable\r\n\r\n## Behavior Matrix\r\n\r\n| Scenario | TX Flag | Node Setting | Expected Behavior | Tested |\r\n|----------|---------------|--------------|-------------------|--------|\r\n| New tx | Private | - | Via SOCKS5, flag set | Test 1 ✓ |\r\n| Resubmit | Private | Public | Skip | Test 2 ✓ |\r\n| Resubmit | Public | Private | Skip | Test 3 ✓ |\r\n| Resubmit | Private | Private | Rebroadcast | Test 3 ✓ |\r\n| New tx | Private | - (no Tor) | RPC error | Test 4 ✓ |\r\n| Resubmit | Private | Private (no Tor) | Log error | Test 4 ✓ |\r\n\r\n**Why skip on mode mismatch?** Rebroadcasting via a different method than originally used may allow correlation of transaction to origin, or may indicate origin has `-privatebroadcast` enabled.\r\n\r\n</details>",
-      "state": "open",
-      "user": "w0xlt",
-      "created_at": "2026-01-30T08:06:34Z",
-      "updated_at": "2026-02-27T20:06:55Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34457",
-      "labels": [
-        "Wallet",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2021,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -2583,30 +2703,6 @@
         "text_length": 11214,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3091431534,
-      "number": 34049,
-      "title": "rpc: Disallow captures in RPCMethodImpl",
-      "body": "When defining `RPCHelpMan` objects, we usually return a lambda, and mostly we define those via `[&](...) { ... }` which explicitly captures any parameters or local variables by reference. If we were to actually use any of those captures (we don't), we would invoke undefined behaviour. So instead, convert all the `[&]` to `[]` to avoid capturing, and as part of `RPCHelpMan` check that the function we provide is convertible to a bare function pointer, so that any attempts to capture anything (even if it's by-copy, which is safe) results in an error.\r\n\r\nWhile we're at it, rename `RPCHelpMan` to `RPCMethod`, reflecting it's greater responsibility since #19386.",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2025-12-11T03:25:25Z",
-      "updated_at": "2026-02-27T03:26:54Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34049",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 704,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -4961,30 +5057,6 @@
       }
     },
     {
-      "id": 3308270443,
-      "number": 34638,
-      "title": "guix: Update storage requirement for HOSTS and added warning for Guix overhead",
-      "body": "This is an alternative to #33889\r\n\r\nThe lasttime the storage requirements were updated is 4 years ago in #22075 and do not match the current needs of a Guix build. This PR updates the storage requirements to align with recent builds.\r\n\r\nThe current code is quite off for certain hosts (the total equals out overall), but the check also ignores the output directory which takes up an additional 5 GiB of disk space:\r\n\r\n<details>\r\n\r\nComparing real usage against the script's estimates:\r\n\r\n| Host                  | Real KiB  | Estimate KiB | Delta          |\r\n| --------------------- | --------- | ------------ | -------------- |\r\n| `aarch64-linux-gnu`   | 3,875,896 | 6,400,000    | **-2,524,104** |\r\n| `arm-linux-gnueabihf` | 2,983,008 | 6,400,000    | **-3,416,992** |\r\n| `riscv64-linux-gnu`   | 5,712,668 | 6,400,000    | -687,332       |\r\n| `x86_64-linux-gnu`    | 3,978,648 | 6,400,000    | **-2,421,352** |\r\n| `powerpc64-linux-gnu` | 4,026,948 | 6,400,000    | -2,373,052     |\r\n| `x86_64-w64-mingw32`  | 8,022,644 | 7,600,000    | +422,644       |\r\n| `x86_64-apple-darwin` | 2,714,848 | 440,000      | **+2,274,848** |\r\n| `arm64-apple-darwin`  | 2,659,824 | 440,000      | **+2,219,824** |\r\n| `output dir ` | 5,500,000 | 0 | **+5,500,000**|\r\n\r\n\r\n</details>\r\n\r\nThis PR makes the following changes: \r\n- Updates the required KiB per category to current needs + 10% margin\r\n- it adds an extra category for `riscv64` (was way off * category )\r\n- adds output directory storage requirements \r\n\r\nThis all totals to 42 GiB (using all hosts) :\r\n<details>\r\n\r\nOutput for #34550 on Guix 1.5.0 \r\n\r\n| Host                  |  Real KiB | Estimate      | Margin     |\r\n| --------------------- | ---------------- | ------------- | ---------- |\r\n| `aarch64-linux-gnu`   | ~3,880,000       | 4,400,000     | +13%       |\r\n| `arm-linux-gnueabihf` | ~3,041,000       | 4,400,000     | +45%       |\r\n| `powerpc64-linux-gnu` | ~4,089,000       | 4,400,000     | +8%        |\r\n| `x86_64-linux-gnu`    | ~3,985,000       | 4,400,000     | +10%       |\r\n| `riscv64-linux-gnu`   | ~5,767,000       | 6,300,000     | +9%        |\r\n| `x86_64-w64-mingw32`  | ~8,074,000       | 9,000,000     | +11%       |\r\n| `x86_64-apple-darwin` | ~2,726,000       | 3,000,000     | +10%       |\r\n| `arm64-apple-darwin`  | ~2,726,000       | 3,000,000     | +10%       |\r\n| **output**            | ~4,929,000 | 5,500,000 | +10% |\r\n\r\nOutput for #34627 on Guix 1.4.0 \r\n\r\n| Host                  |  Real KiB | Estimate      | Margin     |\r\n| --------------------- | ---------------- | ------------- | ---------- |\r\n| `aarch64-linux-gnu`   | ~3,934,232       | 4,400,000     | +12%       |\r\n| `arm-linux-gnueabihf` | ~3,040,552       | 4,400,000     | +45%       |\r\n| `powerpc64-linux-gnu` | ~4,084,480       | 4,400,000     | +8%        |\r\n| `x86_64-linux-gnu`    | ~4,036,900       | 4,400,000     | +9%       |\r\n| `riscv64-linux-gnu`   | ~5,764,512       | 6,300,000     | +9%        |\r\n| `x86_64-w64-mingw32`  | ~8,087,164       | 9,000,000     | +11%       |\r\n| `x86_64-apple-darwin` | ~2,762,992       | 3,000,000     | +9%       |\r\n| `arm64-apple-darwin`  | ~2,707,800       | 3,000,000     | +11%       |\r\n| **output**            | ~5,048,228 | 5,500,000 | +9% |\r\n\r\n</details>\r\n\r\nAdditionally, maybe more controversial (happy to drop), I've added a second check to warm users if they do not have enough free space to store the guix overhead (`/gnu` store) which is an additional 8,7 GiB.  This check only warns and does not stop the build. \r\n\r\n<details> <summary> New warning message:</summary>\r\n\r\n```terminal\r\nFound macOS SDK at '/root/SDK/Xcode-26.1.1-17B100-extracted-SDK-with-libcxx-head\r\ners', using...\r\n\r\nWARN: Available disk space (42 GiB) may be insufficient for the\r\n      estimated total of 51 GiB (build directories, output,\r\n      and Guix environment overhead).\r\n\r\nThe build will proceed, but may fail mid-way if disk space runs out.\r\n\r\nChecking that we can connect to the guix-daemon...\r\n```\r\n</details>\r\n\r\nNB.\r\nCould not find a good reason for the change  in disk usage, even older V29 build take up roughly the same size as recent builds.",
-      "state": "open",
-      "user": "janb84",
-      "created_at": "2026-02-20T15:00:28Z",
-      "updated_at": "2026-02-23T09:42:45Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34638",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 4198,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3303304404,
       "number": 34622,
       "title": "test: assert_debug_log timeouts follow-up",
@@ -5125,101 +5197,6 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 877751403,
-      "number": 24539,
-      "title": "Add a \"tx output spender\" index",
-      "body": "This PR adds a new \"tx output spender\" index, which allows users to query which tx spent a given outpoint with the `gettxspendingprevout` RPC call that was added by https://github.com/bitcoin/bitcoin/pull/24408.\r\n\r\nSuch an index would be extremely useful for Lightning, and probably for most layer-2 protocols that rely on chains of unpublished transactions.\r\n\r\nUPDATE: this PR is ready for review and issues have been addressed:\r\n- using a watch-only wallet instead would not work if there is a significant number of outpoints to watch (see https://github.com/bitcoin/bitcoin/pull/24539#issuecomment-1276595646)\r\n- this PR does not require `-txindex` anymore\r\n\r\nWe use a composite key with 2 parts (suggested by romanz): hash(spent outpoint) and tx position, with an empty value. Average composite key size is 15 bytes.\r\n\r\nThe spending tx can optionally be returned by `gettxspendingprevout` (even it `-txindex is not set`).",
-      "state": "closed",
-      "user": "sstone",
-      "created_at": "2022-03-11T19:32:41Z",
-      "updated_at": "2026-02-22T12:28:16Z",
-      "merged_at": "2026-02-20T08:27:26Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/24539",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 957,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3278487026,
-      "number": 34578,
-      "title": "depends: Update Qt to version 6.10.2",
-      "body": "This PR updates the `qt` package in depends to the most recent version [6.10.2](https://www.qt.io/blog/qt-6.10.2-released).\r\n\r\nThe update includes many bugfixes that enable dropping some patches.\r\n\r\nAdditionally, [patches](https://github.com/bitcoin/bitcoin/issues/34569#issuecomment-3892793262) for compatibility with GCC 16 have been included.\r\n\r\nA [commit](https://github.com/bitcoin/bitcoin/pull/32709/changes/8f1b55d1d52fb6e44a6d2d34b506f7f309c89ad1) from https://github.com/bitcoin/bitcoin/pull/32709 is also included.",
-      "state": "closed",
-      "user": "hebasto",
-      "created_at": "2026-02-12T22:40:52Z",
-      "updated_at": "2026-02-22T12:14:28Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34578",
-      "labels": [
-        "Build system",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 561,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 1780312050,
-      "number": 29678,
-      "title": "Bugfix: Correct first-run free space checks",
-      "body": "It's not clear what `m_assumed_*_size` are actually set based on, but historically it was in GB, not GiB, and that's still used in the GUI which is more user-facing.\r\n\r\nCould just as easily change the GUI if GiB is preferred.",
-      "state": "open",
-      "user": "luke-jr",
-      "created_at": "2024-03-19T16:36:10Z",
-      "updated_at": "2026-02-22T09:05:48Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/29678",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 269,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1799118469,
-      "number": 29770,
-      "title": "index: Check all necessary block data is available before starting to sync",
-      "body": "Currently, we check that `BLOCK_HAVE_DATA` is available for all blocks an index needs to sync during startup. However, for `coinstatsindex` and `blockfilterindex` we also need the undo data for these blocks. If that data is missing in the blocks, we are currently still starting to sync each of these indices and then crash later when we encounter the missing data.\r\n\r\nThis PR adds explicit knowledge of which block data is needed for each index and then checks its availability during startup before initializing the sync process on them.\r\n\r\nThis also addresses a few open comments from #29668 in the last commit.",
-      "state": "closed",
-      "user": "fjahr",
-      "created_at": "2024-03-30T22:55:19Z",
-      "updated_at": "2026-02-22T08:52:44Z",
-      "merged_at": "2026-02-20T23:59:07Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/29770",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 689,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "issues": [
@@ -5231,11 +5208,26 @@
       "state": "open",
       "user": "FafoDevelopment",
       "created_at": "2026-02-28T22:27:12Z",
-      "updated_at": "2026-02-28T22:27:12Z",
+      "updated_at": "2026-03-01T12:53:24Z",
       "closed_at": null,
-      "comments": 0,
+      "comments": 1,
       "url": "https://github.com/bitcoin/bitcoin/issues/34703",
       "labels": [],
+      "comment_data": [
+        {
+          "id": 3979906057,
+          "user": "jmoik",
+          "body": "not reproducible on command line on mac, might be an issue specific to the qt front end",
+          "created_at": "2026-03-01T12:53:24Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 87,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
       "drama_signals": {
         "drama_keywords": 0,
         "positive_keywords": 0,
@@ -6536,19 +6528,6 @@
       ],
       "comment_data": [
         {
-          "id": 3940855012,
-          "user": "ostruvek",
-          "body": "> Have a look at the [1] [other] buttons at the top right side of Transiflex. You need to provide both translations to press the save button.\n\nThank you very much for your advice, I have managed to translate the remaining strings.",
-          "created_at": "2026-02-22T12:28:31Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 230,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
           "id": 3958195341,
           "user": "maflcko",
           "body": "I've pushed an update to https://github.com/maflcko/b-c-gui-translations-review",
@@ -6751,47 +6730,7 @@
       "comments": 7,
       "url": "https://github.com/bitcoin/bitcoin/issues/34645",
       "labels": [],
-      "comment_data": [
-        {
-          "id": 3939319088,
-          "user": "sipa",
-          "body": "FWIW:\n\n```\n$ base64 <clusterfuzz-testcase-minimized-coins_view_overlay-6749085850992640 \nICAJICAgXCDpeunp6enp6enp6enp6enp6enp6enp6enp6enp6eDp6enp6elcICAgICAgICAgICAg\nICAgICAgICAgICAgICAgICAgICAgICAgIFwg6Xrp6enp6enp6enp6enp6enp6enp6enp6enp6eng\n6enp6enpXCDl/yD/MP8g/yD/MP8g5f8g/yD/MP8g/13/\n```\n\nAnd indeed, looks like it is fixed by #33018.\n\nEDIT: this seems coincidental; 33018 doesn't address the root cause.",
-          "created_at": "2026-02-21T19:48:01Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 408,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3939473347,
-          "user": "sipa",
-          "body": "Looks like it's the result of the combination of #33512 and #34165, and ultimately a bug in the fuzz test, not the code being tested.",
-          "created_at": "2026-02-21T20:56:20Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 133,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3941123942,
-          "user": "andrewtoth",
-          "body": "Previously double iterating cursor entries was safe, but after #33512 we are decrementing m_dirty_count which can't be done twice.",
-          "created_at": "2026-02-22T14:56:05Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 130,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
+      "comment_data": [],
       "drama_signals": {
         "drama_keywords": 0,
         "positive_keywords": 1,
@@ -7238,87 +7177,12 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 3930968827,
-      "number": 34569,
-      "title": "build: Qt depends build broken with GCC 16",
-      "body": "GCC 16 is in it's \"stabilization\" phase, and `16.1` should be released [~soon](https://gcc.gnu.org/pipermail/gcc/2026-January/247347.html). Doing a depends build / compile currently works, other than building Qt in depends:\n```bash\ngcc (GCC) 16.0.1 20260209 (Red Hat 16.0.1-0)\nmake -C depends/ -j15\n<snip>\nBuilding qt...\n[3/1319] Building CXX object qtbase/src/corelib/CMakeFiles/Core.dir/global/qcompare.cpp.o\nFAILED: [code=1] qtbase/src/corelib/CMakeFiles/Core.dir/global/qcompare.cpp.o \n/usr/lib64/ccache/g++ -DPCRE2_CODE_UNIT_WIDTH=16 -DQT_ASCII_CAST_WARNINGS -DQT_BUILDING_QT -DQT_BUILD_CORE_LIB -DQT_DEPRECATED_WARNINGS -DQT_DISABLE_DEPRECATED_UP_TO=0x050000 -DQT_EXPLICIT_QFILE_CONSTRUCTION_FROM_PATH -DQT_LEAN_HEADERS=1 -DQT_MOC_COMPAT -DQT_NO_AS_CONST -DQT_NO_CAST_TO_ASCII -DQT_NO_CONTEXTLESS_CONNECT -DQT_NO_DEBUG -DQT_NO_FOREACH -DQT_NO_JAVA_STYLE_ITERATORS -DQT_NO_NARROWING_CONVERSIONS_IN_CONNECT -DQT_NO_QEXCHANGE -DQT_NO_QPAIR -DQT_NO_USING_NAMESPACE -DQT_TYPESAFE_FLAGS -DQT_USE_QSTRINGBUILDER -DQT_WARN_DEPRECATED_UP_TO=0x070000 -DQT_ZLIB_LIB -D_LARGEFILE64_SOURCE -D_LARGEFILE_SOURCE -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/Core_autogen/include -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/include -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/include/QtCore -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/global -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/kernel -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/../3rdparty/tinycbor/src -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/include/QtCore/6.7.3 -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/include/QtCore/6.7.3/QtCore -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/../3rdparty/double-conversion/double-conversion -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/../3rdparty/double-conversion -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/.rcc -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/mkspecs/linux-g++ -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/include/QtZlib -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/3rdparty/zlib -I/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/3rdparty/pcre2/src -I/root/bitcoin/depends/aarch64-unknown-linux-gnu/include  -ffile-prefix-map=/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257=/usr -O2 -std=c++20 -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -Wall -Wextra -fexceptions -ffunction-sections -fdata-sections -Wsuggest-override -Winvalid-pch -include /root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/CMakeFiles/Core.dir/cmake_pch.hxx -MD -MT qtbase/src/corelib/CMakeFiles/Core.dir/global/qcompare.cpp.o -MF qtbase/src/corelib/CMakeFiles/Core.dir/global/qcompare.cpp.o.d -o qtbase/src/corelib/CMakeFiles/Core.dir/global/qcompare.cpp.o -c /root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/global/qcompare.cpp\n/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/global/qcompare.cpp:17:19: error: static assertion failed\n   17 |                   == Qt:: type ## _ordering :: flag); \\\n      |                   ^\n/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/global/qcompare.cpp:21:1: note: in expansion of macro ‘CHECK’\n   21 | CHECK(partial, unordered);\n      | ^~~~~\n/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/global/qcompare.cpp:19:19: error: static assertion failed\n   19 |                   == std:: type ## _ordering :: flag) \\\n      |                   ^\n/root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/qtbase/src/corelib/global/qcompare.cpp:21:1: note: in expansion of macro ‘CHECK’\n   21 | CHECK(partial, unordered);\n      | ^~~~~\n[17/1319] Building CXX object qtbase/src/corelib/CMakeFiles/Core.dir/global/qlogging.cpp.o\nninja: build stopped: subcommand failed.\nmake: *** [funcs.mk:343: /root/bitcoin/depends/work/build/aarch64-unknown-linux-gnu/qt/6.7.3-933b44e1257/./.stamp_built] Error 1\n```",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2026-02-12T10:12:51Z",
-      "updated_at": "2026-02-22T12:21:24Z",
-      "closed_at": null,
-      "comments": 5,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34569",
-      "labels": [
-        "GUI",
-        "Build system"
-      ],
-      "comment_data": [
-        {
-          "id": 3893791227,
-          "user": "hebasto",
-          "body": "> Qt has the gcc16 fixes in their main `dev` branch. Backporting all necessary fixes to 6.8 is non-trivial though.\n> \n> [@hebasto](https://github.com/hebasto) has a WIP branch for a bump to 6.10. I managed to cleanly port all necessary patches to 6.10, so I think it's reasonable to consider bumping in order to fix builds with bleeding-edge gcc/clang.\n> \n> Here's my branch build on top of [@hebasto](https://github.com/hebasto)'s WIP: https://github.com/theuni/bitcoin/commits/qt6.10/\n> \n> As a quick summary, to fix build (errors as well as annoying warnings), we need:\n> \n> QCompare fix: [qt/qtbase@7fccc79](https://github.com/qt/qtbase/commit/7fccc79dd5744ea837ffe200bbfc9f2756870220)\n> \n> SFINAE fixes: [qt/qtbase@679e8bd](https://github.com/qt/qtbase/commit/679e8bda1eb0cc98acb981e9a10204bed1c179f2) [qt/qtbase@3312e89](https://github.com/qt/qtbase/commit/3312e89b47f8c2ea0b4263b39841c25b83a37332) [qt/qtbase@05f201a](https://github.com/qt/qtbase/commit/05f201a3d559452287b20becb960de3a50249540) [qt/qtbase@d68fc6e](https://github.com/qt/qtbase/commit/d68fc6ecc88a0e4532754b1a9f209881a248f4ee)\n\nPicked to ~https://github.com/bitcoin/bitcoin/pull/34578~ https://github.com/bitcoin/bitcoin/pull/34650.",
-          "created_at": "2026-02-12T22:42:15Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 1206,
-            "has_nack": false,
-            "has_ack": true
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 4928,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3974115519,
-      "number": 34649,
-      "title": ".",
-      "body": ".",
-      "state": "closed",
-      "user": "arifarafat",
-      "created_at": "2026-02-22T10:15:06Z",
-      "updated_at": "2026-02-22T10:15:19Z",
-      "closed_at": "2026-02-22T10:15:16Z",
-      "comments": 1,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34649",
-      "labels": [],
-      "comment_data": [
-        {
-          "id": 3940642998,
-          "user": "DrahtBot",
-          "body": "\nLLM spam detection (✨ experimental): SPAM\n\nThis is an unsolicited commercial/contact request about domain ownership and asking for off-site email contact. It is not a repository-related bug, feature request, or meaningful contribution and appears promotional/irrelevant.\n\n♻️ Automatically wiping, closing, and locking for now based on heuristics.\nGenerally, please focus on creating high-quality, original content that demonstrates a clear\nunderstanding of the project's requirements and goals.\n",
-          "created_at": "2026-02-22T10:15:15Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 496,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 3,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "summary": {
-    "total_prs": 219,
-    "total_issues": 38,
-    "total_comments": 88,
-    "unique_participants": 85
+    "total_prs": 218,
+    "total_issues": 36,
+    "total_comments": 83,
+    "unique_participants": 83
   }
 }
