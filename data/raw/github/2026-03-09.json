@@ -1,12 +1,395 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-03-09T01:43:25.508839+00:00",
+  "fetched_at": "2026-03-09T08:37:46.332798+00:00",
   "date_range": {
-    "since": "2026-03-02T01:43:25.508783+00:00",
-    "until": "2026-03-09T01:43:25.508783+00:00"
+    "since": "2026-03-02T08:37:46.332700+00:00",
+    "until": "2026-03-09T08:37:46.332700+00:00"
   },
   "pull_requests": [
+    {
+      "id": 1940576733,
+      "number": 30342,
+      "title": "kernel, logging: Pass Logger instances to kernel objects",
+      "body": "Pass `Logger` instances to `BlockManager`, `CCoinsViewDB`, `CDBWrapper`, `Chainstate`, `ChainstateManager`, `CoinsViews`, and `CTxMemPool` classes so libbitcoinkernel applications and tests have the option to control where log output goes instead of having all output sent to the global logger.\n\nThis PR is an alternative to #30338. It is more limited because it only changes kernel code while leaving other parts of the codebase alone. It also takes the opportunity to migrate legacy LogPrint / LogPrintf calls to the new log macros introduced in #28318.\n\n---\n\n<!-- begin based-on -->\n**This is based on #29256 + #33847.** The non-base commits are:\n\n- [`4fc71ce6edf` refactor: Pass Logger instances to kernel objects](https://github.com/bitcoin/bitcoin/pull/30342/commits/4fc71ce6edfa3422cbf05bcdc1d4ae665456c87e)\n- [`507be73175b` refactor: Log kernel output to local log instances](https://github.com/bitcoin/bitcoin/pull/30342/commits/507be73175bce76c9219dcdb559ef9978e456b44)\n- [`b0f28c77ab4` refactor: Pass Logger instance to CTxMemPool](https://github.com/bitcoin/bitcoin/pull/30342/commits/b0f28c77ab4ec7501da1e535a07d02cd73bcf859)\n- [`b6b95a62447` kernel: Drop global Logger instance](https://github.com/bitcoin/bitcoin/pull/30342/commits/b6b95a62447c589a0078474fb8f6bc4b2e7e8a51)<!-- end -->",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2024-06-26T17:52:24Z",
+      "updated_at": "2026-03-09T08:36:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/30342",
+      "labels": [
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1357,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3372217322,
+      "number": 34775,
+      "title": "kernel: make logging callback global",
+      "body": "The underlying `LogInstance()` is a process-wide singleton, and all logging configuration (categories, levels, options) are already global. The per-connection `btck_LoggingConnection` handle gives the false impression of independent logger instances.\r\n\r\nFix this by explicitly making the entire kernel logging interface explicitly global, simplifying its usage. Replaces `btck_LoggingConnection` and its `{create,destroy}` functions with a single `btck_logging_set_callback` function. The `KernelLogger` class is introduced to hold global kernel logging state, which will be used in future work such as #34374.\r\n\r\nTo an extent, this approach is an alternative to #30342 which contextualizes logging. While I do believe contextualized logging would be a natural fit for the kernel interface, it seems there is currently (in my view) too little demand for the scope of changes necessary. That's why I've opened this PR as a much more straightforward way to fix kernel's current logging weirdness. If you believe kernel logging should be contextualized right away, please go review #30342 instead.",
+      "state": "open",
+      "user": "stickies-v",
+      "created_at": "2026-03-09T08:35:36Z",
+      "updated_at": "2026-03-09T08:36:14Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34775",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1131,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2138649533,
+      "number": 31132,
+      "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
+      "body": "_Parts of this PR are isolated in independent smaller PRs to ease review:_\r\n\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34164_\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34165_\r\n* [ ] _https://github.com/bitcoin/bitcoin/pull/34576_\r\n\r\n---\r\n\r\nThis PR parallelizes fetching all input prevouts of a block during block connection, achieving over 3x faster IBD performance in some scenarios[^1][^2][^3][^4][^5].\r\n\r\n### Problem\r\n\r\nCurrently, when fetching inputs in `ConnectBlock`, each input is fetched from the cache sequentially. A cache miss requires a round trip to the disk database to fetch the outpoint and insert it into the cache. Since the database is read-only during `ConnectBlock`, we can fetch all inputs of a block in parallel on multiple threads while connecting.\r\n\r\n### Solution\r\n\r\nWe add a ThreadPool to CoinsViewOverlay to fetch block inputs in parallel. The block is passed to the `CoinsViewOverlay` view before entering `ConnectBlock`, which kicks off the worker threads to begin fetching the inputs. The cache returns fetched coins as they become available via the overridden `FetchCoinFromBase` method. If not available yet, the main thread also fetches coins as it waits.\r\n\r\n### Implementation Details\r\n\r\nThe `CoinsViewOverlay` implements a lock-free MPSC (Multiple Producer, Single Consumer) queue design:\r\n\r\n- **Work Distribution**: Collects all input prevouts into a queue and uses a barrier to start all worker threads simultaneously\r\n- **Synchronization**: Worker threads use an atomic counter to claim which inputs to fetch, and each input has an atomic flag to signal completion to the main thread\r\n- **Main Thread Processing**: The main thread waits for inputs in order and moves their `Coin` into the `cacheCoins` map as they become available.\r\n- **Work Stealing**: If the main thread catches up to the workers, it assists with fetching to maximize parallelism\r\n- **Completion**: All thread futures are waited on in StopFetching, which is called from any mutating method (Flush/Sync/SetBackend/Reset). The ResetGuard going out of scope ensure this happens before the block is destroyed.\r\n\r\n### Safety and Correctness\r\n\r\n- The `CoinsViewOverlay` works on a block that has not been fully validated, but it does not interfere or modify any of the validation during `ConnectBlock`\r\n- It simply fetches inputs in parallel, which must be fetched before a transaction is validated anyways\r\n- **Invalid blocks**: If an invalid block is mined, the temporary cache is reset without being flushed. This is an improvement over the current behavior, where existing inputs are inserted into the main `CoinsTip()` cache when pulled through for an invalid block\r\n\r\n### Performance\r\n\r\nBenchmarks show over 3x faster IBD performance in a cloud environment with network connected storage[^1], 3x faster IBD for an M4 Mac and up to 46% faster with directly connected storage[^2][^3][^4][^5]. The parallelization of expensive disk lookups provides significant speedup.\r\n\r\n[Flamegraphs show how the execution is changed](https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3617315125).\r\n\r\n### Credits\r\n\r\nInspired by [this comment](https://github.com/bitcoin/bitcoin/pull/18941#issuecomment-638553680).\r\n\r\nResolves https://github.com/bitcoin/bitcoin/issues/34121.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3678847806\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3515011880\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3463894000\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3347436866\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3488760623",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2024-10-22T14:40:28Z",
+      "updated_at": "2026-03-09T08:18:51Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31132",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3747,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2168265902,
+      "number": 31252,
+      "title": "rpc: print P2WSH and P2SH redem Script in (get/decode)rawtransaction",
+      "body": "This PR is motivated by https://github.com/bitcoin/bitcoin/issues/27391.\r\nAnd inspired by a previous PR https://github.com/bitcoin/bitcoin/pull/8849 that proposed something similar. \r\n\r\nThis is an example with a real mainnet transaction (3-5 multisig) and using ``decoderawtransaction`` (also works for ``getrawtransaction 'txid' 2``).\r\n\r\nVerbosity must be set to 2.\r\n\r\n```json\r\n$ bitcoin-cli getrawtransaction 44f5ab666cb9dccef69120fe5b51757a647c1f96882931a9faa0b2b5781ddfd2 2 000000000000000000018fa64b5e32335f7d3ac14b9e5553db20f2909c902c34\r\n{\r\n  \"in_active_chain\": true,\r\n  \"txid\": \"44f5ab666cb9dccef69120fe5b51757a647c1f96882931a9faa0b2b5781ddfd2\",\r\n  \"hash\": \"53836d2a4fb1e14356eac69fe1dad8be5dfd9a1b8101bc8aeb04ea2a320aa398\",\r\n  \"version\": 1,\r\n  \"size\": 382,\r\n  \"vsize\": 192,\r\n  \"weight\": 766,\r\n  \"locktime\": 0,\r\n  \"vin\": [\r\n    {\r\n      \"txid\": \"d15236206fbe06d6f38505656a2006a9a5a1ddf189a2647750091fd218d59581\",\r\n      \"vout\": 2,\r\n      \"scriptSig\": {\r\n        \"asm\": \"\",\r\n        \"hex\": \"\"\r\n      },\r\n      \"txinwitness\": [\r\n        \"\",\r\n        \"304402204d91eb67d798d071278ea0570973f3488d60c3ec98a611856f6a813b2e35df3202200bb36403ebd2dcc96b236efaf07db4f1da26b1031fc854548634ff44a340dc6601\",\r\n        \"3044022046abaa75082c2d1cdef57f8ef59a0046729220eabe2c2a229d1d592b89ccf1b0022028954703f13d836b1b77acd1eb72639a7a918d756fdd3ddef1d42a28567403ed01\",\r\n        \"522102f69779f4bb466a8c0aa7d6bf2a2dde34e44bae29d5186ee0c3bed4d903d57fa7210333c337637453164d5fd0dc31787a614a74d2acca5c08710937b9b831bd41b11f2103be7c86e40ad380b33f9abd653c6d04b95b818abd5653b63402678fcc45a017e753ae\"\r\n      ],\r\n      \"witnessScript\": {\r\n        \"asm\": \"2 02f69779f4bb466a8c0aa7d6bf2a2dde34e44bae29d5186ee0c3bed4d903d57fa7 0333c337637453164d5fd0dc31787a614a74d2acca5c08710937b9b831bd41b11f 03be7c86e40ad380b33f9abd653c6d04b95b818abd5653b63402678fcc45a017e7 3 OP_CHECKMULTISIG\",\r\n        \"desc\": \"multi(2,02f69779f4bb466a8c0aa7d6bf2a2dde34e44bae29d5186ee0c3bed4d903d57fa7,0333c337637453164d5fd0dc31787a614a74d2acca5c08710937b9b831bd41b11f,03be7c86e40ad380b33f9abd653c6d04b95b818abd5653b63402678fcc45a017e7)#sll5t8hh\",\r\n        \"type\": \"multisig\"\r\n      },\r\n      \"prevout\": {\r\n        ... bla bla bla prev output info ...\r\n        }\r\n      },\r\n      \"sequence\": 4294967293\r\n    }\r\n  ],\r\n  \"vout\": [ ... bla bla bla outputs ...  ],\r\n  \"fee\": 0.00000594,\r\n  \"hex\": \"010000000001018195d518d21f09507764a289f1dda1a5a906206a650585f3d606be6f203652d10200000000fdffffff025b730500000000001976a914381d46badae879d1c6037a03da52074e3914812c88ac38088000000000002200205ab691555ede8432ed7765585edb1c9b285532daf639e3e5ccd4843ff3b04cdf040047304402204d91eb67d798d071278ea0570973f3488d60c3ec98a611856f6a813b2e35df3202200bb36403ebd2dcc96b236efaf07db4f1da26b1031fc854548634ff44a340dc6601473044022046abaa75082c2d1cdef57f8ef59a0046729220eabe2c2a229d1d592b89ccf1b0022028954703f13d836b1b77acd1eb72639a7a918d756fdd3ddef1d42a28567403ed0169522102f69779f4bb466a8c0aa7d6bf2a2dde34e44bae29d5186ee0c3bed4d903d57fa7210333c337637453164d5fd0dc31787a614a74d2acca5c08710937b9b831bd41b11f2103be7c86e40ad380b33f9abd653c6d04b95b818abd5653b63402678fcc45a017e753ae00000000\",\r\n  \"blockhash\": \"000000000000000000018fa64b5e32335f7d3ac14b9e5553db20f2909c902c34\",\r\n  \"confirmations\": 1,\r\n  \"time\": 1746727602,\r\n  \"blocktime\": 1746727602\r\n}\r\n\r\n```",
+      "state": "open",
+      "user": "polespinasa",
+      "created_at": "2024-11-07T20:39:24Z",
+      "updated_at": "2026-03-09T08:15:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31252",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 3342,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2426922942,
+      "number": 32162,
+      "title": "depends: Switch from multilib to platform-specific toolchains",
+      "body": "Using the multilib GCC toolchain, as currently documented in [`depends/README.md`](https://github.com/bitcoin/bitcoin/blob/4c1906a500cacab385b09e780b54271b0addaf4b/depends/README.md), has several issues, such as:\r\n\r\n1. The [`g++-multilib`](https://packages.ubuntu.com/noble/g++-multilib) package conflicts with platform-specific cross-compiler packages. This means it is not possible to cross compile for `i686` and other platforms using the same set of installed packages.\r\n\r\n2. The [`g++-multilib`](https://packages.ubuntu.com/noble/g++-multilib) package is not available for `arm64`:\r\n```sh\r\n$ sudo apt install g++-multilib\r\nReading package lists... Done\r\nBuilding dependency tree... Done\r\nReading state information... Done\r\nE: Unable to locate package g++-multilib\r\n```\r\n\r\n3. Managing the multilib GCC toolchain requires additional code in both depends and Guix scripts.\r\n\r\nThis PR addresses all the issues mentioned above by switching from multilib to platform-specific toolchains.\r\n\r\nAlso see https://github.com/bitcoin/bitcoin/pull/22456.\r\n\r\n---\r\n\r\nHere are examples of building for different scenarions:\r\n\r\n- Linux, `x86_64` or `arm64`, building with depends natively:\r\n```sh\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build --toolchain depends/$(./depends/config.sub $(./depends/config.guess))/toolchain.cmake\r\n$ cmake --build build -j $(nproc)\r\n```\r\n\r\n- Linux, `x86_64` or `arm64`, cross compiling for `i686-pc-linux-gnu`:\r\n```sh\r\n$ sudo apt install g++-i686-linux-gnu binutils-i686-linux-gnu\r\n$ export HOST=i686-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n\r\n- Linux, `x86_64`, cross compiling for `arm64`:\r\n```sh\r\n$ sudo apt install g++-aarch64-linux-gnu binutils-aarch64-linux-gnu\r\n$ export HOST=aarch64-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n\r\n- Linux, `arm64`, cross compiling for `x86_64`:\r\n```sh\r\n$ sudo apt install g++-x86-64-linux-gnu binutils-x86-64-linux-gnu\r\n$ export HOST=x86_64-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-03-29T13:34:59Z",
+      "updated_at": "2026-03-09T07:25:03Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32162",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2364,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3193702464,
+      "number": 34361,
+      "title": "test: clean up tx resurrection (re-org) test in feature_block.py",
+      "body": "The following comment about ECDSA signatures created with the test framework not passing mempool policy has been obsolete for a long time (at least since 2019, see PR #15826):\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/8c07800b193e94740a20f40d3e7c6626a59dd21f/test/functional/feature_block.py#L1167-L1172\r\n\r\nso remove it. While at it, change the resurrected txs to be indeed standard valid, so the `acceptnonstdtxn=1` parameter can also be removed from the functional test.\r\n\r\nKudos to stratospher, who (IIRC) mentioned this outdated comment a while ago.",
+      "state": "open",
+      "user": "theStack",
+      "created_at": "2026-01-21T04:08:53Z",
+      "updated_at": "2026-03-09T07:13:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34361",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 619,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2471245988,
+      "number": 32317,
+      "title": "kernel: Separate UTXO set access from validation functions",
+      "body": "The current code makes it hard to call functions for checking the consensus-correctness of a block without having a full UTXO set at hand. This makes implementing features such as Utreexo and non-assumevalid swiftsync, where maintaining a full UTXO set defeats their purpose, through the kernel API difficult. Checks like the coinbase subsidy, or block sigops are only available through `ConnectBlock`, which requires a complete coins cache.\r\n\r\nSolve this by moving accessing coins and the responsibility of spending them out of `ConnectBlock` and into a new separate function called `SpendBlock`. Pass a block's spent coins through the existing `CBlockUndo` data structure to `ConnectBlock`. \r\n\r\nWhile the change is largely a refactor, some smaller behaviour changes were unavoidable. These should be highlighted in the commit messages. The last commit contains the most important part of the coins logic move, the commits before attempt to prepare it piecemeal.\r\n\r\nThis pull request was benchmarked on [benchcoin](https://github.com/bitcoin-dev-tools/benchcoin/pull/162), which showed no performance regression. While discussing this pull request it was noted that pre-fetching and eliminating the need for some additional map lookups might improve performance a bit, but this does not make a measurable difference in the grand scheme of things and was not the motivation for this pull request.\r\n\r\nIn future changes, ConnectBlock could be made even more self contained, accessing the coins from the internal map could be further optimized by consolidating existence checking and spending, and the function eventually exposed in an external kernel API (as done [here](https://github.com/sedited/bitcoin/commit/09e05493010119fc60d310d3e7ffc388de441f9a#diff-f638e65d9278276b2a6ac42ffbbd26d079c3dba752feed5038a25a1ee565d320R947))",
+      "state": "open",
+      "user": "sedited",
+      "created_at": "2025-04-21T13:15:46Z",
+      "updated_at": "2026-03-09T07:12:38Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32317",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1886,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2598874149,
+      "number": 32764,
+      "title": "guix: Build for macOS using Clang only",
+      "body": "This PR makes macOS builds Clang-only by switching the build compiler in depends to `clang` + `libc++`.\r\n\r\nSee: https://github.com/bitcoin/bitcoin/issues/30206.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-06-17T13:39:41Z",
+      "updated_at": "2026-03-09T06:26:15Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/32764",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 199,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2803909911,
+      "number": 33324,
+      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
+      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-09-05T23:51:29Z",
+      "updated_at": "2026-03-09T04:59:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 3232,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2902093523,
+      "number": 33593,
+      "title": "guix: Use UCRT runtime for Windows release binaries",
+      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-10-09T21:46:43Z",
+      "updated_at": "2026-03-09T04:13:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
+      "labels": [
+        "Windows",
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 213,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3371412314,
+      "number": 34774,
+      "title": "p2p: prevent unsolicited addr relay token abuse",
+      "body": "The current addr relay token logic opens an attack that allows a malicious outbound peer to abuse our unsolicited message relaying as mentioned on [#34717 (comment)](https://github.com/bitcoin/bitcoin/pull/34717#issuecomment-4020647442): \r\n>- We establish an outbound connection to a node X.\r\n>- We increase the token counter to[ +1000 tokens](https://github.com/bitcoin/bitcoin/blob/d198635fa2d48b7618789aedf112783935015d77/src/net_processing.cpp#L3772) since we expect to receive up to 1000 addresses in response from node X.\r\n>-  Node X sends a buffer containing only 1 address, to [bypasses](https://github.com/bitcoin/bitcoin/blob/d198635fa2d48b7618789aedf112783935015d77/src/net_processing.cpp#L4100) the initial `m_getaddr_sent` check (or this negligible protection disappears entirely if the variable is removed as proposed in this PR)\r\n>- Node X then starts sending unsolicited messages of size 10, since it knows it can use up to 1000 tokens (each address they will consume 1 token and if the number of addresses in the buffer is less or equal to 10 our node will relay it).\r\n>- Our node become an intermediate relay, unintentionally helping hide this malicious node, since its (our node) the one who will relay the unsolicited messages.\r\n>- Our node they will consume all of its tokens with other nodes by forwarding malicious addresses instead of forwarding addresses for legitimate nodes.\r\n\r\nThis issue predates PR #34146, which introduced a new addr self-announcement  mechanism that rendered `m_getaddr_sent` entirely ineffective, leading PR #34717 to propose removing  it entirely.\r\n\r\nInstead of removing `m_getaddr_sent`, this PR keeps it and improves the token handling logic.\r\nThe addr self-announcement is ordered to be sent after the `GETADDR` response, allowing the `GETADDR` sender to clearly distinguish between the response and the self-announcement, and safely assume the first incoming message is the legitimate response.\r\nOnce the `GETADDR` response is processed, the token bucket is adjusted to count only the addresses actually received.\r\n",
+      "state": "open",
+      "user": "taki-abedesselam",
+      "created_at": "2026-03-09T04:11:16Z",
+      "updated_at": "2026-03-09T04:11:59Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34774",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 1,
+        "text_length": 2117,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3022278484,
+      "number": 33902,
+      "title": "doc: Document compiler configuration for native depends packages",
+      "body": "Fixes: #33859\r\n\r\nPreviously one had to read the Makefile (and various *.mk configuration\r\nfiles) to see how to correctly override CC and CXX when building native\r\ndepends packages.\r\n\r\nDetail this in README.md to make it clearer.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2025-11-18T15:23:18Z",
+      "updated_at": "2026-03-09T03:22:27Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33902",
+      "labels": [
+        "Docs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 293,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3091431534,
+      "number": 34049,
+      "title": "rpc: Disallow captures in RPCMethodImpl",
+      "body": "When defining `RPCHelpMan` objects, we usually return a lambda, and mostly we define those via `[&](...) { ... }` which explicitly captures any parameters or local variables by reference. If we were to actually use any of those captures (we don't), we would invoke undefined behaviour. So instead, convert all the `[&]` to `[]` to avoid capturing, and as part of `RPCHelpMan` check that the function we provide is convertible to a bare function pointer, so that any attempts to capture anything (even if it's by-copy, which is safe) results in an error.\r\n\r\nWhile we're at it, rename `RPCHelpMan` to `RPCMethod`, reflecting it's greater responsibility since #19386.",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2025-12-11T03:25:25Z",
+      "updated_at": "2026-03-09T02:48:08Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34049",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 704,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3119599294,
+      "number": 34124,
+      "title": "refactor: make `CCoinsView` a pure virtual interface",
+      "body": "### Problem\r\n`CCoinsView` is the coins view interface, but historically it also provided built-in no-op behavior:\r\n\r\n* It provided default no-op implementations (returning `std::nullopt`, `uint256()`, `false`, or `nullptr`) instead of being pure virtual\r\n* Callers could instantiate a bare `CCoinsView` and get silent no-op behavior\r\n* Mixing the interface definition with a built-in dummy implementation blurred the abstraction boundary\r\n\r\n### Context\r\nThis is part of the ongoing coins caching cleanup in #34280.\r\n\r\n### Fix\r\nThis PR separates interface and no-op behavior, and makes `CCoinsView` pure virtual in incremental steps:\r\n* Add `CoinsViewEmpty` as an explicit no-op coins view for tests, benchmarks, and temporary backends\r\n* Replace direct bare-`CCoinsView` test and dummy instantiations with `CoinsViewEmpty`\r\n* Make all `CCoinsView` methods pure virtual (`PeekCoin`, `GetCoin`, `HaveCoin`, `GetBestBlock`, `GetHeadBlocks`, `BatchWrite`, `Cursor`, `EstimateSize`)\r\n* Remove the legacy default implementations from `coins.cpp`\r\n* Update fuzz and dummy backends to use `CoinsViewEmpty` explicitly\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-12-20T08:47:33Z",
+      "updated_at": "2026-03-09T02:36:37Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34124",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1163,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3120160595,
+      "number": 34132,
+      "title": "coins: drop error catcher, centralize fatal read handling",
+      "body": "### Problem\r\nThe current coins database read-error handling adds unnecessary complexity to the critical path:\r\n* `CCoinsViewErrorCatcher` sits between the cache and database views, wrapping every read operation\r\n* `ExecuteBackedWrapper` adds another function call layer with lambda captures on each database read\r\n* Uses `std::vector<std::function<void()>>` for callbacks when there's only ever one callback registered\r\n* The error callback is set after database initialization rather than during construction (requiring a `cs_main` lock)\r\n\r\nThis adds unnecessary stack depth and bookkeeping overhead on every coins database read operation (`GetCoin`). Also note that `CCoinsViewDB::HaveCoin` isn't even on the hot path as far as I can tell.\r\n\r\n### Context\r\nThis is part of ongoing coins caching cleanup efforts, see https://github.com/bitcoin/bitcoin/issues/34280.\r\n\r\n### Fix\r\n**Behavior change:** Treat deserialization failures in `CDBWrapper::Read()` as fatal instead of catching and returning `false`. This makes corruption visible and avoids ambiguous missing-vs-unreadable handling at call sites: on decode failure, `CDBWrapper` logs the error, executes a provided callback, and then calls `std::abort()`.\r\n\r\nWith read-failure handling centralized in `CDBWrapper`, collapse the `CCoinsViewErrorCatcher` layer entirely by removing `ExecuteBackedWrapper` and `CCoinsViewErrorCatcher` which also enables making coins view lookups `noexcept`.\r\n\r\nA new test verifies the node aborts with a clear error message on a few database corruption paths.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-12-20T22:56:45Z",
+      "updated_at": "2026-03-09T02:33:43Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34132",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1604,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3348549752,
+      "number": 34717,
+      "title": "p2p: remove m_getaddr_sent",
+      "body": "This PR removes `m_getaddr_sent`, as it no longer behaves as originally intended. Initially, this flag was meant to track when a getaddr message was sent to a peer.\r\n\r\nNow that self-announcements are sent separately from getaddr responses, the self-announcement sets `m_getaddr_sent `to `false` even though we are still waiting for the getaddr response (1000 addresses). \r\nWhen the getaddr response does arrive, we rely on the size of the addr message, not the flag, to decide whether it should be relayed. This makes the flag redundant.\r\n\r\nThis is the current behavior:\r\n\r\n- The initial self-announcement is not relayed but it flips m_getaddr_sent to be false\r\n- We use addr.size() to avoid relaying  (1000) getaddr response.(assuming the other two flags are false) \r\n- The first addr message is relayed because the flag is  false(this was not the case before https://github.com/bitcoin/bitcoin/pull/34146).\r\n\r\nRemoving this flag ensures that:\r\n\r\n- The initial self-announcement is relayed.\r\n- The getaddr response is still not relayed, using the existing size-based check.\r\n\r\nI had initially considered an alternative approach https://github.com/naiyoma/bitcoin/pull/14, where the self-announcement would not affect this flag and would therefore retain the initial behaviour, but i decided to reattempt its removal, as this was previously attempted, see https://github.com/bitcoin/bitcoin/pull/19794. Given the changes since then, I believe revisiting it is now more appropriate.\r\n",
+      "state": "open",
+      "user": "naiyoma",
+      "created_at": "2026-03-03T12:04:38Z",
+      "updated_at": "2026-03-09T02:11:52Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34717",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1510,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
     {
       "id": 3338911698,
       "number": 34702,
@@ -74,54 +457,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 864,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3119599294,
-      "number": 34124,
-      "title": "refactor: make `CCoinsView` a pure virtual interface",
-      "body": "### Problem\r\n`CCoinsView` is the coins view interface, but historically it also provided built-in no-op behavior:\r\n\r\n* It provided default no-op implementations (returning `std::nullopt`, `uint256()`, `false`, or `nullptr`) instead of being pure virtual\r\n* Callers could instantiate a bare `CCoinsView` and get silent no-op behavior\r\n* Mixing the interface definition with a built-in dummy implementation blurred the abstraction boundary\r\n\r\n### Context\r\nThis is part of the ongoing coins caching cleanup in #34280.\r\n\r\n### Fix\r\nThis PR separates interface and no-op behavior, and makes `CCoinsView` pure virtual in incremental steps:\r\n* Add `CoinsViewEmpty` as an explicit no-op coins view for tests, benchmarks, and temporary backends\r\n* Replace direct bare-`CCoinsView` test and dummy instantiations with `CoinsViewEmpty`\r\n* Make all `CCoinsView` methods pure virtual (`PeekCoin`, `GetCoin`, `HaveCoin`, `GetBestBlock`, `GetHeadBlocks`, `BatchWrite`, `Cursor`, `EstimateSize`)\r\n* Remove the legacy default implementations from `coins.cpp`\r\n* Update fuzz and dummy backends to use `CoinsViewEmpty` explicitly\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-12-20T08:47:33Z",
-      "updated_at": "2026-03-09T00:45:12Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34124",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1163,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 2138649533,
-      "number": 31132,
-      "title": "validation: fetch block inputs on parallel threads 3x faster IBD",
-      "body": "_Parts of this PR are isolated in independent smaller PRs to ease review:_\r\n\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34164_\r\n* [x] _https://github.com/bitcoin/bitcoin/pull/34165_\r\n* [ ] _https://github.com/bitcoin/bitcoin/pull/34576_\r\n\r\n---\r\n\r\nThis PR parallelizes fetching all input prevouts of a block during block connection, achieving over 3x faster IBD performance in some scenarios[^1][^2][^3][^4][^5].\r\n\r\n### Problem\r\n\r\nCurrently, when fetching inputs in `ConnectBlock`, each input is fetched from the cache sequentially. A cache miss requires a round trip to the disk database to fetch the outpoint and insert it into the cache. Since the database is read-only during `ConnectBlock`, we can fetch all inputs of a block in parallel on multiple threads while connecting.\r\n\r\n### Solution\r\n\r\nWe add a ThreadPool to CoinsViewOverlay to fetch block inputs in parallel. The block is passed to the `CoinsViewOverlay` view before entering `ConnectBlock`, which kicks off the worker threads to begin fetching the inputs. The cache returns fetched coins as they become available via the overridden `FetchCoinFromBase` method. If not available yet, the main thread also fetches coins as it waits.\r\n\r\n### Implementation Details\r\n\r\nThe `CoinsViewOverlay` implements a lock-free MPSC (Multiple Producer, Single Consumer) queue design:\r\n\r\n- **Work Distribution**: Collects all input prevouts into a queue and uses a barrier to start all worker threads simultaneously\r\n- **Synchronization**: Worker threads use an atomic counter to claim which inputs to fetch, and each input has an atomic flag to signal completion to the main thread\r\n- **Main Thread Processing**: The main thread waits for inputs in order and moves their `Coin` into the `cacheCoins` map as they become available.\r\n- **Work Stealing**: If the main thread catches up to the workers, it assists with fetching to maximize parallelism\r\n- **Completion**: All thread futures are waited on in StopFetching, which is called from any mutating method (Flush/Sync/SetBackend/Reset). The ResetGuard going out of scope ensure this happens before the block is destroyed.\r\n\r\n### Safety and Correctness\r\n\r\n- The `CoinsViewOverlay` works on a block that has not been fully validated, but it does not interfere or modify any of the validation during `ConnectBlock`\r\n- It simply fetches inputs in parallel, which must be fetched before a transaction is validated anyways\r\n- **Invalid blocks**: If an invalid block is mined, the temporary cache is reset without being flushed. This is an improvement over the current behavior, where existing inputs are inserted into the main `CoinsTip()` cache when pulled through for an invalid block\r\n\r\n### Performance\r\n\r\nBenchmarks show over 3x faster IBD performance in a cloud environment with network connected storage[^1], 3x faster IBD for an M4 Mac and up to 46% faster with directly connected storage[^2][^3][^4][^5]. The parallelization of expensive disk lookups provides significant speedup.\r\n\r\n[Flamegraphs show how the execution is changed](https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3617315125).\r\n\r\n### Credits\r\n\r\nInspired by [this comment](https://github.com/bitcoin/bitcoin/pull/18941#issuecomment-638553680).\r\n\r\nResolves https://github.com/bitcoin/bitcoin/issues/34121.\r\n\r\n[^1]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3678847806\r\n[^2]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3515011880\r\n[^3]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3463894000\r\n[^4]: https://github.com/bitcoin/bitcoin/pull/31132#pullrequestreview-3347436866\r\n[^5]: https://github.com/bitcoin/bitcoin/pull/31132#issuecomment-3488760623",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2024-10-22T14:40:28Z",
-      "updated_at": "2026-03-09T00:26:57Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31132",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3747,
         "has_nack": false,
         "has_ack": true
       }
@@ -455,30 +790,6 @@
         "drama_keywords": 1,
         "positive_keywords": 0,
         "text_length": 927,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3193702464,
-      "number": 34361,
-      "title": "test: clean up tx resurrection (re-org) test in feature_block.py",
-      "body": "The following comment about ECDSA signatures created with the test framework not passing mempool policy has been obsolete for a long time (at least since 2019, see PR #15826):\r\n\r\nhttps://github.com/bitcoin/bitcoin/blob/8c07800b193e94740a20f40d3e7c6626a59dd21f/test/functional/feature_block.py#L1167-L1172\r\n\r\nso remove it. While at it, change the resurrected txs to be indeed standard valid, so the `acceptnonstdtxn=1` parameter can also be removed from the functional test.\r\n\r\nKudos to stratospher, who (IIRC) mentioned this outdated comment a while ago.",
-      "state": "open",
-      "user": "theStack",
-      "created_at": "2026-01-21T04:08:53Z",
-      "updated_at": "2026-03-08T19:01:17Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34361",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 619,
         "has_nack": false,
         "has_ack": false
       }
@@ -840,30 +1151,6 @@
       }
     },
     {
-      "id": 2168265902,
-      "number": 31252,
-      "title": "rpc: print P2WSH and P2SH redem Script in (get/decode)rawtransaction",
-      "body": "This PR is motivated by https://github.com/bitcoin/bitcoin/issues/27391.\r\nAnd inspired by a previous PR https://github.com/bitcoin/bitcoin/pull/8849 that proposed something similar. \r\n\r\nThis is an example with a real mainnet transaction (3-5 multisig) and using ``decoderawtransaction`` (also works for ``getrawtransaction 'txid' 2``).\r\n\r\nVerbosity must be set to 2.\r\n\r\n```json\r\n$ bitcoin-cli getrawtransaction 44f5ab666cb9dccef69120fe5b51757a647c1f96882931a9faa0b2b5781ddfd2 2 000000000000000000018fa64b5e32335f7d3ac14b9e5553db20f2909c902c34\r\n{\r\n  \"in_active_chain\": true,\r\n  \"txid\": \"44f5ab666cb9dccef69120fe5b51757a647c1f96882931a9faa0b2b5781ddfd2\",\r\n  \"hash\": \"53836d2a4fb1e14356eac69fe1dad8be5dfd9a1b8101bc8aeb04ea2a320aa398\",\r\n  \"version\": 1,\r\n  \"size\": 382,\r\n  \"vsize\": 192,\r\n  \"weight\": 766,\r\n  \"locktime\": 0,\r\n  \"vin\": [\r\n    {\r\n      \"txid\": \"d15236206fbe06d6f38505656a2006a9a5a1ddf189a2647750091fd218d59581\",\r\n      \"vout\": 2,\r\n      \"scriptSig\": {\r\n        \"asm\": \"\",\r\n        \"hex\": \"\"\r\n      },\r\n      \"txinwitness\": [\r\n        \"\",\r\n        \"304402204d91eb67d798d071278ea0570973f3488d60c3ec98a611856f6a813b2e35df3202200bb36403ebd2dcc96b236efaf07db4f1da26b1031fc854548634ff44a340dc6601\",\r\n        \"3044022046abaa75082c2d1cdef57f8ef59a0046729220eabe2c2a229d1d592b89ccf1b0022028954703f13d836b1b77acd1eb72639a7a918d756fdd3ddef1d42a28567403ed01\",\r\n        \"522102f69779f4bb466a8c0aa7d6bf2a2dde34e44bae29d5186ee0c3bed4d903d57fa7210333c337637453164d5fd0dc31787a614a74d2acca5c08710937b9b831bd41b11f2103be7c86e40ad380b33f9abd653c6d04b95b818abd5653b63402678fcc45a017e753ae\"\r\n      ],\r\n      \"witnessScript\": {\r\n        \"asm\": \"2 02f69779f4bb466a8c0aa7d6bf2a2dde34e44bae29d5186ee0c3bed4d903d57fa7 0333c337637453164d5fd0dc31787a614a74d2acca5c08710937b9b831bd41b11f 03be7c86e40ad380b33f9abd653c6d04b95b818abd5653b63402678fcc45a017e7 3 OP_CHECKMULTISIG\",\r\n        \"desc\": \"multi(2,02f69779f4bb466a8c0aa7d6bf2a2dde34e44bae29d5186ee0c3bed4d903d57fa7,0333c337637453164d5fd0dc31787a614a74d2acca5c08710937b9b831bd41b11f,03be7c86e40ad380b33f9abd653c6d04b95b818abd5653b63402678fcc45a017e7)#sll5t8hh\",\r\n        \"type\": \"multisig\"\r\n      },\r\n      \"prevout\": {\r\n        ... bla bla bla prev output info ...\r\n        }\r\n      },\r\n      \"sequence\": 4294967293\r\n    }\r\n  ],\r\n  \"vout\": [ ... bla bla bla outputs ...  ],\r\n  \"fee\": 0.00000594,\r\n  \"hex\": \"010000000001018195d518d21f09507764a289f1dda1a5a906206a650585f3d606be6f203652d10200000000fdffffff025b730500000000001976a914381d46badae879d1c6037a03da52074e3914812c88ac38088000000000002200205ab691555ede8432ed7765585edb1c9b285532daf639e3e5ccd4843ff3b04cdf040047304402204d91eb67d798d071278ea0570973f3488d60c3ec98a611856f6a813b2e35df3202200bb36403ebd2dcc96b236efaf07db4f1da26b1031fc854548634ff44a340dc6601473044022046abaa75082c2d1cdef57f8ef59a0046729220eabe2c2a229d1d592b89ccf1b0022028954703f13d836b1b77acd1eb72639a7a918d756fdd3ddef1d42a28567403ed0169522102f69779f4bb466a8c0aa7d6bf2a2dde34e44bae29d5186ee0c3bed4d903d57fa7210333c337637453164d5fd0dc31787a614a74d2acca5c08710937b9b831bd41b11f2103be7c86e40ad380b33f9abd653c6d04b95b818abd5653b63402678fcc45a017e753ae00000000\",\r\n  \"blockhash\": \"000000000000000000018fa64b5e32335f7d3ac14b9e5553db20f2909c902c34\",\r\n  \"confirmations\": 1,\r\n  \"time\": 1746727602,\r\n  \"blocktime\": 1746727602\r\n}\r\n\r\n```",
-      "state": "open",
-      "user": "polespinasa",
-      "created_at": "2024-11-07T20:39:24Z",
-      "updated_at": "2026-03-08T16:05:16Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/31252",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 3342,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3328427974,
       "number": 34677,
       "title": "kernel: Chainparams and headerssync updates pre-31.0",
@@ -982,30 +1269,6 @@
       }
     },
     {
-      "id": 2426922942,
-      "number": 32162,
-      "title": "depends: Switch from multilib to platform-specific toolchains",
-      "body": "Using the multilib GCC toolchain, as currently documented in [`depends/README.md`](https://github.com/bitcoin/bitcoin/blob/4c1906a500cacab385b09e780b54271b0addaf4b/depends/README.md), has several issues, such as:\r\n\r\n1. The [`g++-multilib`](https://packages.ubuntu.com/noble/g++-multilib) package conflicts with platform-specific cross-compiler packages. This means it is not possible to cross compile for `i686` and other platforms using the same set of installed packages.\r\n\r\n2. The [`g++-multilib`](https://packages.ubuntu.com/noble/g++-multilib) package is not available for `arm64`:\r\n```sh\r\n$ sudo apt install g++-multilib\r\nReading package lists... Done\r\nBuilding dependency tree... Done\r\nReading state information... Done\r\nE: Unable to locate package g++-multilib\r\n```\r\n\r\n3. Managing the multilib GCC toolchain requires additional code in both depends and Guix scripts.\r\n\r\nThis PR addresses all the issues mentioned above by switching from multilib to platform-specific toolchains.\r\n\r\nAlso see https://github.com/bitcoin/bitcoin/pull/22456.\r\n\r\n---\r\n\r\nHere are examples of building for different scenarions:\r\n\r\n- Linux, `x86_64` or `arm64`, building with depends natively:\r\n```sh\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build --toolchain depends/$(./depends/config.sub $(./depends/config.guess))/toolchain.cmake\r\n$ cmake --build build -j $(nproc)\r\n```\r\n\r\n- Linux, `x86_64` or `arm64`, cross compiling for `i686-pc-linux-gnu`:\r\n```sh\r\n$ sudo apt install g++-i686-linux-gnu binutils-i686-linux-gnu\r\n$ export HOST=i686-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n\r\n- Linux, `x86_64`, cross compiling for `arm64`:\r\n```sh\r\n$ sudo apt install g++-aarch64-linux-gnu binutils-aarch64-linux-gnu\r\n$ export HOST=aarch64-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n\r\n- Linux, `arm64`, cross compiling for `x86_64`:\r\n```sh\r\n$ sudo apt install g++-x86-64-linux-gnu binutils-x86-64-linux-gnu\r\n$ export HOST=x86_64-linux-gnu\r\n$ gmake -C depends -j $(nproc)\r\n$ cmake -B build-${HOST} --toolchain depends/${HOST}/toolchain.cmake\r\n$ cmake --build build-${HOST} -j $(nproc)\r\n```\r\n",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-03-29T13:34:59Z",
-      "updated_at": "2026-03-08T15:16:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32162",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2364,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2466171613,
       "number": 32297,
       "title": "bitcoin-cli: Add -ipcconnect option",
@@ -1049,30 +1312,6 @@
         "drama_keywords": 2,
         "positive_keywords": 0,
         "text_length": 1085,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2471245988,
-      "number": 32317,
-      "title": "kernel: Separate UTXO set access from validation functions",
-      "body": "The current code makes it hard to call functions for checking the consensus-correctness of a block without having a full UTXO set at hand. This makes implementing features such as Utreexo and non-assumevalid swiftsync, where maintaining a full UTXO set defeats their purpose, through the kernel API difficult. Checks like the coinbase subsidy, or block sigops are only available through `ConnectBlock`, which requires a complete coins cache.\r\n\r\nSolve this by moving accessing coins and the responsibility of spending them out of `ConnectBlock` and into a new separate function called `SpendBlock`. Pass a block's spent coins through the existing `CBlockUndo` data structure to `ConnectBlock`. \r\n\r\nWhile the change is largely a refactor, some smaller behaviour changes were unavoidable. These should be highlighted in the commit messages. The last commit contains the most important part of the coins logic move, the commits before attempt to prepare it piecemeal.\r\n\r\nThis pull request was benchmarked on [benchcoin](https://github.com/bitcoin-dev-tools/benchcoin/pull/162), which showed no performance regression. While discussing this pull request it was noted that pre-fetching and eliminating the need for some additional map lookups might improve performance a bit, but this does not make a measurable difference in the grand scheme of things and was not the motivation for this pull request.\r\n\r\nIn future changes, ConnectBlock could be made even more self contained, accessing the coins from the internal map could be further optimized by consolidating existence checking and spending, and the function eventually exposed in an external kernel API (as done [here](https://github.com/sedited/bitcoin/commit/09e05493010119fc60d310d3e7ffc388de441f9a#diff-f638e65d9278276b2a6ac42ffbbd26d079c3dba752feed5038a25a1ee565d320R947))",
-      "state": "open",
-      "user": "sedited",
-      "created_at": "2025-04-21T13:15:46Z",
-      "updated_at": "2026-03-08T15:05:17Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32317",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1886,
         "has_nack": false,
         "has_ack": false
       }
@@ -1437,28 +1676,6 @@
       }
     },
     {
-      "id": 2803909911,
-      "number": 33324,
-      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
-      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-09-05T23:51:29Z",
-      "updated_at": "2026-03-08T12:58:54Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3232,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3233731791,
       "number": 34471,
       "title": "refactor: Use aliasing shared_ptr in Sock::Wait",
@@ -1718,30 +1935,6 @@
       }
     },
     {
-      "id": 3022278484,
-      "number": 33902,
-      "title": "doc: Document compiler configuration for native depends packages",
-      "body": "Fixes: #33859\r\n\r\nPreviously one had to read the Makefile (and various *.mk configuration\r\nfiles) to see how to correctly override CC and CXX when building native\r\ndepends packages.\r\n\r\nDetail this in README.md to make it clearer.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2025-11-18T15:23:18Z",
-      "updated_at": "2026-03-08T11:25:31Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33902",
-      "labels": [
-        "Docs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 293,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3034182041,
       "number": 33922,
       "title": "mining: add getMemoryLoad() and track template non-mempool memory footprint",
@@ -1838,30 +2031,6 @@
       }
     },
     {
-      "id": 3091431534,
-      "number": 34049,
-      "title": "rpc: Disallow captures in RPCMethodImpl",
-      "body": "When defining `RPCHelpMan` objects, we usually return a lambda, and mostly we define those via `[&](...) { ... }` which explicitly captures any parameters or local variables by reference. If we were to actually use any of those captures (we don't), we would invoke undefined behaviour. So instead, convert all the `[&]` to `[]` to avoid capturing, and as part of `RPCHelpMan` check that the function we provide is convertible to a bare function pointer, so that any attempts to capture anything (even if it's by-copy, which is safe) results in an error.\r\n\r\nWhile we're at it, rename `RPCHelpMan` to `RPCMethod`, reflecting it's greater responsibility since #19386.",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2025-12-11T03:25:25Z",
-      "updated_at": "2026-03-08T10:51:48Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34049",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 704,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3221659481,
       "number": 34439,
       "title": "qa: Drop recursive deletes from test code, add lint checks.",
@@ -1883,30 +2052,6 @@
         "text_length": 1101,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3120160595,
-      "number": 34132,
-      "title": "coins: drop error catcher, centralize fatal read handling",
-      "body": "### Problem\r\nThe current coins database read-error handling adds unnecessary complexity to the critical path:\r\n* `CCoinsViewErrorCatcher` sits between the cache and database views, wrapping every read operation\r\n* `ExecuteBackedWrapper` adds another function call layer with lambda captures on each database read\r\n* Uses `std::vector<std::function<void()>>` for callbacks when there's only ever one callback registered\r\n* The error callback is set after database initialization rather than during construction (requiring a `cs_main` lock)\r\n\r\nThis adds unnecessary stack depth and bookkeeping overhead on every coins database read operation (`GetCoin`). Also note that `CCoinsViewDB::HaveCoin` isn't even on the hot path as far as I can tell.\r\n\r\n### Context\r\nThis is part of ongoing coins caching cleanup efforts, see https://github.com/bitcoin/bitcoin/issues/34280.\r\n\r\n### Fix\r\n**Behavior change:** Treat deserialization failures in `CDBWrapper::Read()` as fatal instead of catching and returning `false`. This makes corruption visible and avoids ambiguous missing-vs-unreadable handling at call sites: on decode failure, `CDBWrapper` logs the error, executes a provided callback, and then calls `std::abort()`.\r\n\r\nWith read-failure handling centralized in `CDBWrapper`, collapse the `CCoinsViewErrorCatcher` layer entirely by removing `ExecuteBackedWrapper` and `CCoinsViewErrorCatcher` which also enables making coins view lookups `noexcept`.\r\n\r\nA new test verifies the node aborts with a clear error message on a few database corruption paths.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-12-20T22:56:45Z",
-      "updated_at": "2026-03-08T10:37:55Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34132",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1604,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -2430,30 +2575,6 @@
       }
     },
     {
-      "id": 1940576733,
-      "number": 30342,
-      "title": "kernel, logging: Pass Logger instances to kernel objects",
-      "body": "Pass `Logger` instances to `BlockManager`, `CCoinsViewDB`, `CDBWrapper`, `Chainstate`, `ChainstateManager`, `CoinsViews`, and `CTxMemPool` classes so libbitcoinkernel applications and tests have the option to control where log output goes instead of having all output sent to the global logger.\n\nThis PR is an alternative to #30338. It is more limited because it only changes kernel code while leaving other parts of the codebase alone. It also takes the opportunity to migrate legacy LogPrint / LogPrintf calls to the new log macros introduced in #28318.\n\n---\n\n<!-- begin based-on -->\n**This is based on #29256 + #33847.** The non-base commits are:\n\n- [`4fc71ce6edf` refactor: Pass Logger instances to kernel objects](https://github.com/bitcoin/bitcoin/pull/30342/commits/4fc71ce6edfa3422cbf05bcdc1d4ae665456c87e)\n- [`507be73175b` refactor: Log kernel output to local log instances](https://github.com/bitcoin/bitcoin/pull/30342/commits/507be73175bce76c9219dcdb559ef9978e456b44)\n- [`b0f28c77ab4` refactor: Pass Logger instance to CTxMemPool](https://github.com/bitcoin/bitcoin/pull/30342/commits/b0f28c77ab4ec7501da1e535a07d02cd73bcf859)\n- [`b6b95a62447` kernel: Drop global Logger instance](https://github.com/bitcoin/bitcoin/pull/30342/commits/b6b95a62447c589a0078474fb8f6bc4b2e7e8a51)<!-- end -->",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2024-06-26T17:52:24Z",
-      "updated_at": "2026-03-08T06:03:42Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/30342",
-      "labels": [
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1357,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3342587092,
       "number": 34708,
       "title": "validation: refactor: remove ConnectTrace",
@@ -2473,30 +2594,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 473,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3348549752,
-      "number": 34717,
-      "title": "p2p: remove m_getaddr_sent",
-      "body": "This PR removes `m_getaddr_sent`, as it no longer behaves as originally intended. Initially, this flag was meant to track when a getaddr message was sent to a peer.\r\n\r\nNow that self-announcements are sent separately from getaddr responses, the self-announcement sets `m_getaddr_sent `to `false` even though we are still waiting for the getaddr response (1000 addresses). \r\nWhen the getaddr response does arrive, we rely on the size of the addr message, not the flag, to decide whether it should be relayed. This makes the flag redundant.\r\n\r\nThis is the current behavior:\r\n\r\n- The initial self-announcement is not relayed but it flips m_getaddr_sent to be false\r\n- We use addr.size() to avoid relaying  (1000) getaddr response.(assuming the other two flags are false) \r\n- The first addr message is relayed because the flag is  false(this was not the case before https://github.com/bitcoin/bitcoin/pull/34146).\r\n\r\nRemoving this flag ensures that:\r\n\r\n- The initial self-announcement is relayed.\r\n- The getaddr response is still not relayed, using the existing size-based check.\r\n\r\nI had initially considered an alternative approach https://github.com/naiyoma/bitcoin/pull/14, where the self-announcement would not affect this flag and would therefore retain the initial behaviour, but i decided to reattempt its removal, as this was previously attempted, see https://github.com/bitcoin/bitcoin/pull/19794. Given the changes since then, I believe revisiting it is now more appropriate.\r\n",
-      "state": "open",
-      "user": "naiyoma",
-      "created_at": "2026-03-03T12:04:38Z",
-      "updated_at": "2026-03-08T03:49:55Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34717",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1510,
         "has_nack": false,
         "has_ack": true
       }
@@ -2708,55 +2805,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1076,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2598874149,
-      "number": 32764,
-      "title": "guix: Build for macOS using Clang only",
-      "body": "This PR makes macOS builds Clang-only by switching the build compiler in depends to `clang` + `libc++`.\r\n\r\nSee: https://github.com/bitcoin/bitcoin/issues/30206.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-06-17T13:39:41Z",
-      "updated_at": "2026-03-07T21:57:55Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32764",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 199,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2902093523,
-      "number": 33593,
-      "title": "guix: Use UCRT runtime for Windows release binaries",
-      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-10-09T21:46:43Z",
-      "updated_at": "2026-03-07T21:57:03Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
-      "labels": [
-        "Windows",
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 213,
         "has_nack": false,
         "has_ack": false
       }
@@ -6646,55 +6694,6 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 3182466003,
-      "number": 34322,
-      "title": "node: Persist private broadcast transactions over node restarts",
-      "body": "Follow-up from #29415 \r\n\r\nCurrently private broadcast transactions are stored in peer manager and do not persist over restarts. A submitted transaction can be lost if the node restarts before it is privately broadcast.\r\n\r\nThis change dumps the set of private broadcast transactions to a `privatebroadcast.dat` file on shutdown, and adds the transactions back to the private broadcast data structure on restart.",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2026-01-16T19:37:05Z",
-      "updated_at": "2026-03-02T02:43:42Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34322",
-      "labels": [
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 474,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 2743147697,
-      "number": 33184,
-      "title": "test: Refactor rpc_getblockstats.py to use MiniWallet",
-      "body": "Refactors rpc_getblockstats.py to use MiniWallet for transaction creation, removing legacy wallet dependencies and simplifying the test by eliminating data caching.\r\n\r\nFixes #31838",
-      "state": "open",
-      "user": "enirox001",
-      "created_at": "2025-08-13T14:52:22Z",
-      "updated_at": "2026-03-02T01:59:08Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33184",
-      "labels": [
-        "Tests",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 234,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "issues": [
@@ -7104,19 +7103,6 @@
         "Feature"
       ],
       "comment_data": [
-        {
-          "id": 3981691598,
-          "user": "andrewtoth",
-          "body": "Some more movement here https://github.com/bitcoin/bitcoin/pull/34707. One step at a time.\n",
-          "created_at": "2026-03-02T02:40:46Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 91,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
         {
           "id": 4011177941,
           "user": "optout21",
@@ -8609,19 +8595,6 @@
       ],
       "comment_data": [
         {
-          "id": 3982625319,
-          "user": "sedited",
-          "body": "Is the failure [here](https://github.com/bitcoin/bitcoin/actions/runs/22523817761/job/65360748096?pr=34692#step:9:3224) related to this?\n\n```\n396/455 - wallet_assumeutxo.py failed, Duration: 2 s\n\nstdout:\n2026-02-28T16:12:48.637327Z TestFramework (INFO): PRNG seed is: 3704802399065086238\n2026-02-28T16:12:48.637849Z TestFramework (INFO): Initializing test directory /Users/runner/work/bitcoin/bitcoin/repo_archive/ci/scratch/test_runner/test_runner_₿_🏃_20260228_155759/wallet_assumeutxo_58\n2026-02-28T16:12:49.548117Z TestFramework (INFO): -- Testing assumeutxo\n2026-02-28T16:12:49.548768Z TestFramework (INFO): Creating a UTXO snapshot at height 299\n2026-02-28T16:12:49.895968Z TestFramework (INFO): Loading snapshot into second node from /Users/runner/work/bitcoin/bitcoin/repo_archive/ci/scratch/test_runner/test_runner_₿_🏃_20260228_155759/wallet_assumeutxo_58/node0/regtest/utxos.dat\n2026-02-28T16:12:49.911552Z TestFramework (INFO): Backup from the snapshot height can be loaded during background sync\n2026-02-28T16:12:49.915983Z TestFramework (INFO): Backup from before the snapshot height can't be loaded during background sync\n2026-02-28T16:12:49.919539Z TestFramework (INFO): Backup from the snapshot height can be loaded during background sync (pruned node)\n2026-02-28T16:12:49.940587Z TestFramework (INFO): Backup from before the snapshot height can't be loaded during background sync (pruned node)\n2026-02-28T16:12:49.944432Z TestFramework (INFO): Test loading descriptors during background sync\n2026-02-28T16:12:49.956406Z TestFramework (INFO): Test that rescanning blocks from before the snapshot fails when blocks are not available from the background sync yet\n2026-02-28T16:12:49.956860Z TestFramework (INFO): Restarting node to stop at height 359\n2026-02-28T16:12:50.947949Z TestFramework (INFO): Restarted node before snapshot validation completed, reloading...\n2026-02-28T16:12:51.316321Z TestFramework (INFO): Verify node state after restart during background sync\n2026-02-28T16:12:51.316847Z TestFramework (ERROR): Unexpected exception:\nTraceback (most recent call last):\n  File \"/Users/runner/work/bitcoin/bitcoin/repo_archive/test/functional/test_framework/test_framework.py\", line 142, in main\n    self.run_test()\n    ~~~~~~~~~~~~~^^\n  File \"/Users/runner/work/bitcoin/bitcoin/repo_archive/ci/scratch/build-aarch64-apple-darwin24.6.0/test/functional/wallet_assumeutxo.py\", line 251, in run_test\n    assert_equal(chainstates[0]['blocks'], START_HEIGHT)\n    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/runner/work/bitcoin/bitcoin/repo_archive/test/functional/test_framework/util.py\", line 80, in assert_equal\n    raise AssertionError(\"not(%s)\" % \" == \".join(str(arg) for arg in (thing1, thing2) + args))\nAssertionError: not(211 == 199)\n2026-02-28T16:12:51.382295Z TestFramework (INFO): Not stopping nodes as test failed. The dangling processes will be cleaned up later.\n2026-02-28T16:12:51.382372Z TestFramework (WARNING): Not cleaning up dir /Users/runner/work/bitcoin/bitcoin/repo_archive/ci/scratch/test_runner/test_runner_₿_🏃_20260228_155759/wallet_assumeutxo_58\n2026-02-28T16:12:51.382410Z TestFramework (ERROR): Test failed. Test logging available at /Users/runner/work/bitcoin/bitcoin/repo_archive/ci/scratch/test_runner/test_runner_₿_🏃_20260228_155759/wallet_assumeutxo_58/test_framework.log\n2026-02-28T16:12:51.382488Z TestFramework (ERROR): \n2026-02-28T16:12:51.382577Z TestFramework (ERROR): Hint: Call /Users/runner/work/bitcoin/bitcoin/repo_archive/test/functional/combine_logs.py '/Users/runner/work/bitcoin/bitcoin/repo_archive/ci/scratch/test_runner/test_runner_₿_🏃_20260228_155759/wallet_assumeutxo_58' to consolidate all logs\n2026-02-28T16:12:51.382609Z TestFramework (ERROR): \n2026-02-28T16:12:51.382634Z TestFramework (ERROR): If this failure happened unexpectedly or intermittently, please file a bug and provide a link or upload of the combined log.\n2026-02-28T16:12:51.382680Z TestFramework (ERROR): https://github.com/bitcoin/bitcoin/issues\n2026-02-28T16:12:51.382703Z TestFramework (ERROR): \n\n\nstderr:\n[node 3] Cleaning up leftover process\n[node 2] Cleaning up leftover process\n[node 1] Cleaning up leftover process\n[node 0] Cleaning up leftover process\n```",
-          "created_at": "2026-03-02T07:29:33Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 4228,
-            "has_nack": false,
-            "has_ack": true
-          }
-        },
-        {
           "id": 3984581510,
           "user": "maflcko",
           "body": "> Is the failure [here](https://github.com/bitcoin/bitcoin/actions/runs/22523817761/job/65360748096?pr=34692#step:9:3224) related to this?\n\nNo, that just ignores the `f\"-stopatheight={PAUSE_HEIGHT}\"` and sync further. That is an unrelated issue.",
@@ -8734,19 +8707,6 @@
         "CI failed"
       ],
       "comment_data": [
-        {
-          "id": 3982398137,
-          "user": "maflcko",
-          "body": "I did 5600 runs of the test via:\n\n```\nwhile ./bld-cmake/test/functional/test_runner.py -j $( nproc ) $( printf 'feature_fee_estimation %.0s' {1..200} )  --timeout-factor=10 ; do echo >> /tmp/count_f ; done \n```\n\nI guess the underlying issue may still exist, just not reproducible anymore via the test?",
-          "created_at": "2026-03-02T06:25:04Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 301,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
         {
           "id": 3984733876,
           "user": "ismaelsadeeq",
@@ -8891,102 +8851,12 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 3967266428,
-      "number": 34631,
-      "title": "Intermittent failure of p2p_private_broadcast.py",
-      "body": "Not sure if this is from the original PR or #34329\n\n<details>\n<summary>Logs:</summary>\n\n\n```\n455/455 - p2p_private_broadcast.py failed, Duration: 84 s                              \n\nstdout:\n2026-02-20T08:16:52.932185Z TestFramework (INFO): PRNG seed is: 5474091116900090230\n2026-02-20T08:16:52.932503Z TestFramework (INFO): Initializing test directory /tmp/merging_clang_build_Debug/test_runner_₿_🏃_20260220_091548/p2p_private_broadcast_74\n2026-02-20T08:16:58.196783Z TestFramework (INFO): Created txid=2db3a22f9370eb32f110597882acebef1c76cf319837bac69b829917730d2349: for basic test\n2026-02-20T08:16:58.196839Z TestFramework (INFO): Created txid=1586df3125397f95009109f8978a656d966eba39b36bb7552d0cfa703e58d84a: for broadcast with dependency in mempool + rebroadcast\n2026-02-20T08:16:58.196858Z TestFramework (INFO): Created txid=f4580414da8808a9772291d522281ba7d3c5d4ad480cde6580b5363590ec79d2: for broadcast with dependency not in mempool\n2026-02-20T08:17:13.762676Z TestFramework (INFO): Outbound connection i=10: the private broadcast target received and further relayed the transaction\n2026-02-20T08:17:13.762865Z TestFramework (INFO): Basic: ok: outbound connection i=11 is private broadcast of txid=2db3a22f9370eb32f110597882acebef1c76cf319837bac69b829917730d2349\n2026-02-20T08:17:13.762948Z TestFramework (INFO): Basic: ok: outbound connection i=12 is private broadcast of txid=2db3a22f9370eb32f110597882acebef1c76cf319837bac69b829917730d2349\n2026-02-20T08:17:13.764109Z TestFramework (INFO): Resending the same transaction via RPC again (it is not in the mempool yet)\n2026-02-20T08:17:13.765058Z TestFramework (INFO): Sending a malleated transaction with an invalid witness via RPC\n2026-02-20T08:17:13.766052Z TestFramework (INFO): Checking that the transaction is not in the originator node's mempool\n2026-02-20T08:17:13.766348Z TestFramework (INFO): Sending INV and waiting for GETDATA from node\n2026-02-20T08:17:13.817260Z TestFramework (INFO): Waiting for normal broadcast to another peer\n2026-02-20T08:17:16.720760Z TestFramework (INFO): Checking getprivatebroadcastinfo no longer reports the transaction after it is received back\n2026-02-20T08:17:16.721406Z TestFramework (INFO): Checking abortprivatebroadcast removes a pending private-broadcast transaction\n2026-02-20T08:17:16.723782Z TestFramework (INFO): Checking abortprivatebroadcast fails for non-existent transaction\n2026-02-20T08:17:16.724255Z TestFramework (INFO): Sending a transaction that is already in the mempool\n2026-02-20T08:17:16.925456Z TestFramework (INFO): Broadcast of mempool transaction: ok: outbound connection i=13 is private broadcast of txid=2db3a22f9370eb32f110597882acebef1c76cf319837bac69b829917730d2349\n2026-02-20T08:17:16.975699Z TestFramework (INFO): Broadcast of mempool transaction: ok: outbound connection i=14 is private broadcast of txid=2db3a22f9370eb32f110597882acebef1c76cf319837bac69b829917730d2349\n2026-02-20T08:17:17.075987Z TestFramework (INFO): Broadcast of mempool transaction: ok: outbound connection i=15 is private broadcast of txid=2db3a22f9370eb32f110597882acebef1c76cf319837bac69b829917730d2349\n2026-02-20T08:17:17.076719Z TestFramework (INFO): Sending a transaction with a dependency in the mempool\n2026-02-20T08:17:17.228560Z TestFramework (INFO): Dependency in mempool: ok: outbound connection i=16 is private broadcast of txid=1586df3125397f95009109f8978a656d966eba39b36bb7552d0cfa703e58d84a\n2026-02-20T08:17:17.278785Z TestFramework (INFO): Dependency in mempool: ok: outbound connection i=17 is private broadcast of txid=1586df3125397f95009109f8978a656d966eba39b36bb7552d0cfa703e58d84a\n2026-02-20T08:17:17.328990Z TestFramework (INFO): Dependency in mempool: ok: outbound connection i=18 is private broadcast of txid=1586df3125397f95009109f8978a656d966eba39b36bb7552d0cfa703e58d84a\n2026-02-20T08:17:17.329712Z TestFramework (INFO): Sending a transaction with a dependency not in the mempool (should be rejected)\n2026-02-20T08:17:17.331228Z TestFramework (INFO): Checking that rebroadcast works\n2026-02-20T08:18:17.331354Z TestFramework (ERROR): Unexpected exception:\nTraceback (most recent call last):\n  File \"/home/user/bitcoin/test/functional/test_framework/test_framework.py\", line 142, in main\n    self.run_test()\n  File \"/home/user/bitcoin/clang_build/Debug/test/functional/p2p_private_broadcast.py\", line 429, in run_test\n    with tx_originator.busy_wait_for_debug_log(expected_msgs=[rebroadcast_msg.encode()]):\n  File \"/usr/lib/python3.12/contextlib.py\", line 144, in __exit__\n    next(self.gen)\n  File \"/home/user/bitcoin/test/functional/test_framework/test_node.py\", line 616, in busy_wait_for_debug_log\n    self._raise_assertion_error(f'Expected message(s) {remaining_expected!s} '\n  File \"/home/user/bitcoin/test/functional/test_framework/test_node.py\", line 229, in _raise_assertion_error\n    raise AssertionError(self._node_msg(msg))\nAssertionError: [node 0] Expected message(s) [b'Reattempting broadcast of stale txid=1586df3125397f95009109f8978a656d966eba39b36bb7552d0cfa703e58d84a'] not found in log:\n\n - 2026-02-20T08:17:17.331379Z [http] [httpserver.cpp:233] [http_request_cb] [http] Received a POST request for / from 127.0.0.1:36796\n - 2026-02-20T08:17:17.331431Z [http_pool_1] [rpc/request.cpp:243] [parse] [rpc] ThreadRPCServer method=setmocktime user=__cookie__\n - 2026-02-20T08:17:17.331568Z (mocktime: 2026-02-20T08:37:17Z) [http] [httpserver.cpp:233] [http_request_cb] [http] Received a POST request for / from 127.0.0.1:36796\n - 2026-02-20T08:17:17.331669Z (mocktime: 2026-02-20T08:37:17Z) [http_pool_0] [rpc/request.cpp:243] [parse] [rpc] ThreadRPCServer method=mockscheduler user=__cookie__\n - 2026-02-20T08:17:17.331823Z (mocktime: 2026-02-20T08:37:17Z) [scheduler] [net.cpp:2438] [StartExtraBlockRelayPeers] [net] enabling extra block-relay-only peers\n - 2026-02-20T08:17:17.333250Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=2\n - 2026-02-20T08:17:17.333389Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=2\n - 2026-02-20T08:17:17.333462Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=2 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.333508Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=19\n - 2026-02-20T08:17:17.333530Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5012] [ProcessMessage] [privatebroadcast] Got a PONG (the transaction will probably reach the network), marking for disconnect, peer=19\n - 2026-02-20T08:17:17.333574Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=7\n - 2026-02-20T08:17:17.333613Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->m_sock_mutex, net.cpp:2138 started\n - 2026-02-20T08:17:17.333631Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->m_sock_mutex, net.cpp:2138 completed (0μs)\n - 2026-02-20T08:17:17.333648Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending inv (37 bytes) peer=7\n - 2026-02-20T08:17:17.333662Z (mocktime: 2026-02-20T08:37:17Z) [net] [net.cpp:558] [CloseSocketDisconnect] [net] Resetting socket for peer=19\n - 2026-02-20T08:17:17.333687Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=7\n - 2026-02-20T08:17:17.333749Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=7 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.333802Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=1\n - 2026-02-20T08:17:17.333900Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=1\n - 2026-02-20T08:17:17.333936Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->cs_vSend, net.cpp:2072 started\n - 2026-02-20T08:17:17.333953Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->cs_vSend, net.cpp:2072 completed (0μs)\n - 2026-02-20T08:17:17.333964Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=1 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.334016Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=6\n - 2026-02-20T08:17:17.334055Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->m_sock_mutex, net.cpp:2138 started\n - 2026-02-20T08:17:17.334067Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->m_sock_mutex, net.cpp:2138 completed (0μs)\n - 2026-02-20T08:17:17.334078Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=6\n - 2026-02-20T08:17:17.334150Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=6 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.334192Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=9\n - 2026-02-20T08:17:17.334265Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=9\n - 2026-02-20T08:17:17.334340Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=9 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.334378Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=3\n - 2026-02-20T08:17:17.334470Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=3\n - 2026-02-20T08:17:17.334526Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->m_sock_mutex, net.cpp:2138 started\n - 2026-02-20T08:17:17.334542Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=3 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.334551Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->m_sock_mutex, net.cpp:2138 completed (0μs)\n - 2026-02-20T08:17:17.334568Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=0\n - 2026-02-20T08:17:17.334609Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->cs_vSend, net.cpp:2072 started\n - 2026-02-20T08:17:17.334622Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->cs_vSend, net.cpp:2072 completed (4μs)\n - 2026-02-20T08:17:17.334656Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=0\n - 2026-02-20T08:17:17.334719Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=0 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.334749Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=5\n - 2026-02-20T08:17:17.334830Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=5\n - 2026-02-20T08:17:17.334893Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=5 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.334941Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=8\n - 2026-02-20T08:17:17.334972Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->m_sock_mutex, net.cpp:2138 started\n - 2026-02-20T08:17:17.334983Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->m_sock_mutex, net.cpp:2138 completed (0μs)\n - 2026-02-20T08:17:17.335000Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=8\n - 2026-02-20T08:17:17.335068Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=8 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.335110Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=4\n - 2026-02-20T08:17:17.335163Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->cs_vSend, net.cpp:2072 started\n - 2026-02-20T08:17:17.335177Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention pnode->cs_vSend, net.cpp:2072 completed (0μs)\n - 2026-02-20T08:17:17.335190Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=4\n - 2026-02-20T08:17:17.335247Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5339] [ConsiderEviction] [net] sending getheaders to outbound peer=4 to verify chain work (current best known block:<none>, benchmark blockhash: 76b181cf5782e03af6adb8f990404168f05f9abd940e7a4e92a33e6044d1f6a5)\n - 2026-02-20T08:17:17.335294Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention cs_main, net_processing.cpp:1680 started\n - 2026-02-20T08:17:17.335304Z (mocktime: 2026-02-20T08:37:17Z) [net] [logging/timer.h:58] [Log] [lock] Enter: lock contention cs_main, net_processing.cpp:1680 completed (0μs)\n - 2026-02-20T08:17:17.335311Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=0\n - 2026-02-20T08:17:17.335335Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [logging/timer.h:58] [Log] [lock] Enter: lock contention cs_main, net_processing.cpp:5614 started\n - 2026-02-20T08:17:17.335343Z (mocktime: 2026-02-20T08:37:17Z) [net] [net_processing.cpp:1750] [FinalizeNode] [net] Cleared nodestate for peer=19\n - 2026-02-20T08:17:17.335351Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [logging/timer.h:58] [Log] [lock] Enter: lock contention cs_main, net_processing.cpp:5614 completed (0μs)\n - 2026-02-20T08:17:17.335403Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=3\n - 2026-02-20T08:17:17.335455Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=7\n - 2026-02-20T08:17:17.335481Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=5\n - 2026-02-20T08:17:17.335506Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=4\n - 2026-02-20T08:17:17.335532Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=2\n - 2026-02-20T08:17:17.335557Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=1\n - 2026-02-20T08:17:17.335583Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=8\n - 2026-02-20T08:17:17.335606Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=6\n - 2026-02-20T08:17:17.335632Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=9\n - 2026-02-20T08:17:17.335727Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: getdata (37 bytes) peer=7\n - 2026-02-20T08:17:17.335735Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:4225] [ProcessMessage] [net] received getdata (1 invsz) peer=7\n - 2026-02-20T08:17:17.335744Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:4228] [ProcessMessage] [net] received getdata for: wtx 300386bebae3d16bdf431a264212a900e15716f784d3888fd800b583d235a389 peer=7\n - 2026-02-20T08:17:17.335777Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending tx (133 bytes) peer=7\n - 2026-02-20T08:17:17.342789Z (mocktime: 2026-02-20T08:37:17Z) [scheduler] [txmempool.cpp:435] [check] [mempool] Checking mempool with 1 transactions and 1 inputs\n - 2026-02-20T08:17:17.342847Z (mocktime: 2026-02-20T08:37:17Z) [scheduler] [net_processing.cpp:1663] [ReattemptPrivateBroadcast] [privatebroadcast] Giving up broadcast attempts for txid=2db3a22f9370eb32f110597882acebef1c76cf319837bac69b829917730d2349 wtxid=300386bebae3d16bdf431a264212a900e15716f784d3888fd800b583d235a389: txn-already-in-mempool\n - 2026-02-20T08:17:17.343326Z (mocktime: 2026-02-20T08:37:17Z) [scheduler] [net.cpp:2401] [DumpAddresses] [net] Flushed 100 addresses to peers.dat  0ms\n - 2026-02-20T08:17:17.603367Z (mocktime: 2026-02-20T08:37:17Z) [opencon] [addrman.cpp:786] [Select_] [addrman] Selected [80::1]:8333 from new\n - 2026-02-20T08:17:17.603457Z (mocktime: 2026-02-20T08:37:17Z) [opencon] [net.cpp:396] [ConnectNode] [net] trying v1 connection [80::1]:8333 lastseen=0.3hrs\n - 2026-02-20T08:17:17.603487Z (mocktime: 2026-02-20T08:37:17Z) [opencon] [net.cpp:486] [ConnectNode] [proxy] Using proxy: 127.0.0.1:11890 to connect to [80::1]:8333\n - 2026-02-20T08:17:17.603607Z (mocktime: 2026-02-20T08:37:17Z) [opencon] [netbase.cpp:396] [Socks5] [net] SOCKS5 connecting 80::1\n - 2026-02-20T08:17:17.603898Z (mocktime: 2026-02-20T08:37:17Z) [opencon] [netbase.cpp:435] [Socks5] [proxy] SOCKS5 sending proxy authentication b498d4efaac06cd7-20:b498d4efaac06cd7-20\n - 2026-02-20T08:17:17.603975Z (mocktime: 2026-02-20T08:37:17Z) [opencon] [netbase.cpp:514] [Socks5] [net] SOCKS5 connected 80::1\n - 2026-02-20T08:17:17.604089Z (mocktime: 2026-02-20T08:37:17Z) [opencon] [net.cpp:4006] [CNode] [net] Added connection peer=20\n - 2026-02-20T08:17:17.636870Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending version (114 bytes) peer=20\n - 2026-02-20T08:17:17.636987Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:1595] [PushNodeVersion] [net] send version message: version=70016, blocks=200, txrelay=0, peer=20\n - 2026-02-20T08:17:17.655393Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: version (111 bytes) peer=20\n - 2026-02-20T08:17:17.655440Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3702] [ProcessMessage] [net] receive version message: /python-p2p-tester:0.0.3/: version 70016, blocks=-1, us=0.0.0.0:0, txrelay=1, peer=20\n - 2026-02-20T08:17:17.655453Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending wtxidrelay (0 bytes) peer=20\n - 2026-02-20T08:17:17.655510Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending sendaddrv2 (0 bytes) peer=20\n - 2026-02-20T08:17:17.655559Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending verack (0 bytes) peer=20\n - 2026-02-20T08:17:17.655679Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [addrman.cpp:676] [Good_] [addrman] Moved [80::1]:8333 to tried[35][47]\n - 2026-02-20T08:17:17.655695Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [node/timeoffsets.cpp:31] [Add] [net] Added time offset -1200s, total samples 11\n - 2026-02-20T08:17:17.655879Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: wtxidrelay (0 bytes) peer=20\n - 2026-02-20T08:17:17.656325Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: verack (0 bytes) peer=20\n - 2026-02-20T08:17:17.656342Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3842] [ProcessMessage] New block-relay-only peer connected: transport: v1, version: 70016, blocks=-1 peer=20\n - 2026-02-20T08:17:17.656359Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending sendcmpct (9 bytes) peer=20\n - 2026-02-20T08:17:17.656428Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending ping (8 bytes) peer=20\n - 2026-02-20T08:17:17.656487Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net.cpp:4074] [PushMessage] [net] sending getheaders (645 bytes) peer=20\n - 2026-02-20T08:17:17.656544Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:5811] [SendMessages] [net] initial getheaders (199) to peer=20 (startheight:-1)\n - 2026-02-20T08:17:17.697564Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [net_processing.cpp:3582] [ProcessMessage] [net] received: pong (8 bytes) peer=20\n - 2026-02-20T08:17:17.898187Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [logging/timer.h:58] [Log] [lock] Enter: lock contention connman.m_nodes_mutex, net.h:1812 started\n - 2026-02-20T08:17:17.898212Z (mocktime: 2026-02-20T08:37:17Z) [msghand] [logging/timer.h:58] [Log] [lock] Enter: lock contention connman.m_nodes_mutex, net.h:1812 completed (1μs)\n - 2026-02-20T08:17:21.077693Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:418] [CreateIfNotCreatedAlready] [i2p] Creating persistent I2P SAM session 76611381d8 with 127.0.0.1:1\n - 2026-02-20T08:17:21.077810Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [netbase.cpp:584] [LogConnectFailure] connect() to 127.0.0.1:1 failed after wait: Connection refused (111)\n - 2026-02-20T08:17:21.077857Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:152] [Listen] [error] Couldn't listen: Cannot connect to 127.0.0.1:1\n - 2026-02-20T08:17:29.077977Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:418] [CreateIfNotCreatedAlready] [i2p] Creating persistent I2P SAM session ad468d1474 with 127.0.0.1:1\n - 2026-02-20T08:17:29.078063Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [netbase.cpp:584] [LogConnectFailure] connect() to 127.0.0.1:1 failed after wait: Connection refused (111)\n - 2026-02-20T08:17:29.078100Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:152] [Listen] [error] Couldn't listen: Cannot connect to 127.0.0.1:1\n - 2026-02-20T08:17:38.078194Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:418] [CreateIfNotCreatedAlready] [i2p] Creating persistent I2P SAM session 857489dee6 with 127.0.0.1:1\n - 2026-02-20T08:17:38.078258Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [netbase.cpp:584] [LogConnectFailure] connect() to 127.0.0.1:1 failed after wait: Connection refused (111)\n - 2026-02-20T08:17:38.078285Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:152] [Listen] [error] Couldn't listen: Cannot connect to 127.0.0.1:1\n - 2026-02-20T08:17:48.078396Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:418] [CreateIfNotCreatedAlready] [i2p] Creating persistent I2P SAM session 583b195c09 with 127.0.0.1:1\n - 2026-02-20T08:17:48.078489Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [netbase.cpp:584] [LogConnectFailure] connect() to 127.0.0.1:1 failed after wait: Connection refused (111)\n - 2026-02-20T08:17:48.078525Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:152] [Listen] [error] Couldn't listen: Cannot connect to 127.0.0.1:1\n - 2026-02-20T08:17:59.078597Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:418] [CreateIfNotCreatedAlready] [i2p] Creating persistent I2P SAM session d5af5b3c3c with 127.0.0.1:1\n - 2026-02-20T08:17:59.078672Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [netbase.cpp:584] [LogConnectFailure] connect() to 127.0.0.1:1 failed after wait: Connection refused (111)\n - 2026-02-20T08:17:59.078701Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:152] [Listen] [error] Couldn't listen: Cannot connect to 127.0.0.1:1\n - 2026-02-20T08:18:02.331914Z (mocktime: 2026-02-20T08:37:17Z) [scheduler] [net_processing.cpp:5393] [operator()] [net] keeping block-relay-only peer=20 chosen for eviction (connect time: 1771576637, blocks_in_flight: 0)\n - 2026-02-20T08:18:11.078881Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:418] [CreateIfNotCreatedAlready] [i2p] Creating persistent I2P SAM session 3d08732ffb with 127.0.0.1:1\n - 2026-02-20T08:18:11.079007Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [netbase.cpp:584] [LogConnectFailure] connect() to 127.0.0.1:1 failed after wait: Connection refused (111)\n - 2026-02-20T08:18:11.079052Z (mocktime: 2026-02-20T08:37:17Z) [i2paccept] [i2p.cpp:152] [Listen] [error] Couldn't listen: Cannot connect to 127.0.0.1:1\n\n\n2026-02-20T08:18:17.391487Z TestFramework (INFO): Not stopping nodes as test failed. The dangling processes will be cleaned up later.\n```\n\n</details>",
-      "state": "closed",
-      "user": "sedited",
-      "created_at": "2026-02-20T08:26:24Z",
-      "updated_at": "2026-03-02T08:22:24Z",
-      "closed_at": "2026-03-02T07:28:03Z",
-      "comments": 10,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34631",
-      "labels": [
-        "Tests",
-        "CI failed"
-      ],
-      "comment_data": [
-        {
-          "id": 3982619338,
-          "user": "sedited",
-          "body": "> So maybe this can be closed?\n\nReading through the logs posted here and the patch again, I think this is fixed. \n\n> I guess there is not much that can be done without the full logs. \n\nSorry, I was under the impression that the actions job gets archived somewhere, but I was unable to find it again.",
-          "created_at": "2026-03-02T07:28:03Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 299,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 3982862508,
-          "user": "maflcko",
-          "body": "I think they are archived for 90 days, but it needs the full run id and job id in the URL, like https://github.com/bitcoin/bitcoin/actions/runs/22211364381/job/64246250770?pr=34628#step:9:8320",
-          "created_at": "2026-03-02T08:22:24Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 192,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 26238,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3545450511,
-      "number": 33691,
-      "title": "Template Sharing Tracking Issue",
-      "body": "Plan:\n\n * Protocol specification [BIN25-2](https://github.com/bitcoin-inquisition/binana/blob/master/2025/BIN-2025-0002.md) and [BIP153 PR#1937](https://github.com/bitcoin/bips/pull/1937)\n * Implementation:\n   * [PR#33191](https://github.com/bitcoin/bitcoin/pull/33191) - Providing templates to peers\n   * [sendtemplate3 branch](https://github.com/ajtowns/bitcoin/tree/202508-sendtemplate3) - Using templates from peers\n * Live tests\n   * [x] signet: inquisition 29.x ([#96](https://github.com/bitcoin-inquisition/bitcoin/pull/96)) nodes provide templates, eg inquisition.bitcoin-signet.net\n   * [x] mainnet: cornflower.erisian.com.au provides templates currently\n   * [ ] warnet simulation?\n * Discussion:\n   * https://delvingbitcoin.org/t/sharing-block-templates/1906\n * Potential benefits: (tick with data confirming benefit)\n   * [ ] Quick population of mempool on initial start\n   * [ ] Quicker relay of top-of-mempool transactions \n   * [ ] Improved compact block propagation with diverse mempool policies\n   * [ ] Transaction rebroadcast without participation of sender/receiver\n * Future ideas:\n   * [x] Include 2MvB of transactions, not just the next block\n   * [ ] Send templates shortly after construction\n   * [ ] Coordinate template construction with INV announcements better\n   * [ ] Send diffs since prior templates to reduce bandwidth\n   * [ ] Use set reconciliation to improve compact block reconstruction (see delving discussion)\n   * [ ] Use reduced siphash to make compact block calculations faster?\n",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2025-10-23T16:11:55Z",
-      "updated_at": "2026-03-02T06:40:07Z",
-      "closed_at": null,
-      "comments": 2,
-      "url": "https://github.com/bitcoin/bitcoin/issues/33691",
-      "labels": [
-        "Tracking Issue"
-      ],
-      "comment_data": [
-        {
-          "id": 3982430106,
-          "user": "ajtowns",
-          "body": "Have an updated approach ~90% specced and implemented at:\n\n * [Updated spec](https://github.com/ajtowns/binana/blob/202602-bin25.2-template-sharing/2025/BIN-2025-0002.md)\n * [Implementation branch](https://github.com/ajtowns/bitcoin/commits/202602-sendtemplate/)\n\nThe main change is it no longer attempts to reuse the compact block messages, but has its own scheme:\n\n * GETTMPLT [oldtemplatehash]\n * TMPLT [newtemplatehash] [tiphash] [what txns to pull from old template] [shortids for new txns]\n * GETTMPLTTXNS [templatehash] [delta encoded idxs to missing txs]\n * TMPLTTXNS [templatehash] [~100kB of requested txns]\n * TMPLTTXNS [templatehash] [~100kB of requested txns]\n * TMPLTTXNS [templatehash] [~100kB of requested txns]\n\nSplitting the actual txns from the template into chunk avoids messages potentially going over 4MB and also allows the sender to interleave other messages in between (eg their own tx requests, or a block announcement if a real block comes in).\n\nThe implementation has a bunch of privacy code (particularly providing different templates on different networks, building the template at the same time as we would be announcing INVs, extremely limited template relay over block-relay-only connections), but the final commits are still a bit vibe-codey, though I think the idea is roughly sound. The spec is still missing proper rationale descriptions for a bunch of concerns, including things the implementation takes into account.\n\nI did a flamegraph as a quick performance check. It ended up dominated by leveldb compaction, but it looks like the ratio between `CreateNewBlock() + GenerateTemplate() + GetNextTemplateTx()` and the existing `TxDownloadManager::GetRequestsToSend()` is about 67 to 119, so at idle (when it's just regularly generating templates for the \"outbounds\" \"network\") cpu usage seems fine at least.\n\nAnyway, if anyone wants to take a look, mess around, or otherwise provide feedback before I do another round of dev to get it more polished, links are above.",
-          "created_at": "2026-03-02T06:33:32Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 2005,
-            "has_nack": false,
-            "has_ack": true
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1552,
-        "has_nack": false,
-        "has_ack": true
-      }
     }
   ],
   "summary": {
     "total_prs": 281,
-    "total_issues": 51,
-    "total_comments": 78,
-    "unique_participants": 104
+    "total_issues": 49,
+    "total_comments": 72,
+    "unique_participants": 105
   }
 }
