@@ -1,10 +1,10 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-03-14T01:27:12.566890+00:00",
+  "fetched_at": "2026-03-14T08:28:11.756604+00:00",
   "date_range": {
-    "since": "2026-03-07T01:27:12.566828+00:00",
-    "until": "2026-03-14T01:27:12.566828+00:00"
+    "since": "2026-03-07T08:28:11.756521+00:00",
+    "until": "2026-03-14T08:28:11.756521+00:00"
   },
   "pull_requests": [
     {
@@ -15,7 +15,7 @@
       "state": "open",
       "user": "ismaelsadeeq",
       "created_at": "2026-03-11T13:39:00Z",
-      "updated_at": "2026-03-14T01:23:36Z",
+      "updated_at": "2026-03-14T08:26:09Z",
       "merged_at": null,
       "comments": 0,
       "review_comments": 0,
@@ -29,6 +29,546 @@
         "text_length": 6704,
         "has_nack": false,
         "has_ack": true
+      }
+    },
+    {
+      "id": 3102178109,
+      "number": 34075,
+      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
+      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nSee https://bitcoincorefeerate.com/stats for recent running stats that have almost identical data. \r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-12-15T11:53:35Z",
+      "updated_at": "2026-03-14T08:18:26Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 1,
+        "text_length": 9030,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3266545660,
+      "number": 34547,
+      "title": "lint: modernise lint tooling",
+      "body": "Modernise our lint tooling by:\r\n\r\n\\- Replacing pyenv + pip with [uv](https://docs.astral.sh/uv/) for better Python environment and dependency management\r\n\\- Replacing mypy with https://github.com/astral-sh/ty\r\n\\- Replacing the 01_install.sh runtime install script with COPY --from multi-stage Docker image imports for uv, ruff, shellcheck, mlc, and ty\r\n\\- Moving ruff lint rules from hardcoded Rust array (in lint_py.rs) into a top-level ruff.toml, and add ty.toml for the type checker\r\n\\- Extracting all remaining pip dependencies into dedicated ci/lint/requirements.txt\r\n\\- Add a ruff format lint which, if the original file is formatted, will fail if a change un-formats it\r\n\r\nExtra rationale:\r\n\r\n`COPY --from` pulls pre-built binaries from upstream images instead of compiling/downloading at runtime. Containerfile layer optimisations reduce rebuild frequency further.\r\n\r\n`ty` is significantly faster/more modern/maintained than `mypy`, and configured declaratively.\r\n\r\nAdding root-level `[ty|ruff].toml` config files means contributors can easily run `ty check` or `ruff check` locally without running the full linter, along with being accessible to other tooling (similarly for requriements.txt).\r\n\r\nPinning tool versions in the dockerfile makes it more excplicit and easier to find.\r\n\r\nThe tradeoff we make here is that there is no longer a bare install script to install tooling on a local machine. However I think this is OK, as it currently only works for `apt`-based OSes anyway, and I don't think running the linter outside of the container is such a valuable use-case as it is with some of the other CI jobs.\r\n\r\nFurther work can drop individual rules from `ty.toml` fixing up the infringing code as necessary.\r\n\r\nI can split this up if wanted, but IMO it makes sense to do it altogether.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2026-02-10T10:25:27Z",
+      "updated_at": "2026-03-14T08:11:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34547",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1829,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3398516421,
+      "number": 34824,
+      "title": "net: refactor: replace Peer::TxRelay RecursiveMutex instances with Mutex",
+      "body": "Part of #19303.\r\n\r\nReplace `m_bloom_filter_mutex` and `m_tx_inventory_mutex` in `Peer::TxRelay` from `RecursiveMutex` to `Mutex`. Neither mutex is acquired recursively anywhere in the codebase - all 18 lock sites are first-time acquisitions within their call contexts.\r\n\r\nIn `SendMessages()`, both mutexes are used together: `m_tx_inventory_mutex` is held as the outer lock while `m_bloom_filter_mutex` is locked separately for three short sections. These are two different mutexes, not recursive acquisition of the same one.\r\n\r\nNegative capability annotations are not added because both mutexes live inside `Peer::TxRelay`, a nested struct accessed via pointer. Clang Thread Safety Analysis cannot reference them from `PeerManagerImpl` method signatures.",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2026-03-14T08:07:38Z",
+      "updated_at": "2026-03-14T08:10:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34824",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 828,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3326623224,
+      "number": 34669,
+      "title": "feefrac: drop comparison and operator{<<,>>} for sorted wrappers",
+      "body": "Instead of having an unintuitive but strong implicit sort order on `FeeFrac` (first increasing feerate, then decreasing size), and separate overloaded `operator<<` and `operator>>` that implement a weak ordering that only looks at feerate, replace these with explicit wrapper classes which make the behavior more explicit (`ByRatio` and `ByRatioNegSize`).\r\n\r\nThis allows for things like `ByRatio{a} <= ByRatio{b}`, instead of the earlier `!(a >> b)`. It also supports usage inside `std::min`/`std::max`/`std::less`, and `std::greater`, so one can use:\r\n* `std::max<ByRatioNegSize<FeeFrac>>(a, b)` to get the highest-feerate `FeeFrac`, tie-breaking by smallest size.\r\n* `std::ranges::sort(v, std::greater<ByRatioNegSize<FeeFrac>>{});` to sort a vector that way.\r\n\r\nSuggested in https://github.com/bitcoin/bitcoin/pull/34257#discussion_r2780475893.\r\n",
+      "state": "open",
+      "user": "sipa",
+      "created_at": "2026-02-25T16:39:08Z",
+      "updated_at": "2026-03-14T08:00:53Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34669",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 913,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3222520742,
+      "number": 34440,
+      "title": "Refactor CChain methods to use references, tests",
+      "body": "Refactor `CChain` methods (`Contains()`, `Next()`, etc.) to use references instead of pointers, to minimize the risk of accidental `nullptr` dereference (memory access violation). Also add missing unit tests to the `CChain` class.\r\n\r\nThe `CChain::Contains()` method (in `src/chain.h`) dereferences its input without checking. The `Next()` method also calls into this with a `nullptr` if invoked with `nullptr`. While most call sites have indirect guarantee that the input is not `nullptr`, it's not easy to establish this to all call sites with high confidence. These methods are publicly available. There is no known high-level use case to trigger this error, but the fix is easy, and makes the code safer.\r\n\r\nChanges:\r\n\r\n- Add basic unit tests for `CChain` class methods\r\n- Refactor `CChain::Contains()` to take reference\r\n- Refactor `CChain::Next()` to take reference\r\n- Add unit tests for `CChain::FindFork()`\r\n- Change `PeerManagerImpl::BlockRequestAllowed()` to take reference\r\n\r\nTODO:\r\n\r\n- ? /Change `CChain` internals to store references instead of pointers/\r\n- ? /Explore the change to always have at least one element (genesis), that way there is always genesis and tip./\r\n- Check related methods to change to reference -- `FindFork`, `FindEarliestAtLeast`, `FindForkInGlobalIndex`, `blockman.AddToBlockIndex`, etc.\r\n\r\nAlternative. A simpler change is to stick with pointers, with extra checks where needed, see #34416 .\r\n\r\nThis change is remotely related to and indirectly triggered by #32875 .\r\n",
+      "state": "open",
+      "user": "optout21",
+      "created_at": "2026-01-29T09:21:03Z",
+      "updated_at": "2026-03-14T07:52:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34440",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1556,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3330547465,
+      "number": 34681,
+      "title": "wallet: refactor ScanForWalletTransactions",
+      "body": "Part of https://github.com/bitcoin/bitcoin/pull/34400\r\n\r\nThis PR refactors the wallet scanning logic for improved readability and maintainability, and prepares the scanning logic for the changes in https://github.com/bitcoin/bitcoin/pull/34400.\r\n\r\n`ScanForWalletTransactions` is expanded into a class, and the main scanning loop is simplified by delegating some logic to member functions. No behaviour change is introduced in this PR.",
+      "state": "open",
+      "user": "Eunovo",
+      "created_at": "2026-02-26T11:36:35Z",
+      "updated_at": "2026-03-14T07:33:52Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34681",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 477,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3331553763,
+      "number": 34683,
+      "title": "RFC: Support a format description of our JSON-RPC interface",
+      "body": "Ref #29912.\r\n\r\nThis draft PR adds a machine-readable[ OpenRPC](https://www.open-rpc.org/) 1.3.2 specification of out JSON-RPC interface, auto-generated from existing `RPCHelpMan` metadata.\r\n\r\nThere is currently no formal, machine-readable specification of the RPC API. As discussed in #29912, this has knock-on consequences:\r\n\r\n- Client libraries re-implement the API manually, leading to bugs like unit mistakes (sats vs BTC, vB vs kvB) and missing/incorrect argument types. No existing client library fully and correctly implements the API in a type-safe manner.\r\n- When the API changes, every downstream client must manually discover and adapt, creating downstream maintenance burden. There is no artifact they can diff between releases.\r\n- Implementing a new client in a new language requires reading C++ source or help text and transcribing it, which is error-prone and tedious, and represents an on-going porting cost.\r\n- Existing documentation is either stale or not machine-readable. The developer.bitcoin.org docs are wrong/outdated in places, and the bitcoincore.org/en/doc/ pages are rendered from help output but not in a standard schema format.\r\n- (new/extra) AI/LLM tooling increasingly builds on structured API specifications. A standard spec format enables AI-assisted client generation and integration without the ambiguity of parsing human-readable help text.\r\n\r\nThis draft builds on prior art by @casey and the observations by @laanwj, @stickies-v, @kilianmh, @hodlinator, and @cdecker in #29912. Casey's work demonstrated that RPCHelpMan already contains all the structured information needed, which makes this feasible without duplicating any API definitions.\r\n\r\nThis differs from Casey's branches in that it uses the OpenRPC standard rather than an ad-hoc format or raw JSON Schema.\r\n\r\n### Why OpenRPC\r\n\r\nI seletced OpenRPC for a number of reasons:\r\n\r\n- It's purpose-built for JSON-RPC APIs (suggested by @stickies-v, @nflatrea, and @kilianmh).\r\n- It wraps JSON schema for params/results, so consumers get both the method-level structure and the type-level schemas.\r\n- Unlike OpenAPI, it is not path-centric, which better fits our single-endpoint JSON-RPC model (concern raised by @hodlinator).\r\n  - Although it therefore does not cover our REST interface.\r\n- It's _kind of_ a standard format with (_some_) existing tooling for type generation (TypeScript, Rust, Python, Go) and client scaffolding, though maturity varies by language. More importantly though, IMO, a ~standardised format is inherently more useful than any ad-hoc one: any JSON Schema validator works, any LLM can consume it directly, and anyone can write a bespoke generator against a known schema rather than parsing help text.\r\n\r\n### Approach\r\n\r\n`RPCHelpMan metadata → getopenrpcinfo RPC → OpenRPC JSON`\r\n\r\n### Tradeoffs\r\n\r\nvs an ad-hoc format OpenRPC gives us interoperability with the (admittedly surprisingly limited) tooling, documentation generators, code generators, and validators, at the cost of needing x-bitcoin-* extensions for Bitcoin-specific concepts. As Casey noted after trying both approaches, JSON Schema \"is probably not a great fit\". OpenRPC's method-level framing on top of JSON Schema addresses the ergonomic issues while keeping the schema benefits. After testing both, I think I agree.\r\n\r\nTypes: JSON Schema cannot natively express units like \"BTC/kvB\" or semantic distinctions like \"this hex string is a txid.\" These are preserved in description text and x-bitcoin-type-str extensions, but are *not* machine-enforceable from the schema alone. This was recognized as a fundamental limitation by several commenters in the issue. Future work could enrich the x-bitcoin-* extensions with a more structured unit vocabulary.\r\n\r\nSome RPCs return different types depending on argument values (e.g. verbosity levels). These are represented as `oneOf` in the result schema with free-text condition descriptions. This is accurate but not fully machine-parseable — a code generator cannot automatically determine which result variant corresponds to which argument value without parsing the description. I still we have enough information to satisfy humans an agents alike though.\r\n\r\n### Regenerating the spec\r\n\r\nThe current functional test simply tests that the RPC runs, and produces valid JSON. We might want to consider extending this..\r\n\r\nThe RPC output documents which RPCs are available for any given built binary.\r\n\r\n### Discussion questions\r\n\r\n- Is this valuable/wanted?\r\n- Do we like openrpc format? (less relevant if we don't want this in this repo, as another repo could generate one or many definitions).\r\n- Should we cover \"hidden\" RPCs? They are currently hidden, but don't have to be...\r\n\r\nMy personal thoughts are that this is very nice to have.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2026-02-26T15:22:35Z",
+      "updated_at": "2026-03-14T07:20:22Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34683",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 4825,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3332706834,
+      "number": 34684,
+      "title": "refactor: Enable -Wswitch in exhaustive switch'es, Enable -Wcovered-switch-default",
+      "body": "The compiler flag `-Wswitch` is enabled. However, it can not fire when a `default:` case exists. Fix that by removing the default case where a switch is already handling all cases exhaustively.\r\n\r\nAlso, enable `-Wcovered-switch-default` to catch those cases at compile time in the future.\r\n\r\nAlso, apply the comment according to the dev notes.\r\n\r\nCan be reviewed via `--ignore-all-space`\r\n\r\n",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-02-26T20:05:21Z",
+      "updated_at": "2026-03-14T07:09:05Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34684",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 474,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3340382450,
+      "number": 34704,
+      "title": "validation: Explicitly move blocks to validation signals",
+      "body": "This enforces behaviour that is currently already implicit: The destructor for blocks runs mostly in the [scheduler thread](https://bitcoin-dev-tools.github.io/benchcoin/results/pr-176/20472174834/mainnet-default-instrumented-head-flamegraph.svg?x=2762391536960&y=684). The change should make it a bit clearer what the ownership semantics for these validation signals are.\r\n\r\n`BlockConnected` already takes a reference to a block that is emplaced in `connected_blocks`. Once `connected_blocks` is iterated through, it is not reused. Similarly `BlockDisconnected` currently takes a reference to a block that is discarded after the call to it. Note that this does not give the guarantee that blocks' lifetimes are extended by other means once they are connected. For example after IBD, the block's lifetime is extended in net_processing's `m_most_recent_block` and `ActivateBestChain` itself takes a copy of the block's shared pointer, meaning its caller may delay de-allocation. ",
+      "state": "open",
+      "user": "sedited",
+      "created_at": "2026-03-01T09:07:28Z",
+      "updated_at": "2026-03-14T06:35:05Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34704",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1035,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3342160900,
+      "number": 34707,
+      "title": "net: keep finished private broadcast txs in memory, rebroadcast if evicted from mempool",
+      "body": "Follow up from #34329.\r\n\r\nPrivate broadcast transaction data is removed from memory when either 1) the tx is received back from another peer and inserted into our mempool or 2) the tx is no longer acceptable to our mempool.\r\n\r\nWe want to persist this data for a number of reasons. See https://github.com/bitcoin/bitcoin/issues/30471.\r\n\r\nThis PR changes the behavior of the private broadcast queue to keep received and mempool-rejected txs in memory. The peer's address we received the tx from and the time, or the mempool rejection reason is now also returned via `getprivatebroadcastinfo` RPC.\r\n\r\nWe store the txs mempool state as either `IN_MEMPOOL`, `ACCEPTABLE`, or `REJECTED`. Only txs that are currently not in the mempool but are acceptable will be picked for broadcast and returned as pending transactions. This maintains the current behavior of stopping broadcasting when these conditions are met.\r\n\r\nWhen reattempting to broadcast stale private broadcast txs, every tx whether pending or not is checked for mempool acceptance. This has the added benefit of rebroadcasting previously received txs that have since been evicted from the mempool.\r\n\r\nThis is designed to facilitate follow up work including:\r\n- rebroadcasting txs that are in our mempool but have not been confirmed after a while. This can obviate rebroadcasting wallet txs if private broadcast is enabled (see https://github.com/bitcoin/bitcoin/pull/34533#issuecomment-3969991481).\r\n- adding a delay when submitting private broadcast txs so they will be broadcast at a later time (see https://github.com/bitcoin/bitcoin/issues/34118).\r\n- persisting private broadcast state to disk for resuming after restart or crash (see #34322).\r\n- expiring txs after a while so they are removed from the queue without having to manually abort.\r\n",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2026-03-02T01:46:35Z",
+      "updated_at": "2026-03-14T06:21:37Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34707",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 1891,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3395217307,
+      "number": 34821,
+      "title": "txgraph: Add ChainClusterImpl for chain-shaped cluster topologies",
+      "body": "### Summary                                                                      \r\n                                                                                 \r\nThis PR adds an optimized `ChainClusterImpl` for chain-shaped transaction topologies (A→B→C→D…). It replaces the generic `DepGraph`-based cluster with a compact linear representation (`m_txdata`) and a backward-absorbing chunk algorithm, reducing memory and improving performance for common chain patterns.\r\n                                                                                 \r\n### Key changes                                                                  \r\n                                                                                 \r\n- **`m_maybe_chain` flag** on `GroupEntry` to hint at chain-shaped merges        \r\n- **`ChainClusterImpl`** with `m_txdata` (chain order) and `m_split_segments` (contiguous segments after removals)\r\n- **`TryChainMerge`** in `ApplyDependencies` to detect and merge chains via the fast path\r\n- **`ApplyRemovals` / `Split`** correctly split chains when middle transactions are removed (no spurious dependencies)\r\n- **Removal of `m_linearization`** from `ChainClusterImpl` (always `[0,1,…,n-1]`)\r\n- **`ComputeChunks()`** helper to centralize the backward-absorbing chunk logic  \r\n- **`SetFee` / `Relinearize`** fix: downgrade to `NEEDS_RELINEARIZE` on fee change to avoid dereferencing destroyed Refs; `Relinearize` promotes back to OPTIMAL and recomputes chunks\r\n                                                                                 \r\n### Bug fix (from fuzz)                                                          \r\n                                                                                 \r\nFuzzing exposed a crash when `SetTransactionFee` was called on a transaction whose sibling's Ref had been destroyed but `ApplyRemovals` had not yet run. `ChainClusterImpl::Updated()` dereferenced `m_ref` in chunk computation and hit a null pointer. The fix mirrors `GenericClusterImpl::SetFee`: downgrade quality to `NEEDS_RELINEARIZE` so chunk computation is skipped until removals are processed, then use `Relinearize()` to restore OPTIMAL and recompute chunks.\r\n                                                                                 \r\n### Testing                                                                      \r\n                                                                                 \r\n- **Unit tests**: `txgraph_chain_merge` (TryChainMerge), `txgraph_chain_split_on_removal` (ApplyRemovals/Split)\r\n- **Benchmarks**: ChainCluster merge and BlockBuilder paths                      \r\n                                                                                 \r\n### Trace replay comparison                                                      \r\n                                                                                 \r\nTrace recording (TracingTxGraph) and replay (`txgraph-replay`, `analyze_trace.py`) code: [`git@github.com:HowHsu/bitcoin.git`](https://github.com/HowHsu/bitcoin) branch `before_chaincluster`. Usage guide: [TxGraph Trace & Replay](https://howhsu.github.io/thinking-in-bitcoin/articles/txgraph-trace-replay.en.html).\r\n                                                                                 \r\nSame trace replayed on baseline vs ChainCluster branch. Parameters: `max_cluster_count=64`, `max_cluster_size=404000`, `acceptable_cost=75000`. Total ops: 71,313,272.\r\n                                                                                 \r\n| Entry point | Baseline Total (μs) | ChainCluster Total (μs) |                  \r\n|-------------|--------------------|--------------------------|                  \r\n| DoWork | 3,595,581 | 1,297,506 |                                               \r\n| CompareMainOrder | 1,445 | 1,531 |                                             \r\n| GetAncestors | 1 | 0 |                                                         \r\n| GetDescendants | 8,543 | 8,361 |                                               \r\n| CountDistinctClusters | 575 | 2,474 |                                          \r\n| GetMainMemoryUsage | 157 | 156 |                                               \r\n| GetMainStagingDiagrams | 35,428 | 15,969 |                                     \r\n| IsOversized | 31,732 | 108,050 |                                               \r\n| StartStaging | 128 | 87 |                                                      \r\n| AbortStaging | 0 | 0 |                                                         \r\n| CommitStaging | 9,300 | 10,777 |                                               \r\n| **TOTAL** | **3,682,890** | **1,444,911** |                                    \r\n                                                                                 \r\nMutations (not timed): ADD_TX 1,764,814, REMOVE_TX 33,050, ADD_DEP 791,630, SET_FEE 0, UNLINK_REF 1,764,814.\r\n                                                                                 \r\n### Trace analysis                                                               \r\n                                                                                 \r\n`analyze_trace.py` on the same trace file (`/tmp/txgraph.trace`).                \r\n                                                                                 \r\n**Note on oversized clusters:** Clusters with size > 64 appear because the trace captures graph state at discrete snapshots (e.g. after each CommitStaging). Split is triggered lazily by DoWork/ApplyDependencies; at snapshot time, some clusters may not yet have been processed and thus exceed `max_cluster_count`.\r\n                                                                                 \r\n**Note on peak state:** Peak state is the snapshot with the most transactions (27,512), not necessarily the one with the most chain clusters.\r\n                                                                                 \r\n```                                                                              \r\nTrace format version: 1                                                          \r\nParameters: max_cluster_count=64 max_cluster_size=404000 acceptable_cost=75000   \r\n                                                                                 \r\nProcessed 71313273 operations, 1763516 CommitStagings                            \r\nPeak mempool size: 27512 transactions (at op #51503379)                          \r\nUnstaged mutations: 0 ADD_TX, 0 ADD_DEP, 0 REMOVE_TX, 1764814 UNLINK_REF         \r\n                                                                                 \r\nEdge sanity check (final state): OK - all edges reference live transactions         \r\nEdge sanity check (peak state): OK - all edges reference live transactions          \r\n```                                                                              \r\n                                                                                 \r\n**Peak state** (27,512 transactions, 8,596 clusters):                            \r\n                                                                                 \r\n| Size | Clusters | Chains | Non-chain | Chain% |                                \r\n|------|----------|--------|-----------|--------|                                \r\n| 1 | 7,628 | 7,628 | 0 | 100.0% |                                               \r\n| 2 | 575 | 575 | 0 | 100.0% |                                                   \r\n| 3 | 103 | 72 | 31 | 69.9% |                                                    \r\n| 4 | 75 | 58 | 17 | 77.3% |                                                     \r\n| 5 | 21 | 18 | 3 | 85.7% |                                                      \r\n| 6 | 9 | 4 | 5 | 44.4% |                                                        \r\n| 7 | 12 | 9 | 3 | 75.0% |                                                       \r\n| 8 | 4 | 1 | 3 | 25.0% |                                                        \r\n| 9 | 31 | 30 | 1 | 96.8% |                                                      \r\n| 10 | 25 | 23 | 2 | 92.0% |                                                     \r\n| 13 | 1 | 1 | 0 | 100.0% |                                                      \r\n| 16 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 20 | 2 | 2 | 0 | 100.0% |                                                      \r\n| 24 | 10 | 9 | 1 | 90.0% |                                                      \r\n| 25 | 90 | 87 | 3 | 96.7% |                                                     \r\n| 26 | 3 | 0 | 3 | 0.0% |                                                        \r\n| 29 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 33 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 48 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 51 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 59 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 14464 | 1 | 0 | 1 | 0.0% |                                                     \r\n| **TOTAL** | **8,596** | **8,517** | **79** | **99.1%** |                       \r\n                                                                                 \r\n- Transactions in chain clusters: 12,355 (44.9%)                                 \r\n- Transactions in non-chain clusters: 15,157 (55.1%)                             \r\n- Transactions with dependencies: 19,884 (72.3%)                                 \r\n- **Excluding size=1 clusters:** 4,727 in chains (23.8%), 15,157 in non-chains (76.2%), of 19,884 txs \r\n- 1 cluster of size 14,464 exceeds `max_cluster_count=64` (oversized)            \r\n\r\n**Final state** (6,079 transactions, 4,665 clusters):                            \r\n                                                                                 \r\n| Size | Clusters | Chains | Non-chain | Chain% |                                \r\n|------|----------|--------|-----------|--------|                                \r\n| 1 | 4,269 | 4,269 | 0 | 100.0% |                                               \r\n| 2 | 285 | 285 | 0 | 100.0% |                                                   \r\n| 3 | 68 | 44 | 24 | 64.7% |                                                     \r\n| 4 | 24 | 9 | 15 | 37.5% |                                                      \r\n| 5 | 6 | 4 | 2 | 66.7% |                                                        \r\n| 6 | 4 | 1 | 3 | 25.0% |                                                        \r\n| 7 | 3 | 0 | 3 | 0.0% |                                                         \r\n| 8 | 1 | 0 | 1 | 0.0% |                                                         \r\n| 10 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 26 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 54 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 286 | 1 | 0 | 1 | 0.0% |                                                       \r\n| 481 | 1 | 0 | 1 | 0.0% |                                                       \r\n| **TOTAL** | **4,665** | **4,612** | **53** | **98.9%** |                       \r\n                                                                                 \r\n- Transactions in chain clusters: 5,033 (82.8%)                                  \r\n- Transactions in non-chain clusters: 1,046 (17.2%)                              \r\n- Transactions with dependencies: 1,810 (29.8%)                                  \r\n- **Excluding size=1 clusters:** 764 in chains (42.2%), 1,046 in non-chains (57.8%), of 1,810 txs\r\n- 2 clusters (sizes 286, 481) exceed `max_cluster_count=64`       \r\n\r\nThe trace file is about 0.5 GB, I'll find a place to upload it soon.               \r\n                                                                                 \r\n### Fuzz testing                                                                 \r\n                                                                                 \r\n| Check | Result |                                                               \r\n|-------|--------|                                                               \r\n| Crash files | None |                                                           \r\n| Error log | No assert / ERROR / deadly signal |                                \r\n| Workers | All 8 finished normally |                                            \r\n| Total runs | ~39.6M |                                                          \r\n| Duration | 36001 s (~10 h) |                                                   \r\n                                                                                 \r\n**Environment**                                                                  \r\n                                                                                 \r\n| Item | Value |                                                                 \r\n|------|--------|                                                                \r\n| Host kernel | Linux 6.17.0-14-generic (Ubuntu) |                               \r\n| Container OS | Debian GNU/Linux 12 (bookworm) |                                \r\n| Architecture | x86_64 |                                                        \r\n| Compiler | Clang 20.1.8 |                                                      \r\n| Fuzzer | libFuzzer |                                                           \r\n| Sanitizers | AddressSanitizer, UndefinedBehaviorSanitizer |                    \r\n| Target | `txgraph` |                                                           \r\n| Corpus | `fuzz_corpus/txgraph` |                      ",
+      "state": "open",
+      "user": "HowHsu",
+      "created_at": "2026-03-13T13:44:43Z",
+      "updated_at": "2026-03-14T05:48:24Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34821",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 13726,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3350769984,
+      "number": 34726,
+      "title": "[wip] ignore 2603 ci empty",
+      "body": "",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-03-03T21:54:50Z",
+      "updated_at": "2026-03-14T05:42:46Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34726",
+      "labels": [
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 27,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3353080679,
+      "number": 34729,
+      "title": "Reduce log noise",
+      "body": "This set of changes reduces some of the exaggerated logging that was introduced in #29236 when \"error()\" logging was upgraded from `LogPrintf` (aka `LogInfo`) to `LogError`. It also introduces `LogWarnThenDebug()` which duplicates the behaviour of #34549 which issues a warning the first time the log line is hit, but downgrades that to categorized debug messages afterwards. This function is used for failures that are likely caused by system configuration problems (so likely degrade the node's functionality and warrant admin attention) but are triggered by remote activity and thus could occur frequently.",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2026-03-04T11:56:05Z",
+      "updated_at": "2026-03-14T05:16:15Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34729",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 626,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3353107575,
+      "number": 34730,
+      "title": "util/log: Combine the warning/error log levels into a single alert level",
+      "body": "There's little benefit in having two error levels that the node operator should pay attention to when the only difference between them is that one means the node is about to shut down -- the admin can easily see that just by looking at whether the node did shutdown. So this PR replaces LogWarning and LogError with LogAlert, which hopefully emphasises that the point of using that level is to alert the node operator.\r\n\r\nLeaves LogWarning and LogError available as deprecated aliases to reduce code churn and avoid invalidating PRs.\r\n\r\nLeft as draft pending #34038 as the \"warning\" and \"error\" levels are currently exposed to users via the `-loglevel` config option.",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2026-03-04T12:03:15Z",
+      "updated_at": "2026-03-14T05:09:44Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34730",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 740,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3358813627,
+      "number": 34743,
+      "title": "p2p: protect manual evictions",
+      "body": "Closes: #5097\r\n\r\nManual peers (`-addnode`, `-connect` + RPC) currently get disconnected by IBD timeout logic for block stalling, block download timeout and headers sync timeout. This can conflict with explicit user intent to keep these peers connected (especially in privacy-focused -connect setups), and causes unnecessary disconnect/reconnect churn.\r\n\r\nThis PR changes that behavior: manual peers are not disconnected by those timeout paths and we try to re-assign their work to other peers to maintain progress.\r\n\r\n----\r\n\r\nDisconnecting manual peers automatically causes reconnect loops and other behavior that can violate user expectation for manually configured peers.\r\n\r\nSimply “not disconnecting” (for block stalling) is not sufficient by itself: a manual peer can retain in-flight block assignments and delay overall IBD progress.\r\n\r\nI considered taking an approach more like that from #32051, simply protecting peers from some disconnects. However without the reassignment the stalling effects are simply prolonged (which is worse, IMO).\r\n\r\nThis PR uses a different appraoch:\r\n\r\n- For manual peers in block-stalling/download-timeout paths:\r\n    - release all in-flight blocks from that peer,\r\n    - set a one-round recovery flag (`m_stall_recovery`) so scheduler ordering doesn’t immediately reassign those same blocks back to the same peer.\r\n\r\nThis attempts to both preserve manual connections and maintain download progress. It actively reassigns stalled work so IBD can continue, rather than just waiting longer. And, the one-round skip prevents immediate re-capture of freed blocks by the same manual peer due to per-peer send ordering.\r\n\r\nCompared with simpler “don’t disconnect” approaches, this is more robust both in tests, and real-world slow-peer conditions.\r\n\r\nI believe the changes do not increase remote attacker control because it only applies to manual peers (-addnode, -connect, addnode), which are explicitly chosen by the local operator. You were and still are free to add a malicious peer manually.\r\n\r\nA malicious manually-added peer can now remain connected longer, but that peer was already granted privileged trust by operator configuration. And in fact, for block stalling/download timeout this PR reduces potential impact of a slow/malicious manual peer by releasing its in-flight blocks so other peers can fetch them.\r\n\r\nOf course, if an operator relies _only on bad manual peers_, sync can still be delayed.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2026-03-05T13:28:47Z",
+      "updated_at": "2026-03-14T04:37:58Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34743",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 1,
+        "text_length": 2472,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3364554727,
+      "number": 34757,
+      "title": "guix: re-enable riscv exported symbol checking",
+      "body": "Switching to binutils 2.46.0 seems to fix this (2.45.1 was still broken). Will find the relevant upstream change. No updates on our upstream issue: https://sourceware.org/bugzilla/show_bug.cgi?id=32783.\r\n\r\nBased on #34550.\r\nFixes #28095.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-03-06T16:15:37Z",
+      "updated_at": "2026-03-14T04:26:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34757",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 284,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3365398031,
+      "number": 34764,
+      "title": "rpc: replace ELISION references with explicit result fields",
+      "body": "Seeking concept ACK. Partially addresses #29912. Motivated by #34683, which exports OpenRPC from existing `RPCHelpMan` metadata. [Sample OpenRPC](https://gist.github.com/natobritto/8c4a1da04968d2325082ac4bca7d2408).\r\n\r\nSome RPC help definitions currently rely on `RPCResult::Type::ELISION` entries whose structure is only described in prose. This is concise for human-readable help, but it prevents tools from deriving complete machine-readable result schemas from the metadata.\r\n\r\nThis PR replaces all non-recursive ELISION-based reuses with shared structured definitions, so the result layout is represented directly in `RPCHelpMan` metadata instead of only in text.\r\n\r\nAffected RPCs:\r\n- `decodepsbt`\r\n- `getrawtransaction`\r\n- `getblock`\r\n- `listsinceblock`\r\n\r\nThe patch also replaces `DecodeTxDoc()` with `TxDoc()` plus a `TxDocOptions` struct, so decoded transaction layouts can be reused without positional booleans and selectively extended with `prevout`, `fee`, and `hex` fields.\r\n\r\nAs a consequence, `bitcoin-cli` output for affected RPCs becomes more verbose, since prose summaries like \"Same output as verbosity = 1\" are replaced by the full field definitions. The actual RPC return values are unchanged. I opened this as a draft because I'd like to discuss whether this tradeoff is acceptable, or whether the help renderer should collapse some sub-structures via manual configuration back into short summaries while keeping the underlying metadata explicit.\r\n\r\nThis PR doesn't cover `getaddressinfo.embedded`, which is recursive — runtime output can contain nested embedded objects, and `RPCResult` has no way to express that today. Happy to discuss approaches here if anyone has thoughts.\r\n\r\nChanges:\r\n- replace `DecodeTxDoc()` with `TxDoc()` and `TxDocOptions`\r\n- replace ELISION-based reuse in `decodepsbt`, `getrawtransaction`, `getblock`, and `listsinceblock`\r\n- factor shared result layouts into `TxDoc()`, `GetBlockFields()`, and `ListSinceBlockTxFields()`\r\n- mark `getblock` transaction `fee` documentation optional where it is conditionally present",
+      "state": "open",
+      "user": "satsfy",
+      "created_at": "2026-03-06T20:18:42Z",
+      "updated_at": "2026-03-14T04:20:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34764",
+      "labels": [
+        "RPC/REST/ZMQ",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 2,
+        "text_length": 2128,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3372217322,
+      "number": 34775,
+      "title": "kernel: make logging callback global",
+      "body": "The underlying `LogInstance()` is a process-wide singleton, and all logging configuration (categories, levels, options) are already global. The per-connection `btck_LoggingConnection` handle gives the false impression of independent logger instances.\r\n\r\nFix this by explicitly making the entire kernel logging interface explicitly global, simplifying its usage. Replaces `btck_LoggingConnection` and its `{create,destroy}` functions with a single `btck_logging_set_callback` function. The `KernelLogger` class is introduced to hold global kernel logging state, which will be used in future work such as #34374.\r\n\r\nTo an extent, this approach is an alternative to #30342 which contextualizes logging. While I do believe contextualized logging would be a natural fit for the kernel interface, it seems there is currently (in my view) too little demand for the scope of changes necessary. That's why I've opened this PR as a much more straightforward way to fix kernel's current logging weirdness. If you believe kernel logging should be contextualized right away, please go review #30342 instead.",
+      "state": "open",
+      "user": "stickies-v",
+      "created_at": "2026-03-09T08:35:36Z",
+      "updated_at": "2026-03-14T03:13:33Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34775",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1131,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3374032861,
+      "number": 34778,
+      "title": "logging: rewrite macros to add ratelimit option, avoid unused strprintf, clarify confusing errors",
+      "body": "Rewrite log macros to fix a number of issues: lack of control over rate limiting, unnecessary strprintf calls during fuzzing, and confusing error messages when macros are called with the wrong arguments.\r\n\r\nThis PR is a refactoring and shouldn't change externally visible behavior. Changes are described in detail in commit messages. There are also some internal improvements making previously implicit behaviors (evaluating unused format arguments, not outputting categories at certain log levels) explicit and better enforced.\r\n\r\nSome changes here were originally part of #29256, but they should make sense on their own and simplify both PRs.",
+      "state": "open",
+      "user": "ryanofsky",
+      "created_at": "2026-03-09T15:28:25Z",
+      "updated_at": "2026-03-14T03:00:50Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34778",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 742,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3379273922,
+      "number": 34790,
+      "title": "guix: introduce --exclude parameter to guix-clean",
+      "body": "## Summary\r\nThis is motivated by https://github.com/bitcoin/bitcoin/pull/34776#issuecomment-4026174587 and a follow-up to https://github.com/bitcoin/bitcoin/pull/34776.\r\n\r\nThe motivation is that when a user runs `contrib/guix/guix-clean` it will clean the whole directory or nothing leading the user to have to manually clear out these files. It would be useful to be able to exclude certain files.\r\n\r\nIt adds the `--exclude` and `--help`/`-h` parameters to `contrib/guix/guix-clean`\r\n\r\nRight now, when a user runs that script, it will delete everything. It makes sense to allow the user to exclude any files or directories from being removed.\r\n\r\n---\r\n\r\n#### Help text\r\n![Screenshot 2026-03-10 at 10 15 08 AM](https://github.com/user-attachments/assets/9dbbd9ce-1f70-4e0e-b4ab-99f7aba3ae01)\r\n#### Multiple excludes\r\n![Screenshot 2026-03-10 at 10 15 30 AM](https://github.com/user-attachments/assets/a315576b-4c07-43a8-a742-ddf6197741c0)\r\n#### Unknown option\r\n![Screenshot 2026-03-10 at 10 19 41 AM](https://github.com/user-attachments/assets/a282c0b9-eaa8-4e2c-ad2e-f4527e753c52)\r\n#### Exclude with --force\r\n![Screenshot 2026-03-10 at 10 19 53 AM](https://github.com/user-attachments/assets/2873aa5d-a6a7-4750-8336-e634bdff732e)",
+      "state": "open",
+      "user": "kevkevinpal",
+      "created_at": "2026-03-10T15:22:09Z",
+      "updated_at": "2026-03-14T02:22:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34790",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1278,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2683376326,
+      "number": 33034,
+      "title": "wallet: Store transactions in a separate sqlite table",
+      "body": "The wallet uses SQLite as a key-value store even though SQLite is a powerful relational database engine. This causes us numerous headaches due to the need to serialize multiple fields together, and since record read from the database during loading can come in any order.\r\n\r\nNotably, for transactions, if we were able to load them in the transaction order assigned by the wallet, PRs like #27865 would be a bit simpler and easier to reason about.\r\n\r\nThis PR makes it possible for us to do that by storing transactions in a separate table. This table has a column for each field in `CWalletTx`, which lets us use a SQL statement like `SELECT * FROM transactions ORDER BY pos` which guarantees us the order in which the transactions are loaded into the wallet.\r\n\r\nThe eventual goal is to use SQLite as a relational database with tables that store our keys and other metadata that can reference each other so that the wallet doesn't just use the database as a storage mechanism. But that is still a work in progress.\r\n\r\nThis PR makes use of the last client opened features introduced in #32895 to determine when the old record style needs to be upgraded to the new transactions table. This should give us sufficient upgrade-downgrade-upgrade handling to not lose any funds.\r\n\r\nDepends on #32763, #32895, #32985, #33032, #33033",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-07-21T22:52:54Z",
+      "updated_at": "2026-03-14T02:06:21Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33034",
+      "labels": [
+        "Wallet",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1377,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3264847922,
+      "number": 34544,
+      "title": "wallet: Disallow wallet names that are paths including `..` and `.` elements",
+      "body": "Wallet names including `..` and `.` are unintuitive and can lead to various issues, see #34497\r\n\r\nThis disallows creating or loading wallets that have any path elements that are `..` or `.`, including any present in an absolute path. This does not disallow relative paths altogether but rather limits them to only being subdirectories of the wallets directory.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2026-02-09T23:28:03Z",
+      "updated_at": "2026-03-14T02:04:10Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34544",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 437,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3383557414,
+      "number": 34799,
+      "title": "rpc: Run type check on decodepsbt result",
+      "body": "For RPCResults, the type may be ELISION, which is confusing and brittle:\r\n    \r\n* The elision should only affect the help output, not the type.\r\n* The type should be the real type, so that type checks can be run on it.\r\n    \r\nFix this issue by introducing a new print_elision option and using it in `decodepsbt`.\r\n    \r\nThis change will ensure that `RPCResult::MatchesType` is properly run.\r\n\r\nCan be tested by introducing a bug:\r\n\r\n```diff\r\ndiff --git a/src/core_io.cpp b/src/core_io.cpp\r\nindex 7492e9ca50..4927b70c8e 100644\r\n--- a/src/core_io.cpp\r\n+++ b/src/core_io.cpp\r\n@@ -436,2 +436,3 @@ void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry\r\n     entry.pushKV(\"version\", tx.version);\r\n+    entry.pushKV(\"bug\", \"error!\");\r\n     entry.pushKV(\"size\", tx.ComputeTotalSize());\r\n```\r\nAnd then running (in a debug build) `decodepsbt cHNidP8BAAoCAAAAAAAAAAAAAA==`\r\n\r\nBefore, on master: passes\r\nNow, on this pull: Properly detects the bug",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-03-11T11:13:25Z",
+      "updated_at": "2026-03-14T01:44:47Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34799",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1003,
+        "has_nack": false,
+        "has_ack": false
       }
     },
     {
@@ -51,31 +591,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 707,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3264847922,
-      "number": 34544,
-      "title": "wallet: Disallow wallet names that are paths including `..` and `.` elements",
-      "body": "Wallet names including `..` and `.` are unintuitive and can lead to various issues, see #34497\r\n\r\nThis disallows creating or loading wallets that have any path elements that are `..` or `.`, including any present in an absolute path. This does not disallow relative paths altogether but rather limits them to only being subdirectories of the wallets directory.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2026-02-09T23:28:03Z",
-      "updated_at": "2026-03-14T00:41:17Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34544",
-      "labels": [
-        "Wallet",
-        "Needs rebase"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 437,
         "has_nack": false,
         "has_ack": false
       }
@@ -483,30 +998,6 @@
       }
     },
     {
-      "id": 3383557414,
-      "number": 34799,
-      "title": "rpc: Run type check on decodepsbt result",
-      "body": "For RPCResults, the type may be ELISION, which is confusing and brittle:\r\n    \r\n* The elision should only affect the help output, not the type.\r\n* The type should be the real type, so that type checks can be run on it.\r\n    \r\nFix this issue by introducing a new print_elision option and using it in `decodepsbt`.\r\n    \r\nThis change will ensure that `RPCResult::MatchesType` is properly run.\r\n\r\nCan be tested by introducing a bug:\r\n\r\n```diff\r\ndiff --git a/src/core_io.cpp b/src/core_io.cpp\r\nindex 7492e9ca50..4927b70c8e 100644\r\n--- a/src/core_io.cpp\r\n+++ b/src/core_io.cpp\r\n@@ -436,2 +436,3 @@ void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry\r\n     entry.pushKV(\"version\", tx.version);\r\n+    entry.pushKV(\"bug\", \"error!\");\r\n     entry.pushKV(\"size\", tx.ComputeTotalSize());\r\n```\r\nAnd then running (in a debug build) `decodepsbt cHNidP8BAAoCAAAAAAAAAAAAAA==`\r\n\r\nBefore, on master: passes\r\nNow, on this pull: Properly detects the bug",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-03-11T11:13:25Z",
-      "updated_at": "2026-03-13T21:48:37Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34799",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1003,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 1566486194,
       "number": 28690,
       "title": "build: Introduce internal kernel library",
@@ -577,30 +1068,6 @@
         "text_length": 686,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3395217307,
-      "number": 34821,
-      "title": "txgraph: Add ChainClusterImpl for chain-shaped cluster topologies",
-      "body": "### Summary                                                                      \r\n                                                                                 \r\nThis PR adds an optimized `ChainClusterImpl` for chain-shaped transaction topologies (A→B→C→D…). It replaces the generic `DepGraph`-based cluster with a compact linear representation (`m_txdata`) and a backward-absorbing chunk algorithm, reducing memory and improving performance for common chain patterns.\r\n                                                                                 \r\n### Key changes                                                                  \r\n                                                                                 \r\n- **`m_maybe_chain` flag** on `GroupEntry` to hint at chain-shaped merges        \r\n- **`ChainClusterImpl`** with `m_txdata` (chain order) and `m_split_segments` (contiguous segments after removals)\r\n- **`TryChainMerge`** in `ApplyDependencies` to detect and merge chains via the fast path\r\n- **`ApplyRemovals` / `Split`** correctly split chains when middle transactions are removed (no spurious dependencies)\r\n- **Removal of `m_linearization`** from `ChainClusterImpl` (always `[0,1,…,n-1]`)\r\n- **`ComputeChunks()`** helper to centralize the backward-absorbing chunk logic  \r\n- **`SetFee` / `Relinearize`** fix: downgrade to `NEEDS_RELINEARIZE` on fee change to avoid dereferencing destroyed Refs; `Relinearize` promotes back to OPTIMAL and recomputes chunks\r\n                                                                                 \r\n### Bug fix (from fuzz)                                                          \r\n                                                                                 \r\nFuzzing exposed a crash when `SetTransactionFee` was called on a transaction whose sibling's Ref had been destroyed but `ApplyRemovals` had not yet run. `ChainClusterImpl::Updated()` dereferenced `m_ref` in chunk computation and hit a null pointer. The fix mirrors `GenericClusterImpl::SetFee`: downgrade quality to `NEEDS_RELINEARIZE` so chunk computation is skipped until removals are processed, then use `Relinearize()` to restore OPTIMAL and recompute chunks.\r\n                                                                                 \r\n### Testing                                                                      \r\n                                                                                 \r\n- **Unit tests**: `txgraph_chain_merge` (TryChainMerge), `txgraph_chain_split_on_removal` (ApplyRemovals/Split)\r\n- **Benchmarks**: ChainCluster merge and BlockBuilder paths                      \r\n                                                                                 \r\n### Trace replay comparison                                                      \r\n                                                                                 \r\nTrace recording (TracingTxGraph) and replay (`txgraph-replay`, `analyze_trace.py`) code: [`git@github.com:HowHsu/bitcoin.git`](https://github.com/HowHsu/bitcoin) branch `before_chaincluster`. Usage guide: [TxGraph Trace & Replay](https://howhsu.github.io/thinking-in-bitcoin/articles/txgraph-trace-replay.en.html).\r\n                                                                                 \r\nSame trace replayed on baseline vs ChainCluster branch. Parameters: `max_cluster_count=64`, `max_cluster_size=404000`, `acceptable_cost=75000`. Total ops: 71,313,272.\r\n                                                                                 \r\n| Entry point | Baseline Total (μs) | ChainCluster Total (μs) |                  \r\n|-------------|--------------------|--------------------------|                  \r\n| DoWork | 3,595,581 | 1,297,506 |                                               \r\n| CompareMainOrder | 1,445 | 1,531 |                                             \r\n| GetAncestors | 1 | 0 |                                                         \r\n| GetDescendants | 8,543 | 8,361 |                                               \r\n| CountDistinctClusters | 575 | 2,474 |                                          \r\n| GetMainMemoryUsage | 157 | 156 |                                               \r\n| GetMainStagingDiagrams | 35,428 | 15,969 |                                     \r\n| IsOversized | 31,732 | 108,050 |                                               \r\n| StartStaging | 128 | 87 |                                                      \r\n| AbortStaging | 0 | 0 |                                                         \r\n| CommitStaging | 9,300 | 10,777 |                                               \r\n| **TOTAL** | **3,682,890** | **1,444,911** |                                    \r\n                                                                                 \r\nMutations (not timed): ADD_TX 1,764,814, REMOVE_TX 33,050, ADD_DEP 791,630, SET_FEE 0, UNLINK_REF 1,764,814.\r\n                                                                                 \r\n### Trace analysis                                                               \r\n                                                                                 \r\n`analyze_trace.py` on the same trace file (`/tmp/txgraph.trace`).                \r\n                                                                                 \r\n**Note on oversized clusters:** Clusters with size > 64 appear because the trace captures graph state at discrete snapshots (e.g. after each CommitStaging). Split is triggered lazily by DoWork/ApplyDependencies; at snapshot time, some clusters may not yet have been processed and thus exceed `max_cluster_count`.\r\n                                                                                 \r\n**Note on peak state:** Peak state is the snapshot with the most transactions (27,512), not necessarily the one with the most chain clusters.\r\n                                                                                 \r\n```                                                                              \r\nTrace format version: 1                                                          \r\nParameters: max_cluster_count=64 max_cluster_size=404000 acceptable_cost=75000   \r\n                                                                                 \r\nProcessed 71313273 operations, 1763516 CommitStagings                            \r\nPeak mempool size: 27512 transactions (at op #51503379)                          \r\nUnstaged mutations: 0 ADD_TX, 0 ADD_DEP, 0 REMOVE_TX, 1764814 UNLINK_REF         \r\n                                                                                 \r\nEdge sanity check (final state): OK - all edges reference live transactions         \r\nEdge sanity check (peak state): OK - all edges reference live transactions          \r\n```                                                                              \r\n                                                                                 \r\n**Peak state** (27,512 transactions, 8,596 clusters):                            \r\n                                                                                 \r\n| Size | Clusters | Chains | Non-chain | Chain% |                                \r\n|------|----------|--------|-----------|--------|                                \r\n| 1 | 7,628 | 7,628 | 0 | 100.0% |                                               \r\n| 2 | 575 | 575 | 0 | 100.0% |                                                   \r\n| 3 | 103 | 72 | 31 | 69.9% |                                                    \r\n| 4 | 75 | 58 | 17 | 77.3% |                                                     \r\n| 5 | 21 | 18 | 3 | 85.7% |                                                      \r\n| 6 | 9 | 4 | 5 | 44.4% |                                                        \r\n| 7 | 12 | 9 | 3 | 75.0% |                                                       \r\n| 8 | 4 | 1 | 3 | 25.0% |                                                        \r\n| 9 | 31 | 30 | 1 | 96.8% |                                                      \r\n| 10 | 25 | 23 | 2 | 92.0% |                                                     \r\n| 13 | 1 | 1 | 0 | 100.0% |                                                      \r\n| 16 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 20 | 2 | 2 | 0 | 100.0% |                                                      \r\n| 24 | 10 | 9 | 1 | 90.0% |                                                      \r\n| 25 | 90 | 87 | 3 | 96.7% |                                                     \r\n| 26 | 3 | 0 | 3 | 0.0% |                                                        \r\n| 29 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 33 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 48 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 51 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 59 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 14464 | 1 | 0 | 1 | 0.0% |                                                     \r\n| **TOTAL** | **8,596** | **8,517** | **79** | **99.1%** |                       \r\n                                                                                 \r\n- Transactions in chain clusters: 12,355 (44.9%)                                 \r\n- Transactions in non-chain clusters: 15,157 (55.1%)                             \r\n- Transactions with dependencies: 19,884 (72.3%)                                 \r\n- **Excluding size=1 clusters:** 4,727 in chains (23.8%), 15,157 in non-chains (76.2%), of 19,884 txs \r\n- 1 cluster of size 14,464 exceeds `max_cluster_count=64` (oversized)            \r\n\r\n**Final state** (6,079 transactions, 4,665 clusters):                            \r\n                                                                                 \r\n| Size | Clusters | Chains | Non-chain | Chain% |                                \r\n|------|----------|--------|-----------|--------|                                \r\n| 1 | 4,269 | 4,269 | 0 | 100.0% |                                               \r\n| 2 | 285 | 285 | 0 | 100.0% |                                                   \r\n| 3 | 68 | 44 | 24 | 64.7% |                                                     \r\n| 4 | 24 | 9 | 15 | 37.5% |                                                      \r\n| 5 | 6 | 4 | 2 | 66.7% |                                                        \r\n| 6 | 4 | 1 | 3 | 25.0% |                                                        \r\n| 7 | 3 | 0 | 3 | 0.0% |                                                         \r\n| 8 | 1 | 0 | 1 | 0.0% |                                                         \r\n| 10 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 26 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 54 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 286 | 1 | 0 | 1 | 0.0% |                                                       \r\n| 481 | 1 | 0 | 1 | 0.0% |                                                       \r\n| **TOTAL** | **4,665** | **4,612** | **53** | **98.9%** |                       \r\n                                                                                 \r\n- Transactions in chain clusters: 5,033 (82.8%)                                  \r\n- Transactions in non-chain clusters: 1,046 (17.2%)                              \r\n- Transactions with dependencies: 1,810 (29.8%)                                  \r\n- **Excluding size=1 clusters:** 764 in chains (42.2%), 1,046 in non-chains (57.8%), of 1,810 txs\r\n- 2 clusters (sizes 286, 481) exceed `max_cluster_count=64`       \r\n\r\nThe trace file is about 0.5 GB, I'll find a place to upload it soon.               \r\n                                                                                 \r\n### Fuzz testing                                                                 \r\n                                                                                 \r\n| Check | Result |                                                               \r\n|-------|--------|                                                               \r\n| Crash files | None |                                                           \r\n| Error log | No assert / ERROR / deadly signal |                                \r\n| Workers | All 8 finished normally |                                            \r\n| Total runs | ~39.6M |                                                          \r\n| Duration | 36001 s (~10 h) |                                                   \r\n                                                                                 \r\n**Environment**                                                                  \r\n                                                                                 \r\n| Item | Value |                                                                 \r\n|------|--------|                                                                \r\n| Host kernel | Linux 6.17.0-14-generic (Ubuntu) |                               \r\n| Container OS | Debian GNU/Linux 12 (bookworm) |                                \r\n| Architecture | x86_64 |                                                        \r\n| Compiler | Clang 20.1.8 |                                                      \r\n| Fuzzer | libFuzzer |                                                           \r\n| Sanitizers | AddressSanitizer, UndefinedBehaviorSanitizer |                    \r\n| Target | `txgraph` |                                                           \r\n| Corpus | `fuzz_corpus/txgraph` |                      ",
-      "state": "open",
-      "user": "HowHsu",
-      "created_at": "2026-03-13T13:44:43Z",
-      "updated_at": "2026-03-13T21:23:09Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34821",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 13726,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -769,54 +1236,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 753,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3350769984,
-      "number": 34726,
-      "title": "[wip] ignore 2603 ci empty",
-      "body": "",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-03-03T21:54:50Z",
-      "updated_at": "2026-03-13T20:15:39Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34726",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 27,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3266545660,
-      "number": 34547,
-      "title": "lint: modernise lint tooling",
-      "body": "Modernise our lint tooling by:\r\n\r\n\\- Replacing pyenv + pip with [uv](https://docs.astral.sh/uv/) for better Python environment and dependency management\r\n\\- Replacing mypy with https://github.com/astral-sh/ty\r\n\\- Replacing the 01_install.sh runtime install script with COPY --from multi-stage Docker image imports for uv, ruff, shellcheck, mlc, and ty\r\n\\- Moving ruff lint rules from hardcoded Rust array (in lint_py.rs) into a top-level ruff.toml, and add ty.toml for the type checker\r\n\\- Extracting all remaining pip dependencies into dedicated ci/lint/requirements.txt\r\n\\- Add a ruff format lint which, if the original file is formatted, will fail if a change un-formats it\r\n\r\nExtra rationale:\r\n\r\n`COPY --from` pulls pre-built binaries from upstream images instead of compiling/downloading at runtime. Containerfile layer optimisations reduce rebuild frequency further.\r\n\r\n`ty` is significantly faster/more modern/maintained than `mypy`, and configured declaratively.\r\n\r\nAdding root-level `[ty|ruff].toml` config files means contributors can easily run `ty check` or `ruff check` locally without running the full linter, along with being accessible to other tooling (similarly for requriements.txt).\r\n\r\nPinning tool versions in the dockerfile makes it more excplicit and easier to find.\r\n\r\nThe tradeoff we make here is that there is no longer a bare install script to install tooling on a local machine. However I think this is OK, as it currently only works for `apt`-based OSes anyway, and I don't think running the linter outside of the container is such a valuable use-case as it is with some of the other CI jobs.\r\n\r\nFurther work can drop individual rules from `ty.toml` fixing up the infringing code as necessary.\r\n\r\nI can split this up if wanted, but IMO it makes sense to do it altogether.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2026-02-10T10:25:27Z",
-      "updated_at": "2026-03-13T20:13:47Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34547",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1829,
         "has_nack": false,
         "has_ack": false
       }
@@ -1446,30 +1865,6 @@
       }
     },
     {
-      "id": 3340382450,
-      "number": 34704,
-      "title": "validation: Explicitly move blocks to validation signals",
-      "body": "This enforces behaviour that is currently already implicit: The destructor for blocks runs mostly in the [scheduler thread](https://bitcoin-dev-tools.github.io/benchcoin/results/pr-176/20472174834/mainnet-default-instrumented-head-flamegraph.svg?x=2762391536960&y=684). The change should make it a bit clearer what the ownership semantics for these validation signals are.\r\n\r\n`BlockConnected` already takes a reference to a block that is emplaced in `connected_blocks`. Once `connected_blocks` is iterated through, it is not reused. Similarly `BlockDisconnected` currently takes a reference to a block that is discarded after the call to it. Note that this does not give the guarantee that blocks' lifetimes are extended by other means once they are connected. For example after IBD, the block's lifetime is extended in net_processing's `m_most_recent_block` and `ActivateBestChain` itself takes a copy of the block's shared pointer, meaning its caller may delay de-allocation. ",
-      "state": "open",
-      "user": "sedited",
-      "created_at": "2026-03-01T09:07:28Z",
-      "updated_at": "2026-03-13T13:42:30Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34704",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1035,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2756065507,
       "number": 33215,
       "title": "Fix compatibility with `-debuglogfile` command-line option",
@@ -1924,52 +2319,6 @@
       }
     },
     {
-      "id": 3353080679,
-      "number": 34729,
-      "title": "Reduce log noise",
-      "body": "This set of changes reduces some of the exaggerated logging that was introduced in #29236 when \"error()\" logging was upgraded from `LogPrintf` (aka `LogInfo`) to `LogError`. It also introduces `LogWarnThenDebug()` which duplicates the behaviour of #34549 which issues a warning the first time the log line is hit, but downgrades that to categorized debug messages afterwards. This function is used for failures that are likely caused by system configuration problems (so likely degrade the node's functionality and warrant admin attention) but are triggered by remote activity and thus could occur frequently.",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2026-03-04T11:56:05Z",
-      "updated_at": "2026-03-13T10:13:40Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34729",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 626,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3332706834,
-      "number": 34684,
-      "title": "refactor: Enable -Wswitch in exhaustive switch'es, Enable -Wcovered-switch-default",
-      "body": "The compiler flag `-Wswitch` is enabled. However, it can not fire when a `default:` case exists. Fix that by removing the default case where a switch is already handling all cases exhaustively.\r\n\r\nAlso, enable `-Wcovered-switch-default` to catch those cases at compile time in the future.\r\n\r\nAlso, apply the comment according to the dev notes.\r\n\r\nCan be reviewed via `--ignore-all-space`\r\n\r\n",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-02-26T20:05:21Z",
-      "updated_at": "2026-03-13T09:28:36Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34684",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 474,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3359450078,
       "number": 34745,
       "title": "refactor: replace `ArgsManager::cs_args RecursiveMutex` with `Mutex`",
@@ -2013,28 +2362,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 574,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3222520742,
-      "number": 34440,
-      "title": "Refactor CChain methods to use references, tests",
-      "body": "Refactor `CChain` methods (`Contains()`, `Next()`, etc.) to use references instead of pointers, to minimize the risk of accidental `nullptr` dereference (memory access violation). Also add missing unit tests to the `CChain` class.\r\n\r\nThe `CChain::Contains()` method (in `src/chain.h`) dereferences its input without checking. The `Next()` method also calls into this with a `nullptr` if invoked with `nullptr`. While most call sites have indirect guarantee that the input is not `nullptr`, it's not easy to establish this to all call sites with high confidence. These methods are publicly available. There is no known high-level use case to trigger this error, but the fix is easy, and makes the code safer.\r\n\r\nChanges:\r\n\r\n- Add basic unit tests for `CChain` class methods\r\n- Refactor `CChain::Contains()` to take reference\r\n- Refactor `CChain::Next()` to take reference\r\n- Add unit tests for `CChain::FindFork()`\r\n- Change `PeerManagerImpl::BlockRequestAllowed()` to take reference\r\n\r\nTODO:\r\n\r\n- ? /Change `CChain` internals to store references instead of pointers/\r\n- ? /Explore the change to always have at least one element (genesis), that way there is always genesis and tip./\r\n- Check related methods to change to reference -- `FindFork`, `FindEarliestAtLeast`, `FindForkInGlobalIndex`, `blockman.AddToBlockIndex`, etc.\r\n\r\nAlternative. A simpler change is to stick with pointers, with extra checks where needed, see #34416 .\r\n\r\nThis change is remotely related to and indirectly triggered by #32875 .\r\n",
-      "state": "open",
-      "user": "optout21",
-      "created_at": "2026-01-29T09:21:03Z",
-      "updated_at": "2026-03-13T01:44:28Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34440",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1556,
         "has_nack": false,
         "has_ack": false
       }
@@ -2137,31 +2464,6 @@
       }
     },
     {
-      "id": 3365398031,
-      "number": 34764,
-      "title": "rpc: replace ELISION references with explicit result fields",
-      "body": "Seeking concept ACK. Partially addresses #29912. Motivated by #34683, which exports OpenRPC from existing `RPCHelpMan` metadata. [Sample OpenRPC](https://gist.github.com/natobritto/8c4a1da04968d2325082ac4bca7d2408).\r\n\r\nSome RPC help definitions currently rely on `RPCResult::Type::ELISION` entries whose structure is only described in prose. This is concise for human-readable help, but it prevents tools from deriving complete machine-readable result schemas from the metadata.\r\n\r\nThis PR replaces all non-recursive ELISION-based reuses with shared structured definitions, so the result layout is represented directly in `RPCHelpMan` metadata instead of only in text.\r\n\r\nAffected RPCs:\r\n- `decodepsbt`\r\n- `getrawtransaction`\r\n- `getblock`\r\n- `listsinceblock`\r\n\r\nThe patch also replaces `DecodeTxDoc()` with `TxDoc()` plus a `TxDocOptions` struct, so decoded transaction layouts can be reused without positional booleans and selectively extended with `prevout`, `fee`, and `hex` fields.\r\n\r\nAs a consequence, `bitcoin-cli` output for affected RPCs becomes more verbose, since prose summaries like \"Same output as verbosity = 1\" are replaced by the full field definitions. The actual RPC return values are unchanged. I opened this as a draft because I'd like to discuss whether this tradeoff is acceptable, or whether the help renderer should collapse some sub-structures via manual configuration back into short summaries while keeping the underlying metadata explicit.\r\n\r\nThis PR doesn't cover `getaddressinfo.embedded`, which is recursive — runtime output can contain nested embedded objects, and `RPCResult` has no way to express that today. Happy to discuss approaches here if anyone has thoughts.\r\n\r\nChanges:\r\n- replace `DecodeTxDoc()` with `TxDoc()` and `TxDocOptions`\r\n- replace ELISION-based reuse in `decodepsbt`, `getrawtransaction`, `getblock`, and `listsinceblock`\r\n- factor shared result layouts into `TxDoc()`, `GetBlockFields()`, and `ListSinceBlockTxFields()`\r\n- mark `getblock` transaction `fee` documentation optional where it is conditionally present",
-      "state": "open",
-      "user": "satsfy",
-      "created_at": "2026-03-06T20:18:42Z",
-      "updated_at": "2026-03-12T20:31:57Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34764",
-      "labels": [
-        "RPC/REST/ZMQ",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 2,
-        "text_length": 2128,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3348606555,
       "number": 34718,
       "title": "Release: 31.0 translations update",
@@ -2253,30 +2555,6 @@
         "drama_keywords": 0,
         "positive_keywords": 2,
         "text_length": 772,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3102178109,
-      "number": 34075,
-      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
-      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nSee https://bitcoincorefeerate.com/stats for recent running stats that have almost identical data. \r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-12-15T11:53:35Z",
-      "updated_at": "2026-03-12T17:19:35Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 1,
-        "text_length": 9030,
         "has_nack": false,
         "has_ack": true
       }
@@ -2592,54 +2870,6 @@
       }
     },
     {
-      "id": 3342160900,
-      "number": 34707,
-      "title": "net: keep finished private broadcast txs in memory, rebroadcast if evicted from mempool",
-      "body": "Follow up from #34329.\r\n\r\nPrivate broadcast transaction data is removed from memory when either 1) the tx is received back from another peer and inserted into our mempool or 2) the tx is no longer acceptable to our mempool.\r\n\r\nWe want to persist this data for a number of reasons. See https://github.com/bitcoin/bitcoin/issues/30471.\r\n\r\nThis PR changes the behavior of the private broadcast queue to keep received and mempool-rejected txs in memory. The peer's address we received the tx from and the time, or the mempool rejection reason is now also returned via `getprivatebroadcastinfo` RPC.\r\n\r\nWe store the txs mempool state as either `IN_MEMPOOL`, `ACCEPTABLE`, or `REJECTED`. Only txs that are currently not in the mempool but are acceptable will be picked for broadcast and returned as pending transactions. This maintains the current behavior of stopping broadcasting when these conditions are met.\r\n\r\nWhen reattempting to broadcast stale private broadcast txs, every tx whether pending or not is checked for mempool acceptance. This has the added benefit of rebroadcasting previously received txs that have since been evicted from the mempool.\r\n\r\nThis is designed to facilitate follow up work including:\r\n- rebroadcasting txs that are in our mempool but have not been confirmed after a while. This can obviate rebroadcasting wallet txs if private broadcast is enabled (see https://github.com/bitcoin/bitcoin/pull/34533#issuecomment-3969991481).\r\n- adding a delay when submitting private broadcast txs so they will be broadcast at a later time (see https://github.com/bitcoin/bitcoin/issues/34118).\r\n- persisting private broadcast state to disk for resuming after restart or crash (see #34322).\r\n- expiring txs after a while so they are removed from the queue without having to manually abort.\r\n",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2026-03-02T01:46:35Z",
-      "updated_at": "2026-03-12T14:32:18Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34707",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 1891,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3379273922,
-      "number": 34790,
-      "title": "guix: introduce --exclude parameter to guix-clean",
-      "body": "## Summary\r\nThis is motivated by https://github.com/bitcoin/bitcoin/pull/34776#issuecomment-4026174587 and a follow-up to https://github.com/bitcoin/bitcoin/pull/34776.\r\n\r\nThe motivation is that when a user runs `contrib/guix/guix-clean` it will clean the whole directory or nothing leading the user to have to manually clear out these files. It would be useful to be able to exclude certain files.\r\n\r\nIt adds the `--exclude` and `--help`/`-h` parameters to `contrib/guix/guix-clean`\r\n\r\nRight now, when a user runs that script, it will delete everything. It makes sense to allow the user to exclude any files or directories from being removed.\r\n\r\n---\r\n\r\n#### Help text\r\n![Screenshot 2026-03-10 at 10 15 08 AM](https://github.com/user-attachments/assets/9dbbd9ce-1f70-4e0e-b4ab-99f7aba3ae01)\r\n#### Multiple excludes\r\n![Screenshot 2026-03-10 at 10 15 30 AM](https://github.com/user-attachments/assets/a315576b-4c07-43a8-a742-ddf6197741c0)\r\n#### Unknown option\r\n![Screenshot 2026-03-10 at 10 19 41 AM](https://github.com/user-attachments/assets/a282c0b9-eaa8-4e2c-ad2e-f4527e753c52)\r\n#### Exclude with --force\r\n![Screenshot 2026-03-10 at 10 19 53 AM](https://github.com/user-attachments/assets/2873aa5d-a6a7-4750-8336-e634bdff732e)",
-      "state": "open",
-      "user": "kevkevinpal",
-      "created_at": "2026-03-10T15:22:09Z",
-      "updated_at": "2026-03-12T14:09:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34790",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1278,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3305951143,
       "number": 34628,
       "title": "p2p: Replace per-peer transaction rate-limiting with global rate limits",
@@ -2661,28 +2891,6 @@
         "text_length": 1584,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3326623224,
-      "number": 34669,
-      "title": "feefrac: drop comparison and operator{<<,>>} for sorted wrappers",
-      "body": "Instead of having an unintuitive but strong implicit sort order on `FeeFrac` (first increasing feerate, then decreasing size), and separate overloaded `operator<<` and `operator>>` that implement a weak ordering that only looks at feerate, replace these with explicit wrapper classes which make the behavior more explicit (`ByRatio` and `ByRatioNegSize`).\r\n\r\nThis allows for things like `ByRatio{a} <= ByRatio{b}`, instead of the earlier `!(a >> b)`. It also supports usage inside `std::min`/`std::max`/`std::less`, and `std::greater`, so one can use:\r\n* `std::max<ByRatioNegSize<FeeFrac>>(a, b)` to get the highest-feerate `FeeFrac`, tie-breaking by smallest size.\r\n* `std::ranges::sort(v, std::greater<ByRatioNegSize<FeeFrac>>{});` to sort a vector that way.\r\n\r\nSuggested in https://github.com/bitcoin/bitcoin/pull/34257#discussion_r2780475893.\r\n",
-      "state": "open",
-      "user": "sipa",
-      "created_at": "2026-02-25T16:39:08Z",
-      "updated_at": "2026-03-12T13:38:17Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34669",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 913,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -3235,28 +3443,6 @@
       }
     },
     {
-      "id": 3331553763,
-      "number": 34683,
-      "title": "RFC: Support a format description of our JSON-RPC interface",
-      "body": "Ref #29912.\r\n\r\nThis draft PR adds a machine-readable[ OpenRPC](https://www.open-rpc.org/) 1.3.2 specification of out JSON-RPC interface, auto-generated from existing `RPCHelpMan` metadata.\r\n\r\nThere is currently no formal, machine-readable specification of the RPC API. As discussed in #29912, this has knock-on consequences:\r\n\r\n- Client libraries re-implement the API manually, leading to bugs like unit mistakes (sats vs BTC, vB vs kvB) and missing/incorrect argument types. No existing client library fully and correctly implements the API in a type-safe manner.\r\n- When the API changes, every downstream client must manually discover and adapt, creating downstream maintenance burden. There is no artifact they can diff between releases.\r\n- Implementing a new client in a new language requires reading C++ source or help text and transcribing it, which is error-prone and tedious, and represents an on-going porting cost.\r\n- Existing documentation is either stale or not machine-readable. The developer.bitcoin.org docs are wrong/outdated in places, and the bitcoincore.org/en/doc/ pages are rendered from help output but not in a standard schema format.\r\n- (new/extra) AI/LLM tooling increasingly builds on structured API specifications. A standard spec format enables AI-assisted client generation and integration without the ambiguity of parsing human-readable help text.\r\n\r\nThis draft builds on prior art by @casey and the observations by @laanwj, @stickies-v, @kilianmh, @hodlinator, and @cdecker in #29912. Casey's work demonstrated that RPCHelpMan already contains all the structured information needed, which makes this feasible without duplicating any API definitions.\r\n\r\nThis differs from Casey's branches in that it uses the OpenRPC standard rather than an ad-hoc format or raw JSON Schema.\r\n\r\n### Why OpenRPC\r\n\r\nI seletced OpenRPC for a number of reasons:\r\n\r\n- It's purpose-built for JSON-RPC APIs (suggested by @stickies-v, @nflatrea, and @kilianmh).\r\n- It wraps JSON schema for params/results, so consumers get both the method-level structure and the type-level schemas.\r\n- Unlike OpenAPI, it is not path-centric, which better fits our single-endpoint JSON-RPC model (concern raised by @hodlinator).\r\n  - Although it therefore does not cover our REST interface.\r\n- It's _kind of_ a standard format with (_some_) existing tooling for type generation (TypeScript, Rust, Python, Go) and client scaffolding, though maturity varies by language. More importantly though, IMO, a ~standardised format is inherently more useful than any ad-hoc one: any JSON Schema validator works, any LLM can consume it directly, and anyone can write a bespoke generator against a known schema rather than parsing help text.\r\n\r\n### Approach\r\n\r\n`RPCHelpMan metadata → getopenrpcinfo RPC → OpenRPC JSON`\r\n\r\n### Tradeoffs\r\n\r\nvs an ad-hoc format OpenRPC gives us interoperability with the (admittedly surprisingly limited) tooling, documentation generators, code generators, and validators, at the cost of needing x-bitcoin-* extensions for Bitcoin-specific concepts. As Casey noted after trying both approaches, JSON Schema \"is probably not a great fit\". OpenRPC's method-level framing on top of JSON Schema addresses the ergonomic issues while keeping the schema benefits. After testing both, I think I agree.\r\n\r\nTypes: JSON Schema cannot natively express units like \"BTC/kvB\" or semantic distinctions like \"this hex string is a txid.\" These are preserved in description text and x-bitcoin-type-str extensions, but are *not* machine-enforceable from the schema alone. This was recognized as a fundamental limitation by several commenters in the issue. Future work could enrich the x-bitcoin-* extensions with a more structured unit vocabulary.\r\n\r\nSome RPCs return different types depending on argument values (e.g. verbosity levels). These are represented as `oneOf` in the result schema with free-text condition descriptions. This is accurate but not fully machine-parseable — a code generator cannot automatically determine which result variant corresponds to which argument value without parsing the description. I still we have enough information to satisfy humans an agents alike though.\r\n\r\n### Regenerating the spec\r\n\r\nThe current functional test simply tests that the RPC runs, and produces valid JSON. We might want to consider extending this..\r\n\r\nThe RPC output documents which RPCs are available for any given built binary.\r\n\r\n### Discussion questions\r\n\r\n- Is this valuable/wanted?\r\n- Do we like openrpc format? (less relevant if we don't want this in this repo, as another repo could generate one or many definitions).\r\n- Should we cover \"hidden\" RPCs? They are currently hidden, but don't have to be...\r\n\r\nMy personal thoughts are that this is very nice to have.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2026-02-26T15:22:35Z",
-      "updated_at": "2026-03-11T21:00:54Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34683",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 4825,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3374977999,
       "number": 34779,
       "title": "BIP xxx: reserve version bits 5-28 as extra nonce space",
@@ -3276,30 +3462,6 @@
         "text_length": 804,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3358813627,
-      "number": 34743,
-      "title": "p2p: protect manual evictions",
-      "body": "Closes: #5097\r\n\r\nManual peers (`-addnode`, `-connect` + RPC) currently get disconnected by IBD timeout logic for block stalling, block download timeout and headers sync timeout. This can conflict with explicit user intent to keep these peers connected (especially in privacy-focused -connect setups), and causes unnecessary disconnect/reconnect churn.\r\n\r\nThis PR changes that behavior: manual peers are not disconnected by those timeout paths and we try to re-assign their work to other peers to maintain progress.\r\n\r\n----\r\n\r\nDisconnecting manual peers automatically causes reconnect loops and other behavior that can violate user expectation for manually configured peers.\r\n\r\nSimply “not disconnecting” (for block stalling) is not sufficient by itself: a manual peer can retain in-flight block assignments and delay overall IBD progress.\r\n\r\nI considered taking an approach more like that from #32051, simply protecting peers from some disconnects. However without the reassignment the stalling effects are simply prolonged (which is worse, IMO).\r\n\r\nThis PR uses a different appraoch:\r\n\r\n- For manual peers in block-stalling/download-timeout paths:\r\n    - release all in-flight blocks from that peer,\r\n    - set a one-round recovery flag (`m_stall_recovery`) so scheduler ordering doesn’t immediately reassign those same blocks back to the same peer.\r\n\r\nThis attempts to both preserve manual connections and maintain download progress. It actively reassigns stalled work so IBD can continue, rather than just waiting longer. And, the one-round skip prevents immediate re-capture of freed blocks by the same manual peer due to per-peer send ordering.\r\n\r\nCompared with simpler “don’t disconnect” approaches, this is more robust both in tests, and real-world slow-peer conditions.\r\n\r\nI believe the changes do not increase remote attacker control because it only applies to manual peers (-addnode, -connect, addnode), which are explicitly chosen by the local operator. You were and still are free to add a malicious peer manually.\r\n\r\nA malicious manually-added peer can now remain connected longer, but that peer was already granted privileged trust by operator configuration. And in fact, for block stalling/download timeout this PR reduces potential impact of a slow/malicious manual peer by releasing its in-flight blocks so other peers can fetch them.\r\n\r\nOf course, if an operator relies _only on bad manual peers_, sync can still be delayed.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2026-03-05T13:28:47Z",
-      "updated_at": "2026-03-11T20:37:04Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34743",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 1,
-        "text_length": 2472,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -3373,30 +3535,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 2234,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3364554727,
-      "number": 34757,
-      "title": "guix: re-enable riscv exported symbol checking",
-      "body": "Switching to binutils 2.46.0 seems to fix this (2.45.1 was still broken). Will find the relevant upstream change. No updates on our upstream issue: https://sourceware.org/bugzilla/show_bug.cgi?id=32783.\r\n\r\nBased on #34550.\r\nFixes #28095.",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2026-03-06T16:15:37Z",
-      "updated_at": "2026-03-11T16:27:33Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34757",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 284,
         "has_nack": false,
         "has_ack": false
       }
@@ -3854,32 +3992,6 @@
         "text_length": 6242,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 2683376326,
-      "number": 33034,
-      "title": "wallet: Store transactions in a separate sqlite table",
-      "body": "The wallet uses SQLite as a key-value store even though SQLite is a powerful relational database engine. This causes us numerous headaches due to the need to serialize multiple fields together, and since record read from the database during loading can come in any order.\r\n\r\nNotably, for transactions, if we were able to load them in the transaction order assigned by the wallet, PRs like #27865 would be a bit simpler and easier to reason about.\r\n\r\nThis PR makes it possible for us to do that by storing transactions in a separate table. This table has a column for each field in `CWalletTx`, which lets us use a SQL statement like `SELECT * FROM transactions ORDER BY pos` which guarantees us the order in which the transactions are loaded into the wallet.\r\n\r\nThe eventual goal is to use SQLite as a relational database with tables that store our keys and other metadata that can reference each other so that the wallet doesn't just use the database as a storage mechanism. But that is still a work in progress.\r\n\r\nThis PR makes use of the last client opened features introduced in #32895 to determine when the old record style needs to be upgraded to the new transactions table. This should give us sufficient upgrade-downgrade-upgrade handling to not lose any funds.\r\n\r\nDepends on #32763, #32895, #32985, #33032, #33033",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2025-07-21T22:52:54Z",
-      "updated_at": "2026-03-11T11:27:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33034",
-      "labels": [
-        "Wallet",
-        "Needs rebase",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1377,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -4469,28 +4581,6 @@
         "text_length": 2276,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3374032861,
-      "number": 34778,
-      "title": "logging: rewrite macros to add ratelimit option, avoid unused strprintf, clarify confusing errors",
-      "body": "Rewrite log macros to fix a number of issues: lack of control over rate limiting, unnecessary strprintf calls during fuzzing, and confusing error messages when macros are called with the wrong arguments.\r\n\r\nThis PR is a refactoring and shouldn't change externally visible behavior. Changes are described in detail in commit messages. There are also some internal improvements making previously implicit behaviors (evaluating unused format arguments, not outputting categories at certain log levels) explicit and better enforced.\r\n\r\nSome changes here were originally part of #29256, but they should make sense on their own and simplify both PRs.",
-      "state": "open",
-      "user": "ryanofsky",
-      "created_at": "2026-03-09T15:28:25Z",
-      "updated_at": "2026-03-10T19:03:02Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34778",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 742,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -5109,52 +5199,6 @@
         "text_length": 1508,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3353107575,
-      "number": 34730,
-      "title": "util/log: Combine the warning/error log levels into a single alert level",
-      "body": "There's little benefit in having two error levels that the node operator should pay attention to when the only difference between them is that one means the node is about to shut down -- the admin can easily see that just by looking at whether the node did shutdown. So this PR replaces LogWarning and LogError with LogAlert, which hopefully emphasises that the point of using that level is to alert the node operator.\r\n\r\nLeaves LogWarning and LogError available as deprecated aliases to reduce code churn and avoid invalidating PRs.\r\n\r\nLeft as draft pending #34038 as the \"warning\" and \"error\" levels are currently exposed to users via the `-loglevel` config option.",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2026-03-04T12:03:15Z",
-      "updated_at": "2026-03-10T05:24:03Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34730",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 740,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3372217322,
-      "number": 34775,
-      "title": "kernel: make logging callback global",
-      "body": "The underlying `LogInstance()` is a process-wide singleton, and all logging configuration (categories, levels, options) are already global. The per-connection `btck_LoggingConnection` handle gives the false impression of independent logger instances.\r\n\r\nFix this by explicitly making the entire kernel logging interface explicitly global, simplifying its usage. Replaces `btck_LoggingConnection` and its `{create,destroy}` functions with a single `btck_logging_set_callback` function. The `KernelLogger` class is introduced to hold global kernel logging state, which will be used in future work such as #34374.\r\n\r\nTo an extent, this approach is an alternative to #30342 which contextualizes logging. While I do believe contextualized logging would be a natural fit for the kernel interface, it seems there is currently (in my view) too little demand for the scope of changes necessary. That's why I've opened this PR as a much more straightforward way to fix kernel's current logging weirdness. If you believe kernel logging should be contextualized right away, please go review #30342 instead.",
-      "state": "open",
-      "user": "stickies-v",
-      "created_at": "2026-03-09T08:35:36Z",
-      "updated_at": "2026-03-10T04:34:06Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34775",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1131,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -7874,7 +7918,7 @@
     }
   ],
   "summary": {
-    "total_prs": 264,
+    "total_prs": 266,
     "total_issues": 31,
     "total_comments": 61,
     "unique_participants": 87
