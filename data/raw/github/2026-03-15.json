@@ -1,12 +1,419 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-03-15T01:52:58.791765+00:00",
+  "fetched_at": "2026-03-15T08:30:29.915214+00:00",
   "date_range": {
-    "since": "2026-03-08T01:52:58.791707+00:00",
-    "until": "2026-03-15T01:52:58.791707+00:00"
+    "since": "2026-03-08T08:30:29.915129+00:00",
+    "until": "2026-03-15T08:30:29.915129+00:00"
   },
   "pull_requests": [
+    {
+      "id": 2832518306,
+      "number": 33402,
+      "title": "contrib: Add zsh completion scripts",
+      "body": "  Adds zsh completion support using the compdef system for:\r\n  - bitcoin-cli with RPC command completion and context-sensitive arguments\r\n  - bitcoin-tx with option/command completion and file path handling\r\n  - bitcoind with configuration option completion\r\n\r\n  These complement the existing bash completion scripts and provide\r\n  the same functionality for zsh users.\r\n",
+      "state": "open",
+      "user": "mstampfer",
+      "created_at": "2025-09-16T10:40:35Z",
+      "updated_at": "2026-03-15T08:10:28Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33402",
+      "labels": [
+        "Scripts and tools"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 407,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2837615883,
+      "number": 33421,
+      "title": "node: add  `BlockTemplateCache`",
+      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify an optional template age limit in `MillisecondsDouble`:\r\n\r\n- If template age limit is `nullopt`, we create a new template and return it without adding it to the cache.\r\n- If a matching template (block template with identical block creation options) exists in the cache and hasn't exceeded the age limit, the cached version is returned.\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned. When evicting stale templates, we assume no duplicates exist since templates are evicted as soon as their age limit is reached or exceeded.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted after each insertion.\r\n\r\n\r\nCache lookup requires an exact match on ALL `BlockAssembler::Options` fields. While some fields (e.g., `test_block_validity`, `print_modified_fee`, `coinbase_output_script`) could be ignored for cache reuse, they mainly differ in tests and benchmarks. We keep the logic simple and accept cache misses in those cases.\r\n\r\n\r\nThe cache enforces at most one template per set of options. When searching for a match in `getCachedTemplate()`, if a template with matching options is found but has exceeded the age limit, it's immediately evicted before returning `nullptr`. This ensures no duplicate options exist in the cache. A `SanityCheck()` method verifies this invariant in tests by checking all cached entries for duplicates.\r\n\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\n`GetBlockTemplate()` uses double-checked locking: it first checks the cache with only `m_mutex` held, then if there's a miss, acquires both `cs_main` and `m_mutex` to create the template. Before creating, it checks again since another thread might have added a template while locks were released. \r\n\r\nThis PR removes an unused `node/context.h` import from miner to prevent a circular dependency when exposing the block template cache to the node context.",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-09-17T18:47:09Z",
+      "updated_at": "2026-03-15T07:48:52Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2508,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2858375622,
+      "number": 33477,
+      "title": "Rollback for dumptxoutset without invalidating blocks",
+      "body": "This is an alternative approach to implement `dumptxoutset` with rollback that was discussed a few times. It does not rely on `invalidateblock` and `reconsiderblock` and instead creates a temporary copy of the coins DB, modifies this copy by rolling back as many blocks as necessary and then creating the dump from this temp copy DB. See also https://github.com/bitcoin/bitcoin/pull/29553#issuecomment-1978480989, https://github.com/bitcoin/bitcoin/issues/32817#issuecomment-3012406102 and #29565 discussions.\r\n\r\nThe nice side-effects of this are that forks can not interfere with the rollback and network activity does not have to be suspended. But there are also some downsides when comparing to the current approach: this does require some additional disk space for the copied coins DB and performance is slower (master took 3m 17s vs 9m 16s in my last test with the code here, rolling back ~1500 blocks). However, there is also not much code being added here, network can stay active throughout and performance would stay constant with this approach while it would impact master if there were forks that needed to be invalidated as well (see #33444 for the alternative approach), so this could still be considered a good trade-off.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-09-24T21:15:11Z",
+      "updated_at": "2026-03-15T07:23:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33477",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1289,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3329031729,
+      "number": 34678,
+      "title": "net: drop connection on unknown socket family in AcceptConnection",
+      "body": "When `SetSockAddr()` fails in` AcceptConnection()`, the code logs a warning but continues processing the connection with a default empty CService address. This means ban checks, whitelist matching, and all downstream logic operate on an invalid address.\r\n\r\nReturn early on failure instead, consistent with other error paths in the same function.",
+      "state": "open",
+      "user": "chriszeng1010",
+      "created_at": "2026-02-26T04:52:29Z",
+      "updated_at": "2026-03-15T06:24:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34678",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 411,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2902093523,
+      "number": 33593,
+      "title": "guix: Use UCRT runtime for Windows release binaries",
+      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2025-10-09T21:46:43Z",
+      "updated_at": "2026-03-15T06:17:09Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
+      "labels": [
+        "Windows",
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 213,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2925411752,
+      "number": 33646,
+      "title": "log: check fclose() results and report safely in logging.cpp",
+      "body": "`fclose()` can report write errors (for example if the disk is full or the filesystem has a problem). Right now, some `fclose()` calls in `src/logging.cpp` ignore the return value. This means errors might go unnoticed and log lines could be lost without warning.\r\n\r\n## What this PR does:\r\n- Add a small helper that prints `fclose()` errors to `stderr` (with path and errno).\r\n- In shutdown: close `m_fileout` safely and report errors.\r\n- In reopen: open the new file, swap it in, close the old one, and report errors if closing fails.\r\n- In shrink/rotate: check all `fclose(file)` calls and report failures.\r\n\r\nNo other behavior changes. Normal logging, rotation, and console output remain unchanged.",
+      "state": "open",
+      "user": "cedwies",
+      "created_at": "2025-10-17T19:06:08Z",
+      "updated_at": "2026-03-15T05:50:12Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33646",
+      "labels": [
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 761,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2956421896,
+      "number": 33727,
+      "title": "zmq: Log bind error at Error level, abort startup on init error",
+      "body": "Fixes #33715",
+      "state": "open",
+      "user": "isrod",
+      "created_at": "2025-10-28T18:59:03Z",
+      "updated_at": "2026-03-15T05:01:10Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33727",
+      "labels": [
+        "RPC/REST/ZMQ",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 76,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2964194918,
+      "number": 33747,
+      "title": "contrib: zsh and fish completions for bitcoin wrapper executable",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n\r\nAdd shell (bash, fish, and zsh) completions for unified bitcoin CLI\r\n\r\nThis PR adds comprehensive shell completion scripts for the new unified `bitcoin` command-line interface introduced in #31375. The completions support bash, zsh, and fish shells and provide tab completion for all available commands, options, and arguments.\r\n\r\n### Example Usage\r\n```bash\r\n# Complete subcommands\r\nbitcoin <TAB>\r\n# gui  node  rpc  wallet  tx  help  bench  chainstate  test  test-gui\r\n\r\n# Complete RPC methods  \r\nbitcoin rpc <TAB>\r\n# getblockchaininfo  getbestblockhash  getblock  ...\r\n\r\n# Complete options\r\nbitcoin node -<TAB>\r\n# -datadir  -conf  -daemon  -help  -rpcport  ...\r\n```\r\n\r\nClose #33603",
+      "state": "open",
+      "user": "hulxv",
+      "created_at": "2025-10-30T18:09:16Z",
+      "updated_at": "2026-03-15T04:48:11Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33747",
+      "labels": [
+        "Scripts and tools"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 2811,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2965956843,
+      "number": 33752,
+      "title": "rest: Query predecessor headers using negative count param",
+      "body": "There is currently no mechanism by which to batch-query headers from tip, backwards towards genesis.\r\nThis PR extends the REST Blockheaders API to support batch-querying predecessor headers, by providing a negative count parameter.",
+      "state": "open",
+      "user": "A-Manning",
+      "created_at": "2025-10-31T09:11:11Z",
+      "updated_at": "2026-03-15T04:34:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33752",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 290,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3229673183,
+      "number": 34467,
+      "title": "net: don't perform network activity when networkactive=0",
+      "body": "## Problem\r\nWhen starting bitcoind with `-networkactive=0`, the node still performs various network activities despite the user explicitly requesting that the P2P network be inactive. This results in unnecessary log messages and network overhead:\r\n\r\n- `[addrman] Selected IP:PORT from tried` - Address manager selections\r\n- `[net:error] Could not get best interface for default route` - Gateway detection attempts\r\n- `[tor] Error connecting to Tor control socket` - Tor control connection attempts\r\n- `[tor] Not connected to Tor control port` - Tor reconnection attempts\r\n- `[net] portmap: Could not determine IPv4/IPv6 default gateway` - UPnP/NAT-PMP attempts\r\n\r\nThis defeats the purpose of the `-networkactive` flag, which is documented as \"Enable all P2P network activity (default: 1)\".\r\n\r\n### Steps to Reproduce\r\n1. Start bitcoind with `bitcoind.exe -networkactive=0`\r\n2. Observe logs - despite the flag being set to disable network activity, addrman selections and network-related errors are logged\r\n\r\n### Expected Behavior\r\nNo network activity should occur when `-networkactive=0` is set at startup. The node should remain idle until network is activated via RPC command `setnetworkactive true`.\r\n\r\n## Solution\r\nThis PR ensures that when `networkactive=0`, no network initialization or activity occurs by:\r\n\r\n### 1. **ThreadOpenConnections (src/net.cpp)**\r\nAdded a check at the beginning of the main while loop to pause all outbound connection logic when `fNetworkActive` is false. This prevents:\r\n- Address selection from addrman\r\n- Connection attempts to peers\r\n- Feeler connections\r\n- Block relay connection attempts\r\n\r\nThis check follows the existing pattern used for DNS seed querying (lines 2345-2349) and uses the same synchronization mechanism (`fNetworkActive` atomic flag and `sleep_for` with interruption support).\r\n\r\n### 2. **StartMapPort (src/init.cpp)**\r\nMade NAT-PMP port mapping startup conditional on `-networkactive` being true. This prevents:\r\n- Port mapping initialization\r\n- Gateway detection attempts\r\n- Related network errors and log spam\r\n\r\n### 3. **StartTorControl (src/init.cpp)**\r\nMade Tor control thread startup conditional on `-networkactive` being true. This prevents:\r\n- Tor control socket connection attempts\r\n- Tor-related error logs\r\n- Unnecessary event loop setup\r\n\r\n## Testing\r\nThe fix has been verified to:\r\n- Compile without errors or warnings\r\n- Follow existing code patterns and conventions used in the same functions\r\n- Use the same argument parsing method as existing code (`args.GetBoolArg(\"-networkactive\", true)`)\r\n- Respect the interruption mechanism used throughout the codebase\r\n\r\n### Manual Testing\r\n```bash\r\n# Start with networkactive=0 - should see no network activity logs\r\nbitcoind -networkactive=0\r\n\r\n# Start with networkactive=1 (default) - normal behavior\r\nbitcoind\r\n```\r\n\r\nAffected Code Paths\r\n`src/net.cpp: CConnman::ThreadOpenConnections()` - Main connection management loop\r\n`src/init.cpp` Bitcoin Core initialization - MapPort and TorControl startup\r\n\r\nNotes\r\nThis change is backward compatible - default behavior (networkactive=1) is unchanged\r\nDynamic network activation via setnetworkactive true RPC will resume ThreadOpenConnections activity\r\nMapPort and TorControl remain stopped if started with networkactive=0 (can be addressed in follow-up if needed for dynamic activation)\r\n\r\nFixes #34190",
+      "state": "closed",
+      "user": "saksham-1304",
+      "created_at": "2026-01-30T23:44:08Z",
+      "updated_at": "2026-03-15T04:22:57Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34467",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 3421,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3394533843,
+      "number": 34820,
+      "title": "test: Use asyncio.SelectorEventLoop() over deprecated asyncio.WindowsSelectorEventLoopPolicy(), move loop creation",
+      "body": "It is deprecated according to https://docs.python.org/3.14/library/asyncio-policy.html#asyncio.WindowsSelectorEventLoopPolicy The replacement exists since python 3.7\r\n\r\nAlso, move the event loop creation to happen in the thread that runs the loop.",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-03-13T11:11:11Z",
+      "updated_at": "2026-03-15T04:21:57Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34820",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 362,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3400490821,
+      "number": 34825,
+      "title": "depends: capnp 1.4.0",
+      "body": "Update capnp in depends to [`1.4.0`](https://github.com/capnproto/capnproto/releases/tag/v1.4.0).\r\n\r\nIt contains a number of bugfixes, and fixes for 2 CVEs, of which I think only `Fix benign(?) buffer overrun in async readMessage()` is relevant to us, and it seems to be considered benign:\r\n> This is technically undefined behavior (a buffer overrun), but we suspect that it is benign with all known memory allocators. In C++, a zero-sized allocation (made with `operator new(0)`, as is the case here) is required to return a unique pointer, different from any other such allocation. Because of this, all common memory allocators round up a zero-byte allocation to a word-sized allocation (32-bit or 64-bit, depending on the architecture). The overrun written to this allocation was exactly one pointer in size, so always fits into the actual allocation space.\r\n\r\n> Nevertheless, the code is in fact relying on undefined behavior, and it is theoretically possible that some memory allocator implements zero-sized allocations in a way that would make this overrun dangerous.\r\n\r\nSee https://github.com/capnproto/capnproto/compare/release-1.3.0...release-1.4.0 for all changes since 1.3.0.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-03-15T04:20:06Z",
+      "updated_at": "2026-03-15T04:20:40Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34825",
+      "labels": [
+        "Build system",
+        "DrahtBot Guix build requested"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 1207,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3378264538,
+      "number": 34786,
+      "title": "validation: do not add the snapshot to candidates set of the background chainstate",
+      "body": "The snapshot block needs to be added to the candidates set of the assumed-valid chain because it will be the tip of that chainstate right after snapshot activation.\r\n\r\nHowever, adding it also to the background chainstate is not necessary for anything. Before, the index would be in the set without being connectable. It will be eventually added to the set as part of the normal block download - no extra logic is necessary here.\r\n\r\nThis simplifies a unit test which had a comment that having the block in the set is \"not intended\".\r\nThis was suggested [here](https://github.com/bitcoin/bitcoin/pull/34521#discussion_r2849281299) and [here](https://github.com/bitcoin/bitcoin/pull/34521#discussion_r2883024248) in #34521\r\n\r\nNote that adding the snapshot block was harmless, since `FindMostWorkChain()` lazily removes blocks without data from the set, so this does not fix a bug but just simplifies some code.",
+      "state": "open",
+      "user": "mzumsande",
+      "created_at": "2026-03-10T11:53:45Z",
+      "updated_at": "2026-03-15T04:09:40Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34786",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 990,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2982372791,
+      "number": 33795,
+      "title": "test: Ignore error message give from python because of PYTHON_GIL",
+      "body": "### Description\r\nI was able to reproduce this issue https://github.com/bitcoin/bitcoin/issues/33582\r\nWe should ignore the warning message if `PYTHON_GIL` is not set, instead of the test being abruptly stopped\r\n\r\n### When `PYTHON_GIL` is `0` or `1` or not set\r\n```\r\nPYTHON_GIL=1 ./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\nor \r\nPYTHON_GIL=0 ./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\nor\r\n./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\n\r\nTemporary test directory at /tmp/test_runner_₿_🏃_20251105_180523\r\nWARNING! There is already a bitcoind process running on this system. Tests may fail unexpectedly due to resource contention!\r\nRemaining jobs: [interface_ipc.py]\r\n1/1 - interface_ipc.py passed, Duration: 13 s\r\n\r\nTEST             | STATUS    | DURATION\r\n\r\ninterface_ipc.py | ✓ Passed  | 13 s\r\n\r\nALL              | ✓ Passed  | 13 s (accumulated)\r\nRuntime: 13 s\r\n```",
+      "state": "open",
+      "user": "kevkevinpal",
+      "created_at": "2025-11-05T23:13:29Z",
+      "updated_at": "2026-03-15T04:01:02Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33795",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 994,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3237671040,
+      "number": 34486,
+      "title": "net: Reduce local network activity when networkactive=0",
+      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/34190\r\n\r\nWhen `networkactive=0` is set, NAT-PMP port mapping and Tor **control connections**\r\nstill run in the background, mapping ports and logging retry attempts despite\r\nthe node being \"inactive.\"\r\n\r\nThis wires both subsystems to `CConnman::SetNetworkActive` so they start and stop\r\nwith the network state:\r\n\r\n- mapport: EnableMapPort is injected as a callback via CConnman::Options.\r\n  SetNetworkActive and SetMapPortEnabled both gate on network state.\r\n\r\n- torcontrol: is injected similarly. The callback dispatches onto the tor event loop via \r\n  event_base_once to respect thread ownership. `EVLOOP_NO_EXIT_ON_EMPTY` is \r\n  used to keep the event loop alive without keepalive timers, so the controller starts disconnected and waits for CConnman::Start() to signal.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2026-02-02T17:46:47Z",
+      "updated_at": "2026-03-15T03:45:04Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34486",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 875,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2999254279,
+      "number": 33854,
+      "title": "fix assumevalid is ignored during reindex",
+      "body": "During a reindex, the assumevalid setting may be ignored if the chainwork of the best header is below `minimumchainwork`. This happens when the previous IBD was stopped before connecting enough blocks to reach the required `minimumchainwork`. The assumevalid block will also be missing from the block index because the assumevalid block is set to match the `minimumchainwork`. See [Issue #31494](https://github.com/bitcoin/bitcoin/issues/31494).\r\n\r\nAs a result, `reindex` can take significantly longer to complete than necessary.\r\n\r\nThis PR addresses the issue by modifying reindex behaviour: if the chainwork of the `best_header` is below `minimumchainwork`, the node skips the `ActivateBestChain()` step and proceeds directly to synchronisation.\r\n\r\nThis PR takes a different approach from [PR #31615](https://github.com/bitcoin/bitcoin/pull/31615) to keep the validation path for `reindex` the same as the regular IBD validation path.\r\n\r\nDevelopers benchmarking IBD with `-reindex` may find this behaviour undesirable. In such cases, it’s recommended to use `-reindex-chainstate` instead or ensure that the available blocks have sufficient chainwork.\r\n\r\n`libbitcoinkernel` exposes the `ImportBlocks` function and expects `reindex` to connect blocks, so an attempt was made to preserve the existing behaviour for `libbitcoinkernel`.",
+      "state": "open",
+      "user": "Eunovo",
+      "created_at": "2025-11-11T14:21:14Z",
+      "updated_at": "2026-03-15T03:13:23Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33854",
+      "labels": [
+        "Validation"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1375,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3034182041,
+      "number": 33922,
+      "title": "mining: add getMemoryLoad() and track template non-mempool memory footprint",
+      "body": "Implements a way to track the memory footprint of all non-mempool transactions that are still being referenced by block templates, see discussion in  #33899. It does not impose a limit.\r\n\r\nIPC clients can query this footprint (total, across all clients) using the `getMemoryLoad()` IPC method. Its client-side usage is demonstrated here:\r\n- https://github.com/stratum-mining/sv2-tp/pull/63\r\n\r\nAdditionally, the functional test in `interface_ipc.py` is expanded to demonstrate how template memory management works: templates are not released until the client drops references to them, or calls the template destroy method, or disconnects. The destroy method is called automatically by clients using [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess), as [sv2-tp](https://github.com/stratum-mining/sv2-tp) does. In the Python tests it also happens when references are destroyed or go out of scope.\r\n\r\nThe PR starts with preparation refactor commits:\r\n\r\n1. Tweaks `interface_ipc.py` so `destroy()` calls happen in an order that's useful to later demonstrate memory management\r\n2. Change `std::unique_ptr<BlockTemplate> block_template` from a `static` defined in `rpc/mining.cpp` to `NodeContext`. This prevents a crash when we switch to a non-trivial destructor later (which uses `m_node`).\r\n\r\nThen the main commits:\r\n\r\n3. Add `template_tx_refs` to `NodeContext` to track how many templates contain any given transaction. This map is updated by the `BlockTemplate` constructor and destructor.\r\n4. Add `GetTemplateMemoryUsage()` which loops over this map and sums up the memory footprint for transactions outside the mempool\r\n5. Expose this information to IPC clients via `getMemoryLoad()` and add test coverage\r\n",
+      "state": "open",
+      "user": "Sjors",
+      "created_at": "2025-11-21T15:34:14Z",
+      "updated_at": "2026-03-15T02:05:27Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33922",
+      "labels": [
+        "Mining"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1801,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
     {
       "id": 3056547139,
       "number": 33974,
@@ -173,28 +580,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 1175,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 2858375622,
-      "number": 33477,
-      "title": "Rollback for dumptxoutset without invalidating blocks",
-      "body": "This is an alternative approach to implement `dumptxoutset` with rollback that was discussed a few times. It does not rely on `invalidateblock` and `reconsiderblock` and instead creates a temporary copy of the coins DB, modifies this copy by rolling back as many blocks as necessary and then creating the dump from this temp copy DB. See also https://github.com/bitcoin/bitcoin/pull/29553#issuecomment-1978480989, https://github.com/bitcoin/bitcoin/issues/32817#issuecomment-3012406102 and #29565 discussions.\r\n\r\nThe nice side-effects of this are that forks can not interfere with the rollback and network activity does not have to be suspended. But there are also some downsides when comparing to the current approach: this does require some additional disk space for the copied coins DB and performance is slower (master took 3m 17s vs 9m 16s in my last test with the code here, rolling back ~1500 blocks). However, there is also not much code being added here, network can stay active throughout and performance would stay constant with this approach while it would impact master if there were forks that needed to be invalidated as well (see #33444 for the alternative approach), so this could still be considered a good trade-off.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2025-09-24T21:15:11Z",
-      "updated_at": "2026-03-14T23:43:54Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33477",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1289,
         "has_nack": false,
         "has_ack": true
       }
@@ -583,30 +968,6 @@
       }
     },
     {
-      "id": 3237671040,
-      "number": 34486,
-      "title": "net: Reduce local network activity when networkactive=0",
-      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/34190\r\n\r\nWhen `networkactive=0` is set, NAT-PMP port mapping and Tor **control connections**\r\nstill run in the background, mapping ports and logging retry attempts despite\r\nthe node being \"inactive.\"\r\n\r\nThis wires both subsystems to CConnman::SetNetworkActive so they start and stop\r\nwith the network state:\r\n\r\n- mapport: EnableMapPort is injected as a callback via CConnman::Options.\r\n  SetNetworkActive and SetMapPortEnabled both gate on network state.\r\n\r\n- torcontrol: is injected similarly. The callback dispatches onto the tor event loop via \r\n  event_base_once to respect thread ownership. `EVLOOP_NO_EXIT_ON_EMPTY` is \r\n  used to keep the event loop alive without keepalive timers, so the controller starts disconnected and waits for CConnman::Start() to signal.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2026-02-02T17:46:47Z",
-      "updated_at": "2026-03-14T15:49:38Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34486",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 873,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3239243501,
       "number": 34489,
       "title": "index: batch db writes during initial sync",
@@ -987,30 +1348,6 @@
         "text_length": 715,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3229673183,
-      "number": 34467,
-      "title": "net: don't perform network activity when networkactive=0",
-      "body": "## Problem\r\nWhen starting bitcoind with `-networkactive=0`, the node still performs various network activities despite the user explicitly requesting that the P2P network be inactive. This results in unnecessary log messages and network overhead:\r\n\r\n- `[addrman] Selected IP:PORT from tried` - Address manager selections\r\n- `[net:error] Could not get best interface for default route` - Gateway detection attempts\r\n- `[tor] Error connecting to Tor control socket` - Tor control connection attempts\r\n- `[tor] Not connected to Tor control port` - Tor reconnection attempts\r\n- `[net] portmap: Could not determine IPv4/IPv6 default gateway` - UPnP/NAT-PMP attempts\r\n\r\nThis defeats the purpose of the `-networkactive` flag, which is documented as \"Enable all P2P network activity (default: 1)\".\r\n\r\n### Steps to Reproduce\r\n1. Start bitcoind with `bitcoind.exe -networkactive=0`\r\n2. Observe logs - despite the flag being set to disable network activity, addrman selections and network-related errors are logged\r\n\r\n### Expected Behavior\r\nNo network activity should occur when `-networkactive=0` is set at startup. The node should remain idle until network is activated via RPC command `setnetworkactive true`.\r\n\r\n## Solution\r\nThis PR ensures that when `networkactive=0`, no network initialization or activity occurs by:\r\n\r\n### 1. **ThreadOpenConnections (src/net.cpp)**\r\nAdded a check at the beginning of the main while loop to pause all outbound connection logic when `fNetworkActive` is false. This prevents:\r\n- Address selection from addrman\r\n- Connection attempts to peers\r\n- Feeler connections\r\n- Block relay connection attempts\r\n\r\nThis check follows the existing pattern used for DNS seed querying (lines 2345-2349) and uses the same synchronization mechanism (`fNetworkActive` atomic flag and `sleep_for` with interruption support).\r\n\r\n### 2. **StartMapPort (src/init.cpp)**\r\nMade NAT-PMP port mapping startup conditional on `-networkactive` being true. This prevents:\r\n- Port mapping initialization\r\n- Gateway detection attempts\r\n- Related network errors and log spam\r\n\r\n### 3. **StartTorControl (src/init.cpp)**\r\nMade Tor control thread startup conditional on `-networkactive` being true. This prevents:\r\n- Tor control socket connection attempts\r\n- Tor-related error logs\r\n- Unnecessary event loop setup\r\n\r\n## Testing\r\nThe fix has been verified to:\r\n- Compile without errors or warnings\r\n- Follow existing code patterns and conventions used in the same functions\r\n- Use the same argument parsing method as existing code (`args.GetBoolArg(\"-networkactive\", true)`)\r\n- Respect the interruption mechanism used throughout the codebase\r\n\r\n### Manual Testing\r\n```bash\r\n# Start with networkactive=0 - should see no network activity logs\r\nbitcoind -networkactive=0\r\n\r\n# Start with networkactive=1 (default) - normal behavior\r\nbitcoind\r\n```\r\n\r\nAffected Code Paths\r\n`src/net.cpp: CConnman::ThreadOpenConnections()` - Main connection management loop\r\n`src/init.cpp` Bitcoin Core initialization - MapPort and TorControl startup\r\n\r\nNotes\r\nThis change is backward compatible - default behavior (networkactive=1) is unchanged\r\nDynamic network activation via setnetworkactive true RPC will resume ThreadOpenConnections activity\r\nMapPort and TorControl remain stopped if started with networkactive=0 (can be addressed in follow-up if needed for dynamic activation)\r\n\r\nFixes #34190",
-      "state": "open",
-      "user": "saksham-1304",
-      "created_at": "2026-01-30T23:44:08Z",
-      "updated_at": "2026-03-14T10:22:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34467",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 3421,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -2055,30 +2392,6 @@
       }
     },
     {
-      "id": 3394533843,
-      "number": 34820,
-      "title": "test: Use asyncio.SelectorEventLoop() over deprecated asyncio.WindowsSelectorEventLoopPolicy(), move loop creation",
-      "body": "It is deprecated according to https://docs.python.org/3.14/library/asyncio-policy.html#asyncio.WindowsSelectorEventLoopPolicy The replacement exists since python 3.7\r\n\r\nAlso, move the event loop creation to happen in the thread that runs the loop.",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-03-13T11:11:11Z",
-      "updated_at": "2026-03-13T20:31:13Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34820",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 362,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3379552583,
       "number": 34791,
       "title": "test: Suppress another unsolicited `mock_process/*` output",
@@ -2243,30 +2556,6 @@
         "drama_keywords": 2,
         "positive_keywords": 0,
         "text_length": 1085,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2982372791,
-      "number": 33795,
-      "title": "test: Ignore error message give from python because of PYTHON_GIL",
-      "body": "### Description\r\nI was able to reproduce this issue https://github.com/bitcoin/bitcoin/issues/33582\r\nWe should ignore the warning message if `PYTHON_GIL` is not set, instead of the test being abruptly stopped\r\n\r\n### When `PYTHON_GIL` is `0` or `1` or not set\r\n```\r\nPYTHON_GIL=1 ./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\nor \r\nPYTHON_GIL=0 ./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\nor\r\n./build_dev_mode/test/functional/test_runner.py interface_ipc.py\r\n\r\nTemporary test directory at /tmp/test_runner_₿_🏃_20251105_180523\r\nWARNING! There is already a bitcoind process running on this system. Tests may fail unexpectedly due to resource contention!\r\nRemaining jobs: [interface_ipc.py]\r\n1/1 - interface_ipc.py passed, Duration: 13 s\r\n\r\nTEST             | STATUS    | DURATION\r\n\r\ninterface_ipc.py | ✓ Passed  | 13 s\r\n\r\nALL              | ✓ Passed  | 13 s (accumulated)\r\nRuntime: 13 s\r\n```",
-      "state": "open",
-      "user": "kevkevinpal",
-      "created_at": "2025-11-05T23:13:29Z",
-      "updated_at": "2026-03-13T17:03:37Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33795",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 994,
         "has_nack": false,
         "has_ack": false
       }
@@ -3060,31 +3349,6 @@
       }
     },
     {
-      "id": 2902093523,
-      "number": 33593,
-      "title": "guix: Use UCRT runtime for Windows release binaries",
-      "body": "This PR:\r\n1. Switches Windows release binaries to UCRT.\r\n2. Update docs.\r\n3. Drops MSVCRT workarounds.\r\n\r\nCloses https://github.com/bitcoin/bitcoin/issues/30210.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-10-09T21:46:43Z",
-      "updated_at": "2026-03-13T00:14:45Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33593",
-      "labels": [
-        "Windows",
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 213,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3387019714,
       "number": 34813,
       "title": "threads: qa: Add lock order annotation for `TxMempool::cs`",
@@ -3820,30 +4084,6 @@
         "text_length": 1138,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 2964194918,
-      "number": 33747,
-      "title": "contrib: zsh and fish completions for bitcoin wrapper executable",
-      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n\r\nAdd shell (bash, fish, and zsh) completions for unified bitcoin CLI\r\n\r\nThis PR adds comprehensive shell completion scripts for the new unified `bitcoin` command-line interface introduced in #31375. The completions support bash, zsh, and fish shells and provide tab completion for all available commands, options, and arguments.\r\n\r\n### Example Usage\r\n```bash\r\n# Complete subcommands\r\nbitcoin <TAB>\r\n# gui  node  rpc  wallet  tx  help  bench  chainstate  test  test-gui\r\n\r\n# Complete RPC methods  \r\nbitcoin rpc <TAB>\r\n# getblockchaininfo  getbestblockhash  getblock  ...\r\n\r\n# Complete options\r\nbitcoin node -<TAB>\r\n# -datadir  -conf  -daemon  -help  -rpcport  ...\r\n```\r\n\r\nClose #33603",
-      "state": "open",
-      "user": "hulxv",
-      "created_at": "2025-10-30T18:09:16Z",
-      "updated_at": "2026-03-12T02:19:01Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33747",
-      "labels": [
-        "Scripts and tools"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 2811,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -5037,30 +5277,6 @@
       }
     },
     {
-      "id": 3378264538,
-      "number": 34786,
-      "title": "validation: do not add the snapshot to candidates set of the background chainstate",
-      "body": "The snapshot block needs to be added to the candidates set of the assumed-valid chain because it will be the tip of that chainstate right after snapshot activation.\r\n\r\nHowever, adding it also to the background chainstate is not necessary for anything. Before, the index would be in the set without being connectable. It will be eventually added to the set as part of the normal block download - no extra logic is necessary here.\r\n\r\nThis simplifies a unit test which had a comment that having the block in the set is \"not intended\".\r\nThis was suggested [here](https://github.com/bitcoin/bitcoin/pull/34521#discussion_r2849281299) and [here](https://github.com/bitcoin/bitcoin/pull/34521#discussion_r2883024248) in #34521\r\n\r\nNote that adding the snapshot block was harmless, since `FindMostWorkChain()` lazily removes blocks without data from the set, so this does not fix a bug but just simplifies some code.",
-      "state": "open",
-      "user": "mzumsande",
-      "created_at": "2026-03-10T11:53:45Z",
-      "updated_at": "2026-03-10T16:55:56Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34786",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 990,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3378150463,
       "number": 34784,
       "title": "ci: use latest versions of lint deps",
@@ -5295,55 +5511,6 @@
       }
     },
     {
-      "id": 2925411752,
-      "number": 33646,
-      "title": "log: check fclose() results and report safely in logging.cpp",
-      "body": "`fclose()` can report write errors (for example if the disk is full or the filesystem has a problem). Right now, some `fclose()` calls in `src/logging.cpp` ignore the return value. This means errors might go unnoticed and log lines could be lost without warning.\r\n\r\n## What this PR does:\r\n- Add a small helper that prints `fclose()` errors to `stderr` (with path and errno).\r\n- In shutdown: close `m_fileout` safely and report errors.\r\n- In reopen: open the new file, swap it in, close the old one, and report errors if closing fails.\r\n- In shrink/rotate: check all `fclose(file)` calls and report failures.\r\n\r\nNo other behavior changes. Normal logging, rotation, and console output remain unchanged.",
-      "state": "open",
-      "user": "cedwies",
-      "created_at": "2025-10-17T19:06:08Z",
-      "updated_at": "2026-03-10T11:44:58Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33646",
-      "labels": [
-        "Utils/log/libs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 761,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2956421896,
-      "number": 33727,
-      "title": "zmq: Log bind error at Error level, abort startup on init error",
-      "body": "Fixes #33715",
-      "state": "open",
-      "user": "isrod",
-      "created_at": "2025-10-28T18:59:03Z",
-      "updated_at": "2026-03-10T11:34:13Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33727",
-      "labels": [
-        "RPC/REST/ZMQ",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 76,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3207919952,
       "number": 34401,
       "title": "kernel:  add serialization method for btck_BlockHeader API",
@@ -5387,30 +5554,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 176,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2999254279,
-      "number": 33854,
-      "title": "fix assumevalid is ignored during reindex",
-      "body": "During a reindex, the assumevalid setting may be ignored if the chainwork of the best header is below `minimumchainwork`. This happens when the previous IBD was stopped before connecting enough blocks to reach the required `minimumchainwork`. The assumevalid block will also be missing from the block index because the assumevalid block is set to match the `minimumchainwork`. See [Issue #31494](https://github.com/bitcoin/bitcoin/issues/31494).\r\n\r\nAs a result, `reindex` can take significantly longer to complete than necessary.\r\n\r\nThis PR addresses the issue by modifying reindex behaviour: if the chainwork of the `best_header` is below `minimumchainwork`, the node skips the `ActivateBestChain()` step and proceeds directly to synchronisation.\r\n\r\nThis PR takes a different approach from [PR #31615](https://github.com/bitcoin/bitcoin/pull/31615) to keep the validation path for `reindex` the same as the regular IBD validation path.\r\n\r\nDevelopers benchmarking IBD with `-reindex` may find this behaviour undesirable. In such cases, it’s recommended to use `-reindex-chainstate` instead or ensure that the available blocks have sufficient chainwork.\r\n\r\n`libbitcoinkernel` exposes the `ImportBlocks` function and expects `reindex` to connect blocks, so an attempt was made to preserve the existing behaviour for `libbitcoinkernel`.",
-      "state": "open",
-      "user": "Eunovo",
-      "created_at": "2025-11-11T14:21:14Z",
-      "updated_at": "2026-03-10T11:07:04Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33854",
-      "labels": [
-        "Validation"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1375,
         "has_nack": false,
         "has_ack": false
       }
@@ -5462,30 +5605,6 @@
         "text_length": 1969,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3329031729,
-      "number": 34678,
-      "title": "net: drop connection on unknown socket family in AcceptConnection",
-      "body": "When `SetSockAddr()` fails in` AcceptConnection()`, the code logs a warning but continues processing the connection with a default empty CService address. This means ban checks, whitelist matching, and all downstream logic operate on an invalid address.\r\n\r\nReturn early on failure instead, consistent with other error paths in the same function.",
-      "state": "open",
-      "user": "chriszeng1010",
-      "created_at": "2026-02-26T04:52:29Z",
-      "updated_at": "2026-03-10T08:57:07Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34678",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 411,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -6352,28 +6471,6 @@
       }
     },
     {
-      "id": 2837615883,
-      "number": 33421,
-      "title": "node: add  `BlockTemplateCache`",
-      "body": "This PR implements the first step of #33758 by adding a cache layer for node block templates.\r\n\r\nThe cache stores newly created block templates along with their configuration options. When clients request a block template, they specify an optional template age limit in `MillisecondsDouble`:\r\n\r\n- If template age limit is `nullopt`, we create a new template and return it without adding it to the cache.\r\n- If a matching template (block template with identical block creation options) exists in the cache and hasn't exceeded the age limit, the cached version is returned.\r\n- If no matching template exists or the age limit has been exceeded, a new template is generated, cached, and returned. When evicting stale templates, we assume no duplicates exist since templates are evicted as soon as their age limit is reached or exceeded.\r\n\r\nThe cache maintains a configurable maximum size (default: 10 templates). When this limit is exceeded, the oldest template is evicted after each insertion.\r\n\r\n\r\nCache lookup requires an exact match on ALL `BlockAssembler::Options` fields. While some fields (e.g., `test_block_validity`, `print_modified_fee`, `coinbase_output_script`) could be ignored for cache reuse, they mainly differ in tests and benchmarks. We keep the logic simple and accept cache misses in those cases.\r\n\r\n\r\nThe cache enforces at most one template per set of options. When searching for a match in `getCachedTemplate()`, if a template with matching options is found but has exceeded the age limit, it's immediately evicted before returning `nullptr`. This ensures no duplicate options exist in the cache. A `SanityCheck()` method verifies this invariant in tests by checking all cached entries for duplicates.\r\n\r\n\r\nThe cache subscribes to the validation interface and clears itself when blocks are connected (to non-historical chainstate to avoid clearing during assumeutxo background validation) or disconnected from the active chain (during reorgs), preventing stale or invalid templates from being served.\r\n\r\n`GetBlockTemplate()` uses double-checked locking: it first checks the cache with only `m_mutex` held, then if there's a miss, acquires both `cs_main` and `m_mutex` to create the template. Before creating, it checks again since another thread might have added a template while locks were released. \r\n\r\nThis PR removes an unused `node/context.h` import from miner to prevent a circular dependency when exposing the block template cache to the node context.",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-09-17T18:47:09Z",
-      "updated_at": "2026-03-08T12:36:50Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33421",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2508,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 2971018954,
       "number": 33765,
       "title": "doc: update interface, --stdin flag, `signtx` (#31005)",
@@ -6398,30 +6495,6 @@
       }
     },
     {
-      "id": 3034182041,
-      "number": 33922,
-      "title": "mining: add getMemoryLoad() and track template non-mempool memory footprint",
-      "body": "Implements a way to track the memory footprint of all non-mempool transactions that are still being referenced by block templates, see discussion in  #33899. It does not impose a limit.\r\n\r\nIPC clients can query this footprint (total, across all clients) using the `getMemoryLoad()` IPC method. Its client-side usage is demonstrated here:\r\n- https://github.com/stratum-mining/sv2-tp/pull/63\r\n\r\nAdditionally, the functional test in `interface_ipc.py` is expanded to demonstrate how template memory management works: templates are not released until the client drops references to them, or calls the template destroy method, or disconnects. The destroy method is called automatically by clients using [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess), as [sv2-tp](https://github.com/stratum-mining/sv2-tp) does. In the Python tests it also happens when references are destroyed or go out of scope.\r\n\r\nThe PR starts with preparation refactor commits:\r\n\r\n1. Tweaks `interface_ipc.py` so `destroy()` calls happen in an order that's useful to later demonstrate memory management\r\n2. Change `std::unique_ptr<BlockTemplate> block_template` from a `static` defined in `rpc/mining.cpp` to `NodeContext`. This prevents a crash when we switch to a non-trivial destructor later (which uses `m_node`).\r\n\r\nThen the main commits:\r\n\r\n3. Add `template_tx_refs` to `NodeContext` to track how many templates contain any given transaction. This map is updated by the `BlockTemplate` constructor and destructor.\r\n4. Add `GetTemplateMemoryUsage()` which loops over this map and sums up the memory footprint for transactions outside the mempool\r\n5. Expose this information to IPC clients via `getMemoryLoad()` and add test coverage\r\n",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-11-21T15:34:14Z",
-      "updated_at": "2026-03-08T11:14:23Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33922",
-      "labels": [
-        "Mining"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1801,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3335956636,
       "number": 34692,
       "title": "Bump dbcache to 1 GiB",
@@ -6441,30 +6514,6 @@
         "text_length": 587,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3308270443,
-      "number": 34638,
-      "title": "guix: Update storage requirement for HOSTS and added warning for Guix overhead",
-      "body": "This is an alternative to #33889\r\n\r\nThe lasttime the storage requirements were updated is 4 years ago in #22075 and do not match the current needs of a Guix build. This PR updates the storage requirements to align with recent builds.\r\n\r\nThe current code is quite off for certain hosts (the total equals out overall), but the check also ignores the output directory which takes up an additional 5 GiB of disk space:\r\n\r\n<details>\r\n\r\nComparing real usage against the script's estimates:\r\n\r\n| Host                  | Real KiB  | Estimate KiB | Delta          |\r\n| --------------------- | --------- | ------------ | -------------- |\r\n| `aarch64-linux-gnu`   | 3,875,896 | 6,400,000    | **-2,524,104** |\r\n| `arm-linux-gnueabihf` | 2,983,008 | 6,400,000    | **-3,416,992** |\r\n| `riscv64-linux-gnu`   | 5,712,668 | 6,400,000    | -687,332       |\r\n| `x86_64-linux-gnu`    | 3,978,648 | 6,400,000    | **-2,421,352** |\r\n| `powerpc64-linux-gnu` | 4,026,948 | 6,400,000    | -2,373,052     |\r\n| `x86_64-w64-mingw32`  | 8,022,644 | 7,600,000    | +422,644       |\r\n| `x86_64-apple-darwin` | 2,714,848 | 440,000      | **+2,274,848** |\r\n| `arm64-apple-darwin`  | 2,659,824 | 440,000      | **+2,219,824** |\r\n| `output dir ` | 5,500,000 | 0 | **+5,500,000**|\r\n\r\n\r\n</details>\r\n\r\nThis PR makes the following changes: \r\n- Updates the required KiB per category to current needs + 10% margin\r\n- it adds an extra category for `riscv64` (was way off * category )\r\n- adds output directory storage requirements \r\n\r\nThis all totals to 42 GiB (using all hosts) :\r\n<details>\r\n\r\nOutput for #34550 on Guix 1.5.0 \r\n\r\n| Host                  |  Real KiB | Estimate      | Margin     |\r\n| --------------------- | ---------------- | ------------- | ---------- |\r\n| `aarch64-linux-gnu`   | ~3,880,000       | 4,400,000     | +13%       |\r\n| `arm-linux-gnueabihf` | ~3,041,000       | 4,400,000     | +45%       |\r\n| `powerpc64-linux-gnu` | ~4,089,000       | 4,400,000     | +8%        |\r\n| `x86_64-linux-gnu`    | ~3,985,000       | 4,400,000     | +10%       |\r\n| `riscv64-linux-gnu`   | ~5,767,000       | 6,300,000     | +9%        |\r\n| `x86_64-w64-mingw32`  | ~8,074,000       | 9,000,000     | +11%       |\r\n| `x86_64-apple-darwin` | ~2,726,000       | 3,000,000     | +10%       |\r\n| `arm64-apple-darwin`  | ~2,726,000       | 3,000,000     | +10%       |\r\n| **output**            | ~4,929,000 | 5,500,000 | +10% |\r\n\r\nOutput for #34627 on Guix 1.4.0 \r\n\r\n| Host                  |  Real KiB | Estimate      | Margin     |\r\n| --------------------- | ---------------- | ------------- | ---------- |\r\n| `aarch64-linux-gnu`   | ~3,934,232       | 4,400,000     | +12%       |\r\n| `arm-linux-gnueabihf` | ~3,040,552       | 4,400,000     | +45%       |\r\n| `powerpc64-linux-gnu` | ~4,084,480       | 4,400,000     | +8%        |\r\n| `x86_64-linux-gnu`    | ~4,036,900       | 4,400,000     | +9%       |\r\n| `riscv64-linux-gnu`   | ~5,764,512       | 6,300,000     | +9%        |\r\n| `x86_64-w64-mingw32`  | ~8,087,164       | 9,000,000     | +11%       |\r\n| `x86_64-apple-darwin` | ~2,762,992       | 3,000,000     | +9%       |\r\n| `arm64-apple-darwin`  | ~2,707,800       | 3,000,000     | +11%       |\r\n| **output**            | ~5,048,228 | 5,500,000 | +9% |\r\n\r\n</details>\r\n\r\nAdditionally, maybe more controversial (happy to drop), I've added a second check to warm users if they do not have enough free space to store the guix overhead (`/gnu` store) which is an additional 8,7 GiB.  This check only warns and does not stop the build. \r\n\r\n<details> <summary> New warning message:</summary>\r\n\r\n```terminal\r\nFound macOS SDK at '/root/SDK/Xcode-26.1.1-17B100-extracted-SDK-with-libcxx-head\r\ners', using...\r\n\r\nWARN: Available disk space (42 GiB) may be insufficient for the\r\n      estimated total of 51 GiB (build directories, output,\r\n      and Guix environment overhead).\r\n\r\nThe build will proceed, but may fail mid-way if disk space runs out.\r\n\r\nChecking that we can connect to the guix-daemon...\r\n```\r\n</details>\r\n\r\nNB.\r\nCould not find a good reason for the change  in disk usage, even older V29 build take up roughly the same size as recent builds.",
-      "state": "open",
-      "user": "janb84",
-      "created_at": "2026-02-20T15:00:28Z",
-      "updated_at": "2026-03-08T06:38:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34638",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 4198,
-        "has_nack": false,
-        "has_ack": false
       }
     }
   ],
@@ -7936,9 +7985,9 @@
     }
   ],
   "summary": {
-    "total_prs": 271,
+    "total_prs": 273,
     "total_issues": 28,
     "total_comments": 59,
-    "unique_participants": 86
+    "unique_participants": 87
   }
 }
