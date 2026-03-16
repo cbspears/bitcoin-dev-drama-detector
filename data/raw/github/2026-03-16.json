@@ -1,12 +1,423 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-03-16T01:54:11.453468+00:00",
+  "fetched_at": "2026-03-16T08:50:12.761852+00:00",
   "date_range": {
-    "since": "2026-03-09T01:54:11.453387+00:00",
-    "until": "2026-03-16T01:54:11.453387+00:00"
+    "since": "2026-03-09T08:50:12.761752+00:00",
+    "until": "2026-03-16T08:50:12.761752+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3237671040,
+      "number": 34486,
+      "title": "net: Reduce local network activity when networkactive=0",
+      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/34190\r\n\r\nWhen `networkactive=0` is set, NAT-PMP port mapping and Tor **control connections**\r\nstill run in the background, mapping ports and logging retry attempts despite\r\nthe node being \"inactive.\"\r\n\r\nThis wires both subsystems to `CConnman::SetNetworkActive` so they start and stop\r\nwith the network state:\r\n\r\n- mapport: EnableMapPort is injected as a callback via CConnman::Options.\r\n  SetNetworkActive and SetMapPortEnabled both gate on network state.\r\n\r\n- torcontrol: is injected similarly. The callback dispatches onto the tor event loop via \r\n  event_base_once to respect thread ownership. `EVLOOP_NO_EXIT_ON_EMPTY` is \r\n  used to keep the event loop alive without keepalive timers, so the controller starts disconnected and waits for CConnman::Start() to signal.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2026-02-02T17:46:47Z",
+      "updated_at": "2026-03-16T08:46:47Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34486",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 875,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3299949354,
+      "number": 34617,
+      "title": "fees: wallet: remove block policy fee estimator internals from wallet",
+      "body": "\r\nPart of #34075\r\n\r\n#### Motivation\r\nThe wallet currently knows the block policy estimator's internals from the response returned by `estimateSmartFee`.\r\n`estimateSmartFee` logging, which is supposed to be inside the method, is done in the wallet.\r\nAlso, the source of a wallet transaction fee is saved in the `CBlockPolicyEstimator::FeeReason` enum. This shows that there is tight coupling between the wallet and `CBlockPolicyEstimator`, which results in code that is a bit messy to extend and even read.\r\nIn #34075 the wallet is going to use a response returned via a fee rate estimator manager which does not return all those internals, hence motivating this refactor.\r\nThis PR refactors the interface between the wallet and the fee estimator to improve encapsulation and separate two distinct concerns: the source of a fee rate (where it came from) and the estimator's reason (why the algorithm chose it).\r\n\r\n#### Key Changes\r\n* Separate `FeeSource` from `FeeReason`:\r\n   Introduced a new `FeeSource` enum in `src/util/fees.h` to represent the high-level origin of a fee rate (e.g., `PAYTXFEE`, `FALLBACK`, `FEE_RATE_ESTIMATOR`). The existing `FeeReason` is now strictly scoped to internal `CBlockPolicyEstimator` details.\r\n* Encapsulate `estimateSmartFee` Logging:\r\n   Moved the fee calculation logging logic into `CBlockPolicyEstimator`. This removes the need for the wallet to manage a `FeeCalculation` object just to facilitate logging, especially when the caller passes `nullptr`.\r\n* Refactor `GetMinimumFeeRate`:\r\n   Updated `wallet::GetMinimumFeeRate` to return a `MinimumFeeRateResult` struct. This avoids the use of output parameters and provides a cleaner interface for retrieving the fee rate, source, and target.\r\n* Move `StringForFeeReason`:\r\n   Moved `StringForFeeReason` to `src/policy/fees/block_policy_estimator.cpp` to align with the location of the `FeeReason` enum. The function was also refactored to use a switch statement without a default case to ensure compile-time coverage of all reasons.\r\n*  Wallet RPC field deprecation :\r\n  deprecate the `fee_reason` field in wallet RPCs ( `send` and `sendmany`).  This field now correctly returns the fee source, but does not rename the field `fee_reason` to `fee_source`; instead it deprecates to maintain backward compatibility for some time before renaming the field in the future.\r\n* Additional Logging:\r\n   Added logging for transaction fee, size, and source in `CreateTransactionInternal` to improve debugging of fee selection.",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2026-02-18T18:45:18Z",
+      "updated_at": "2026-03-16T08:44:58Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34617",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 2572,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3133089501,
+      "number": 34162,
+      "title": "net: Avoid undershooting in GetAddressesUnsafe",
+      "body": "This is demonstrating an alternative approach to #33663. The author didn't seem to like by suggestion so I am putting it here to be considered by reviewers. I personally prefer this approach due to it's simplicity.\r\n\r\n`GetAddressesUnsafe` filters banned and discouraged addresses if those exist. If addresses are filtered the returned list of addresses can be shorter than originally requested because the list isn't backfilled with more valid addresses. These results end up in `GETADDR` responses as well as the `getnodeaddresses` RPC.\r\n\r\nFix this by requesting all available addresses and filter them, then only trim them to the requested `max_addresses` afterwards. Also adds a functional test which checks the new behavior via `getnodeaddresses` RPC.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-12-28T17:01:53Z",
+      "updated_at": "2026-03-16T08:44:28Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34162",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 802,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3102178109,
+      "number": 34075,
+      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
+      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nSee https://bitcoincorefeerate.com/stats for recent running stats that have almost identical data. \r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2025-12-15T11:53:35Z",
+      "updated_at": "2026-03-16T08:28:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
+      "labels": [
+        "TX fees and policy"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 1,
+        "text_length": 9030,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1389230610,
+      "number": 27865,
+      "title": "wallet: Track no-longer-spendable TXOs separately",
+      "body": "In #27286, the wallet keeps track of all of its transaction outputs, even if they are already spent or are otherwise unspendable. This TXO set is iterated for balance checking and coin selection preparation, which can still be slow for wallets that have had a lot of activity. This PR aims to improve the performance of such wallets by moving UTXOs that are definitely no longer spendable to a different map in the wallet so that far fewer TXOs need to be iterated for the aforementioned functions.\r\n\r\nUnspendable TXOs (not to be confused with Unspent TXOs) are those which have a spending transaction that has been confirmed, or are no longer valid due to reorgs. TXOs that are spent in unconfirmed transactions remain in the primary TXO set, and are filtered out of balance and coin selection as before.\r\n\r\nDepends on #27286",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2023-06-12T18:40:10Z",
+      "updated_at": "2026-03-16T08:02:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/27865",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 876,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2683353492,
+      "number": 33033,
+      "title": "wallet, sqlite: Encapsulate SQLite statements in a RAII class",
+      "body": "SQLite statements are C objects which can be long lived, so having them be initialized in a constructor, and cleanup everything in a destructor, makes the sqlite code cleaner and easier to read. This also lets us have the various functions needed to interact with sqlite statements be member functions.\r\n\r\nThis will be particularly useful in future work which makes use of more complicated SQL statements.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2025-07-21T22:43:08Z",
+      "updated_at": "2026-03-16T08:01:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33033",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 467,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3400490821,
+      "number": 34825,
+      "title": "depends: capnp 1.4.0",
+      "body": "Update capnp in depends to [`1.4.0`](https://github.com/capnproto/capnproto/releases/tag/v1.4.0).\r\n\r\nIt contains a number of bugfixes, and fixes for 2 CVEs, of which I think only `Fix benign(?) buffer overrun in async readMessage()` is relevant to us, and it seems to be considered benign:\r\n> This is technically undefined behavior (a buffer overrun), but we suspect that it is benign with all known memory allocators. In C++, a zero-sized allocation (made with `operator new(0)`, as is the case here) is required to return a unique pointer, different from any other such allocation. Because of this, all common memory allocators round up a zero-byte allocation to a word-sized allocation (32-bit or 64-bit, depending on the architecture). The overrun written to this allocation was exactly one pointer in size, so always fits into the actual allocation space.\r\n\r\n> Nevertheless, the code is in fact relying on undefined behavior, and it is theoretically possible that some memory allocator implements zero-sized allocations in a way that would make this overrun dangerous.\r\n\r\nSee https://github.com/capnproto/capnproto/compare/release-1.3.0...release-1.4.0 for all changes since 1.3.0.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-03-15T04:20:06Z",
+      "updated_at": "2026-03-16T07:58:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34825",
+      "labels": [
+        "Build system",
+        "DrahtBot Guix build requested"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 0,
+        "text_length": 1207,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 1685623460,
+      "number": 29278,
+      "title": "Wallet:  Add `maxfeerate` wallet startup option",
+      "body": "This PR fixes #29220\r\n\r\n- The PR adds a wallet `-maxfeerate` startup option, as the upper limit of wallet transactions fee rate.\r\n\r\n- This fixes the ambiguity of using `maxtxfee` value to check the upper limit of transactions fee rate.\r\n\r\n-  Wallet will not create a transaction with fee rate above `maxfeerate` value. And you can not set wallet fee rate with `settxfee` RPC above `maxfeerate` value.\r\n\r\n- This PR adds a functional test that ensure the behavior is enforced.\r\n \r\n\r\n\r\n",
+      "state": "open",
+      "user": "ismaelsadeeq",
+      "created_at": "2024-01-18T22:23:49Z",
+      "updated_at": "2026-03-16T07:55:50Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/29278",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 531,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3383557414,
+      "number": 34799,
+      "title": "rpc: Run type check on decodepsbt result",
+      "body": "For RPCResults, the type may be ELISION, which is confusing and brittle:\r\n    \r\n* The elision should only affect the help output, not the type.\r\n* The type should be the real type, so that type checks can be run on it.\r\n    \r\nFix this issue by introducing a new print_elision option and using it in `decodepsbt`.\r\n    \r\nThis change will ensure that `RPCResult::MatchesType` is properly run.\r\n\r\nCan be tested by introducing a bug:\r\n\r\n```diff\r\ndiff --git a/src/core_io.cpp b/src/core_io.cpp\r\nindex 7492e9ca50..4927b70c8e 100644\r\n--- a/src/core_io.cpp\r\n+++ b/src/core_io.cpp\r\n@@ -436,2 +436,3 @@ void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry\r\n     entry.pushKV(\"version\", tx.version);\r\n+    entry.pushKV(\"bug\", \"error!\");\r\n     entry.pushKV(\"size\", tx.ComputeTotalSize());\r\n```\r\nAnd then running (in a debug build) `decodepsbt cHNidP8BAAoCAAAAAAAAAAAAAA==`\r\n\r\nBefore, on master: passes\r\nNow, on this pull: Properly detects the bug",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-03-11T11:13:25Z",
+      "updated_at": "2026-03-16T07:42:33Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34799",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1003,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2976587253,
+      "number": 33775,
+      "title": "guix: use GCC 14.3.0 over 13.3.0",
+      "body": "Switching to using GCC 14.x for release builds has come up multiple times recently. It will eventually be needed for #25573, and could also be useful for #30210.",
+      "state": "closed",
+      "user": "fanquake",
+      "created_at": "2025-11-04T13:12:58Z",
+      "updated_at": "2026-03-16T07:37:45Z",
+      "merged_at": "2026-01-13T23:34:03Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33775",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 194,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3268261877,
+      "number": 34550,
+      "title": "guix: update time-machine to 576eb72293d0c58bde6fd419916a25382a49159e",
+      "body": "Update the Guix time-machine to [576eb72293d0c58bde6fd419916a25382a49159e](https://codeberg.org/guix/guix/commit/576eb72293d0c58bde6fd419916a25382a49159e).\r\n\r\nPackage updates:\r\nbinutils 2.41 -> 2.44\r\ncmake-minimal 3.24.2 -> 3.31.10\r\ndiffutils 3.10 -> 3.12\r\nfile 5.45 -> 5.46\r\ngit-minimal 2.46.0 -> 2.52.0\r\n(base) glibc 2.39 -> 2.41\r\ngzip 1.13 -> 1.14\r\nlinux-headers 6.1.119 -> 6.1.164\r\nLLVM/Clang 19.1.4 -> 19.1.7\r\nmingw-w64 12.0.0 -> 13.0.0\r\nnsis 3.10 -> 3.11\r\npython-minimal 3.10 -> 3.11\r\n\r\nCMake 4.x becomes available.\r\nClang/LLVM 20 & 21 become available.\r\n\r\nSwitch to upstream `osslsigncode` (2.13, `python-lief` (0.17.5) and `python-oscrypto` (1.3.0) packages.\r\n\r\nUpdate glibc to the latest commit on the `2.31` branch.\r\n\r\nCould be used for #32764.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-02-10T17:21:45Z",
+      "updated_at": "2026-03-16T07:36:51Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34550",
+      "labels": [
+        "Build system",
+        "DrahtBot Guix build requested"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 824,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3402827901,
+      "number": 34829,
+      "title": "rpc: add wtxid lookup support to getrawtransaction",
+      "body": "`getrawtransaction()` now accepts a wtxid in addition to a txid. If the initial txid lookup fails, the hash is retried as a wtxid against the mempool. Wtxid lookup is mempool-only since the txindex indexes by txid.\r\n\r\nCloses #34013\r\n",
+      "state": "open",
+      "user": "chriszeng1010",
+      "created_at": "2026-03-16T06:43:10Z",
+      "updated_at": "2026-03-16T07:20:01Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34829",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 284,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3266545660,
+      "number": 34547,
+      "title": "lint: modernise lint tooling",
+      "body": "Modernise our lint tooling by:\r\n\r\n\\- Replacing pyenv + pip with [uv](https://docs.astral.sh/uv/) for better Python environment and dependency management\r\n\\- Replacing mypy with https://github.com/astral-sh/ty\r\n\\- Move uv ruff and ty to install via `COPY --from` multi-stage Docker image imports\r\n\\- Moving ruff lint rules from hardcoded Rust array (in lint_py.rs) into a top-level ruff.toml, and add ty.toml for the type checker\r\n\\- Extracting all remaining pip dependencies into dedicated ci/lint/requirements.txt\r\n\r\nExtra rationale:\r\n\r\n`COPY --from` pulls pre-built binaries from upstream images instead of compiling/downloading at runtime. Containerfile layer optimisations reduce rebuild frequency further.\r\n\r\n`ty` is significantly faster/more modern/maintained than `mypy`, and configured declaratively.\r\n\r\nAdding root-level `[ty|ruff].toml` config files means contributors can easily run `ty check` or `ruff check` locally without running the full linter, along with being accessible to other tooling (similarly for requriements.txt).\r\n\r\nPinning tool versions in the dockerfile makes it more excplicit and easier to find.\r\n\r\nThe tradeoff we make here is that there is no longer a bare install script to install tooling on a local machine. However I think this is OK, as it currently only works for `apt`-based OSes anyway, and I don't think running the linter outside of the container is such a valuable use-case as it is with some of the other CI jobs.\r\n\r\nFurther work can drop individual rules from `ty.toml` fixing up the infringing code as necessary.\r\n\r\nI can split this up if wanted, but IMO it makes sense to do it altogether.",
+      "state": "open",
+      "user": "willcl-ark",
+      "created_at": "2026-02-10T10:25:27Z",
+      "updated_at": "2026-03-16T07:10:23Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34547",
+      "labels": [
+        "Tests",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1667,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3365398031,
+      "number": 34764,
+      "title": "rpc: replace ELISION references with explicit result fields",
+      "body": "Seeking concept ACK. Partially addresses #29912. Motivated by #34683, which exports OpenRPC from existing `RPCHelpMan` metadata. [Sample OpenRPC](https://gist.github.com/natobritto/8c4a1da04968d2325082ac4bca7d2408).\r\n\r\nSome RPC help definitions currently rely on `RPCResult::Type::ELISION` entries whose structure is only described in prose. This is concise for human-readable help, but it prevents tools from deriving complete machine-readable result schemas from the metadata.\r\n\r\nThis PR replaces all non-recursive ELISION-based reuses with shared structured definitions, so the result layout is represented directly in `RPCHelpMan` metadata instead of only in text.\r\n\r\nAffected RPCs:\r\n- `decodepsbt`\r\n- `getrawtransaction`\r\n- `getblock`\r\n- `listsinceblock`\r\n\r\nThe patch also replaces `DecodeTxDoc()` with `TxDoc()` plus a `TxDocOptions` struct, so decoded transaction layouts can be reused without positional booleans and selectively extended with `prevout`, `fee`, and `hex` fields.\r\n\r\nAs a consequence, `bitcoin-cli` output for affected RPCs becomes more verbose, since prose summaries like \"Same output as verbosity = 1\" are replaced by the full field definitions. The actual RPC return values are unchanged. I opened this as a draft because I'd like to discuss whether this tradeoff is acceptable, or whether the help renderer should collapse some sub-structures via manual configuration back into short summaries while keeping the underlying metadata explicit.\r\n\r\nThis PR doesn't cover `getaddressinfo.embedded`, which is recursive — runtime output can contain nested embedded objects, and `RPCResult` has no way to express that today. Happy to discuss approaches here if anyone has thoughts.\r\n\r\nChanges:\r\n- replace `DecodeTxDoc()` with `TxDoc()` and `TxDocOptions`\r\n- replace ELISION-based reuse in `decodepsbt`, `getrawtransaction`, `getblock`, and `listsinceblock`\r\n- factor shared result layouts into `TxDoc()`, `GetBlockFields()`, and `ListSinceBlockTxFields()`\r\n- mark `getblock` transaction `fee` documentation optional where it is conditionally present",
+      "state": "open",
+      "user": "satsfy",
+      "created_at": "2026-03-06T20:18:42Z",
+      "updated_at": "2026-03-16T06:55:46Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34764",
+      "labels": [
+        "RPC/REST/ZMQ",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 2,
+        "text_length": 2128,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3389342528,
+      "number": 34816,
+      "title": "test: Remove vulture from ci, Remove some --min-confidence=60 unused code",
+      "body": "Currently, `vulture` is run with `--min-confidence=100`, which reduces its checks to dead code after control statements, which is nice, but not really a common nor severe issue. See the discussion in https://github.com/bitcoin/bitcoin/issues/34810#issuecomment-4045927137 and commit 5c005363a880c136cc44ff2456a402e398fcbf44, which had to remove dead code manually.\r\n\r\nReducing the confidence has shown to be too brittle/tedious in the past, so remove the tool for now from CI.\r\n\r\nOf course, removing this from CI does not prevent anyone from running it locally and removing dead code.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/34810",
+      "state": "closed",
+      "user": "maflcko",
+      "created_at": "2026-03-12T12:34:55Z",
+      "updated_at": "2026-03-16T06:42:27Z",
+      "merged_at": "2026-03-16T04:46:57Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34816",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 715,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3196609350,
+      "number": 34374,
+      "title": "kernel: use structured logging and simplify logging interface",
+      "body": "tl;dr: kernel logging is cumbersome. This PR enables structured logging and a much simplified kernel logging interface. Closes #34062.\r\n\r\n## Motivation\r\n\r\nThe `bitcoinkernel` library (#27587) [exposes](https://github.com/bitcoin/bitcoin/blob/b26762bdcb941096ccc6f53c3fb5a7786ad735e7/src/kernel/bitcoinkernel.h#L698-L778) functionality to interface with the kernel logging. This includes registering callbacks for log statements, level/category filtering, string formatting options, and more.\r\n\r\nKernel logging has a few problems:\r\n- [callbacks](https://github.com/bitcoin/bitcoin/blob/b26762bdcb941096ccc6f53c3fb5a7786ad735e7/src/kernel/bitcoinkernel.h#L304) operate on formatted strings, so users need to parse the string to get the timestamp, category, level, ... based on which options are set. This is cumbersome, brittle, and inefficient.\r\n- the [filtering interface](https://github.com/bitcoin/bitcoin/blob/b26762bdcb941096ccc6f53c3fb5a7786ad735e7/src/kernel/bitcoinkernel.h#L737) is not really intuitive, requiring users to call combinations of `btck_logging_set_level_category` and `btck_logging_enable_category` when they want to produce `debug` or `trace` logs. The level/category system makes sense for node, because it directly controls what gets written to disk and stdout, and there are quite a lot more categories producing logs. Kernel doesn't really need this - users control what happens to the logs, and can do any filtering/manipulation in the callback they provide.\r\n- the node logging infrastructure has quite a bit more functionality than is necessary for a library, including ratelimiting, log formatting, outputting, buffering, ... This introduces unnecessary code and interface complexity.\r\n\r\n## Approach\r\n\r\nMost of the logic in `logging.h` is not necessary for `bitcoinkernel`, so we first separate it into `util/log.h` and `logging.h` (`common`), then upgrade the `bitcoinkernel` logging interface, and finally remove the `logging.cpp` dependency from kernel entirely.\r\n\r\n1. **Separate log generation**: Add a minimal `util::log::Dispatcher` that is used to generate logs, and forwards structured log entries to registered callbacks. No formatting, rate-limiting, or output handling - that's the consumer's responsibility. Dispatcher can be configured with a `filter` predicate (e.g. `WillLogCategoryLevel()` for `node`, or a simpler levels-based filter for `bitcoinkernel`) to avoid unnecessary string formatting and other overhead.\r\n2. **Register `BCLog::Logger` on Dispatcher**: Register a callback on the global Dispatcher to receive entries and handle node-specific concerns (formatting, rate-limiting, file output) without changing most of its logic.\r\n3. **Move logging macros to `util/log.h`**: Allows the entire codebase (including kernel code) to use the same macros without depending on `logging.h`.\r\n4. **Update bitcoinkernel C API**: Replace the string-based callback with `btck_LogEntry` containing full metadata. Remove `btck_LoggingOptions` and category enable/disable functions. Add `btck_logging_set_min_level()` for early filtering.\r\n5. Move **`logging.cpp` to `common`**: remove it as a kernel dependency entirely.\r\n\r\n## Appendix\r\n\r\n### `bitcoinkernel` C logging interface\r\n\r\n```c\r\nstruct btck_LogEntry {\r\n    const char* message;       //!< Log message\r\n    size_t message_len;        //!< Log message length\r\n    const char* file_name;     //!< Source file name\r\n    size_t file_name_len;      //!< Source file name length\r\n    const char* function_name; //!< Source function name\r\n    size_t function_name_len;  //!< Source function name length\r\n    const char* thread_name;   //!< Thread name\r\n    size_t thread_name_len;    //!< Thread name length\r\n    int64_t timestamp_ns;      //!< Timestamp in nanoseconds since epoch\r\n    uint32_t line;             //!< Source line number\r\n    btck_LogLevel level;       //!< Log level\r\n    btck_LogCategory category; //!< Log category\r\n};\r\n\r\ntypedef void (*btck_LogCallback)(void* user_data, const btck_LogEntry* entry);\r\n\r\nBITCOINKERNEL_API void btck_logging_set_min_level(btck_LogLevel level);\r\n\r\nBITCOINKERNEL_API btck_LoggingConnection* BITCOINKERNEL_WARN_UNUSED_RESULT btck_logging_connection_create(\r\n    btck_LogCallback log_callback,\r\n    void* user_data,\r\n    btck_DestroyCallback user_data_destroy_callback) BITCOINKERNEL_ARG_NONNULL(1);\r\n\r\nBITCOINKERNEL_API void btck_logging_connection_destroy(btck_LoggingConnection* logging_connection);\r\n```\r\n\r\n",
+      "state": "open",
+      "user": "stickies-v",
+      "created_at": "2026-01-21T19:56:44Z",
+      "updated_at": "2026-03-16T05:47:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34374",
+      "labels": [
+        "Validation",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 2,
+        "text_length": 4513,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3398516421,
+      "number": 34824,
+      "title": "net: refactor: replace Peer::TxRelay RecursiveMutex instances with Mutex",
+      "body": "Part of #19303.\r\n\r\nReplace `m_bloom_filter_mutex` and `m_tx_inventory_mutex` in `Peer::TxRelay` from `RecursiveMutex` to `Mutex`. Neither mutex is acquired recursively anywhere in the codebase - all 18 lock sites are first-time acquisitions within their call contexts.\r\n\r\nIn `SendMessages()`, both mutexes are used together: `m_tx_inventory_mutex` is held as the outer lock while `m_bloom_filter_mutex` is locked separately for three short sections. These are two different mutexes, not recursive acquisition of the same one.\r\n\r\nNegative capability annotations are not added because both mutexes live inside `Peer::TxRelay`, a nested struct accessed via pointer. Clang Thread Safety Analysis cannot reference them from `PeerManagerImpl` method signatures.",
+      "state": "open",
+      "user": "w0xlt",
+      "created_at": "2026-03-14T08:07:38Z",
+      "updated_at": "2026-03-16T05:24:54Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34824",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 828,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3022564635,
       "number": 33904,
@@ -15,7 +426,7 @@
       "state": "open",
       "user": "kevkevinpal",
       "created_at": "2025-11-18T16:37:00Z",
-      "updated_at": "2026-03-16T00:25:28Z",
+      "updated_at": "2026-03-16T07:21:41Z",
       "merged_at": null,
       "comments": 0,
       "review_comments": 0,
@@ -177,30 +588,6 @@
       }
     },
     {
-      "id": 3383557414,
-      "number": 34799,
-      "title": "rpc: Run type check on decodepsbt result",
-      "body": "For RPCResults, the type may be ELISION, which is confusing and brittle:\r\n    \r\n* The elision should only affect the help output, not the type.\r\n* The type should be the real type, so that type checks can be run on it.\r\n    \r\nFix this issue by introducing a new print_elision option and using it in `decodepsbt`.\r\n    \r\nThis change will ensure that `RPCResult::MatchesType` is properly run.\r\n\r\nCan be tested by introducing a bug:\r\n\r\n```diff\r\ndiff --git a/src/core_io.cpp b/src/core_io.cpp\r\nindex 7492e9ca50..4927b70c8e 100644\r\n--- a/src/core_io.cpp\r\n+++ b/src/core_io.cpp\r\n@@ -436,2 +436,3 @@ void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry\r\n     entry.pushKV(\"version\", tx.version);\r\n+    entry.pushKV(\"bug\", \"error!\");\r\n     entry.pushKV(\"size\", tx.ComputeTotalSize());\r\n```\r\nAnd then running (in a debug build) `decodepsbt cHNidP8BAAoCAAAAAAAAAAAAAA==`\r\n\r\nBefore, on master: passes\r\nNow, on this pull: Properly detects the bug",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-03-11T11:13:25Z",
-      "updated_at": "2026-03-15T22:41:41Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34799",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1003,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 1230883419,
       "number": 27052,
       "title": "test: rpc: add last block announcement time to getpeerinfo result",
@@ -298,30 +685,6 @@
       }
     },
     {
-      "id": 1389230610,
-      "number": 27865,
-      "title": "wallet: Track no-longer-spendable TXOs separately",
-      "body": "In #27286, the wallet keeps track of all of its transaction outputs, even if they are already spent or are otherwise unspendable. This TXO set is iterated for balance checking and coin selection preparation, which can still be slow for wallets that have had a lot of activity. This PR aims to improve the performance of such wallets by moving UTXOs that are definitely no longer spendable to a different map in the wallet so that far fewer TXOs need to be iterated for the aforementioned functions.\r\n\r\nUnspendable TXOs (not to be confused with Unspent TXOs) are those which have a spending transaction that has been confirmed, or are no longer valid due to reorgs. TXOs that are spent in unconfirmed transactions remain in the primary TXO set, and are filtered out of balance and coin selection as before.\r\n\r\nDepends on #27286",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2023-06-12T18:40:10Z",
-      "updated_at": "2026-03-15T22:06:26Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/27865",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 876,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 1487286408,
       "number": 28333,
       "title": "wallet: Construct ScriptPubKeyMans with all data rather than loaded progressively",
@@ -367,30 +730,6 @@
         "text_length": 906,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3237671040,
-      "number": 34486,
-      "title": "net: Reduce local network activity when networkactive=0",
-      "body": "Fixes https://github.com/bitcoin/bitcoin/issues/34190\r\n\r\nWhen `networkactive=0` is set, NAT-PMP port mapping and Tor **control connections**\r\nstill run in the background, mapping ports and logging retry attempts despite\r\nthe node being \"inactive.\"\r\n\r\nThis wires both subsystems to `CConnman::SetNetworkActive` so they start and stop\r\nwith the network state:\r\n\r\n- mapport: EnableMapPort is injected as a callback via CConnman::Options.\r\n  SetNetworkActive and SetMapPortEnabled both gate on network state.\r\n\r\n- torcontrol: is injected similarly. The callback dispatches onto the tor event loop via \r\n  event_base_once to respect thread ownership. `EVLOOP_NO_EXIT_ON_EMPTY` is \r\n  used to keep the event loop alive without keepalive timers, so the controller starts disconnected and waits for CConnman::Start() to signal.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2026-02-02T17:46:47Z",
-      "updated_at": "2026-03-15T21:03:06Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34486",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 875,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -459,54 +798,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1138,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3266545660,
-      "number": 34547,
-      "title": "lint: modernise lint tooling",
-      "body": "Modernise our lint tooling by:\r\n\r\n\\- Replacing pyenv + pip with [uv](https://docs.astral.sh/uv/) for better Python environment and dependency management\r\n\\- Replacing mypy with https://github.com/astral-sh/ty\r\n\\- Move uv ruff and ty to install via `COPY --from` multi-stage Docker image imports\r\n\\- Moving ruff lint rules from hardcoded Rust array (in lint_py.rs) into a top-level ruff.toml, and add ty.toml for the type checker\r\n\\- Extracting all remaining pip dependencies into dedicated ci/lint/requirements.txt\r\n\r\nExtra rationale:\r\n\r\n`COPY --from` pulls pre-built binaries from upstream images instead of compiling/downloading at runtime. Containerfile layer optimisations reduce rebuild frequency further.\r\n\r\n`ty` is significantly faster/more modern/maintained than `mypy`, and configured declaratively.\r\n\r\nAdding root-level `[ty|ruff].toml` config files means contributors can easily run `ty check` or `ruff check` locally without running the full linter, along with being accessible to other tooling (similarly for requriements.txt).\r\n\r\nPinning tool versions in the dockerfile makes it more excplicit and easier to find.\r\n\r\nThe tradeoff we make here is that there is no longer a bare install script to install tooling on a local machine. However I think this is OK, as it currently only works for `apt`-based OSes anyway, and I don't think running the linter outside of the container is such a valuable use-case as it is with some of the other CI jobs.\r\n\r\nFurther work can drop individual rules from `ty.toml` fixing up the infringing code as necessary.\r\n\r\nI can split this up if wanted, but IMO it makes sense to do it altogether.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2026-02-10T10:25:27Z",
-      "updated_at": "2026-03-15T20:21:57Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34547",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1667,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3398516421,
-      "number": 34824,
-      "title": "net: refactor: replace Peer::TxRelay RecursiveMutex instances with Mutex",
-      "body": "Part of #19303.\r\n\r\nReplace `m_bloom_filter_mutex` and `m_tx_inventory_mutex` in `Peer::TxRelay` from `RecursiveMutex` to `Mutex`. Neither mutex is acquired recursively anywhere in the codebase - all 18 lock sites are first-time acquisitions within their call contexts.\r\n\r\nIn `SendMessages()`, both mutexes are used together: `m_tx_inventory_mutex` is held as the outer lock while `m_bloom_filter_mutex` is locked separately for three short sections. These are two different mutexes, not recursive acquisition of the same one.\r\n\r\nNegative capability annotations are not added because both mutexes live inside `Peer::TxRelay`, a nested struct accessed via pointer. Clang Thread Safety Analysis cannot reference them from `PeerManagerImpl` method signatures.",
-      "state": "open",
-      "user": "w0xlt",
-      "created_at": "2026-03-14T08:07:38Z",
-      "updated_at": "2026-03-15T19:39:33Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34824",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 828,
         "has_nack": false,
         "has_ack": false
       }
@@ -722,30 +1013,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 631,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2976587253,
-      "number": 33775,
-      "title": "guix: use GCC 14.3.0 over 13.3.0",
-      "body": "Switching to using GCC 14.x for release builds has come up multiple times recently. It will eventually be needed for #25573, and could also be useful for #30210.",
-      "state": "closed",
-      "user": "fanquake",
-      "created_at": "2025-11-04T13:12:58Z",
-      "updated_at": "2026-03-15T15:54:52Z",
-      "merged_at": "2026-01-13T23:34:03Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33775",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 194,
         "has_nack": false,
         "has_ack": false
       }
@@ -983,53 +1250,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 579,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3400490821,
-      "number": 34825,
-      "title": "depends: capnp 1.4.0",
-      "body": "Update capnp in depends to [`1.4.0`](https://github.com/capnproto/capnproto/releases/tag/v1.4.0).\r\n\r\nIt contains a number of bugfixes, and fixes for 2 CVEs, of which I think only `Fix benign(?) buffer overrun in async readMessage()` is relevant to us, and it seems to be considered benign:\r\n> This is technically undefined behavior (a buffer overrun), but we suspect that it is benign with all known memory allocators. In C++, a zero-sized allocation (made with `operator new(0)`, as is the case here) is required to return a unique pointer, different from any other such allocation. Because of this, all common memory allocators round up a zero-byte allocation to a word-sized allocation (32-bit or 64-bit, depending on the architecture). The overrun written to this allocation was exactly one pointer in size, so always fits into the actual allocation space.\r\n\r\n> Nevertheless, the code is in fact relying on undefined behavior, and it is theoretically possible that some memory allocator implements zero-sized allocations in a way that would make this overrun dangerous.\r\n\r\nSee https://github.com/capnproto/capnproto/compare/release-1.3.0...release-1.4.0 for all changes since 1.3.0.",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2026-03-15T04:20:06Z",
-      "updated_at": "2026-03-15T11:59:23Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34825",
-      "labels": [
-        "Build system",
-        "DrahtBot Guix build requested"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 0,
-        "text_length": 1207,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 2683353492,
-      "number": 33033,
-      "title": "wallet, sqlite: Encapsulate SQLite statements in a RAII class",
-      "body": "SQLite statements are C objects which can be long lived, so having them be initialized in a constructor, and cleanup everything in a destructor, makes the sqlite code cleaner and easier to read. This also lets us have the various functions needed to interact with sqlite statements be member functions.\r\n\r\nThis will be particularly useful in future work which makes use of more complicated SQL statements.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2025-07-21T22:43:08Z",
-      "updated_at": "2026-03-15T11:59:12Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33033",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 467,
         "has_nack": false,
         "has_ack": false
       }
@@ -1703,30 +1923,6 @@
       }
     },
     {
-      "id": 3102178109,
-      "number": 34075,
-      "title": "fees: Introduce Mempool Based Fee Estimation to reduce overestimation",
-      "body": "This PR is another attempt to fix #27995 using a better approach.\r\n\r\nFor background and motivation, see #27995 and the discussion in the Delving Bitcoin post [Mempool Based Fee Estimation on Bitcoin Core](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703)\r\nThis PR is currently limited to using the mempool only to lower what is recommended by the Block Policy Estimator.\r\nAccurate and safe fee estimation using the mempool is challenging. There are open questions about how to prevent mempool games that are theoretically possible for miners [(a variant of the Finney attack)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/6)\r\n\r\nThis is one of the reasons I opted to use the mempool only to lower the Block Policy Estimator, which itself is not gameable, and therefore this mechanism is not susceptible to this attack.\r\n\r\nThe underlying assumption here is that, with the current tools and work done to make RBF and CPFP feasible and guarantee (TRUC transaction relay, ephemeral anchors, cluster size 2 package rbf), it is safer to underestimate rather than overestimate.\r\nWe now assume it is relatively easy to fee-bump later if a transaction does not confirm, whereas once a fee is overestimated there is no way to recover from that.\r\n\r\nAnother open question when using the mempool for fee estimation is how to account for incoming transaction inflow.\r\n[Bitcoin Augur](https://github.com/block/bitcoin-augur) does this by using past inflow plus a constant expected inflow to predict future inflow. I find this unconvincing for fee estimation and potentially prone to more overestimation, as past conditions are not always representative of the future. See my [review of the Augur fee rate estimator and open questions](https://github.com/block/bitcoin-augur/issues/3).\r\n\r\nThis PR uses a much simpler approach based on current user behavior, similar to the widely used method employed by mempool.space: looking at the top block of the mempool and selecting a percentile feerate depending on whether the user is economical or conservative.\r\n\r\nEmpirical data from both myself and Clara Shikhelman shows that the 75th percentile feerate for economical users and the 50th percentile feerate for conservative users provide positive confirmation guarantees, hence this is what is used in this PR.\r\n\r\nParallel research by René Pickhardt and his student suggests that using the [average fee per byte of the block template performs well](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/12).\r\n\r\nAll of these are constants that can be adjusted, there is parallel work exploring these constants and running benchmarks across fee estimators to find a sweet spot.\r\n\r\nSee also work in LND, the [LND Budget Sweeper](https://delvingbitcoin.org/t/lnds-deadline-aware-budget-sweeper/1512), which applies this idea successfully. Their approach is to estimate fees initially with bitcoind, then increment gradually as the confirmation deadline approaches, using a fixed fee budget.\r\n\r\nHistorical data indicates that by doing only the approach in this PR, we are able to [reduce overestimation quite significantly (~29%)](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8).\r\n\r\nThis is particularly useful in scenarios where the Block Policy Estimator recommends a high feerate while the mempool is empty.\r\n<img width=\"1800\" height=\"1090\" alt=\"56f3ba26c0184521c42bb82ec9d8c9f2224d4f8e\" src=\"https://github.com/user-attachments/assets/c035c40c-8ece-42a7-b290-d29f1ac9bf4d\" />\r\n\r\nAs seen in the image above, there is only one remaining unfixed case: when there is a sudden inflow of transactions and the feerate rises, the Block Policy Estimator takes time to reflect this. In that case, users will continue to see a low feerate estimate until it slowly updates. From the historical data linked above, [this occurs about ~26% of the time](https://delvingbitcoin.org/t/mempool-based-fee-estimation-on-bitcoin-core/703/8)).\r\n\r\nOverall, we observe a **73% success rate with 0% overestimation, and 26% underestimation** with this approach.\r\n\r\nSee https://bitcoincorefeerate.com/stats for recent running stats that have almost identical data. \r\n\r\nThis PR also includes refactors that enable this work. Rather than splitting the PR and implementing changes incrementally, I opted for an end-to-end implementation:\r\n\r\n### 1. Refactors\r\n\r\n* Separation of feerate format from the fee estimate mode enumerator (separation of concerns, as they are semantically distinct)\r\n* Move logging after fee estimation estimateSmartFee from the wallet to the Block Policy Estimator internal method (also separation of concerns and avoiding leaking fee estimator internals). This change also comes with updating `createTransactionInternal` to log only the fee and its source (fee estimator, fallback fee, etc.), which is more appropriate.\r\n* Separate the fee estimate mode enum from the fee source enumerator (separation of concerns, as they are semantically distinct). This introduces a minor breaking change: the wallet RPCs now return fee *source* instead of fee *reason*, which is more accurate. Let me know if we prefer to keep the field name unchanged while returning the fee source.\r\n* Move the `StringForReason` enum from `common` to the Block Policy Estimator (also separation of concerns)\r\n* Various test file updates and renames for improved accuracy\r\n* Update Block Policy Estimator unit tests to be independent of the mempool and the validation interface\r\n\r\n### 2. Introduce Mempool-Based Fee Estimator and Fee Estimator Manager\r\n\r\n* Introduce a new abstract fee estimator base class that all fee estimators must implement\r\n\r\n* Introduce `FeeRateEstimateResult` as the response type, containing metadata and avoiding the use of out-parameters. This is easily extensible and makes future changes less invasive, as method signatures do not need to change.\r\n\r\n* Add `FeeEstimatorType` enum to identify different fee estimators\r\n\r\n* Make `CBlockPolicyEstimator` derive from the new fee estimator base class\r\n\r\n* Add `FeeRateEstimatorManager`, responsible for managing all fee estimators\r\n\r\n* Update the node context to store a `unique_ptr` to `FeeRateEstimatorManager` instead of `CBlockPolicyEstimator`\r\n\r\n* Update `CBlockPolicyEstimator` to no longer subscribe directly to the validation interface; instead, `FeeRateEstimatorManager` subscribes and forwards relevant notifications\r\n\r\n* Add a percentile calculation function that takes the chunk feerates of a block template and returns feerate percentiles; this can also be reused by the `getblockstats` RPC\r\n\r\n* Add a mempool fee estimator that generates a block template when called, calculates a percentile feerate, and returns the 75th percentile for economical mode or the 50th percentile for conservative mode\r\n\r\n* Add caching to the mempool estimator so that new estimates are generated only every 7 seconds, assuming enough [transactions have propagated](https://bitcoin.stackexchange.com/questions/125776/how-long-does-it-take-for-a-transaction-to-propagate-through-the-network/125777#125777) to make a meaningful difference.\r\n  This heuristic will likely be replaced by requesting block templates via the general-purpose block template cache proposed here: [https://github.com/bitcoin/bitcoin/issues/33389](https://github.com/bitcoin/bitcoin/issues/33389)\r\n\r\n* Update `MempoolTransactionRemovedForBlock` to return the actual block transactions as well\r\n\r\n* Track the weight of block transactions and evicted transactions after each block connection\r\n  This data is tracked for the last 6 mined blocks. A mempool feerate estimate is returned only when the average ratio of mempool transaction weight evicted due to `BLOCK` reasons to block transaction weight is greater than 75%. This heuristic provides rough confidence that the node’s mempool matches that of the majority of the hashrate. The 75% threshold is arbitrary and can be adjusted.\r\n\r\nThere is a caveat when transactions in the local mempool are consistently not mined by the network, as described in #27995 (e.g., due to filtering).\r\nAccounting for these transactions during fee estimation is not necessary, as they should be evicted from the mempool itself (see #33510). Handling this again within fee estimation would be redundant.\r\n\r\n* Persist statistics for the 6 most recent blocks to disk during periodic flushes and shutdown, so this data is available after restarts\r\n* Expose this data to users when running `estimatesmartfee` with verbosity > 2\r\n\r\n<details>\r\n<summary>see example output</summary>\r\n\r\n```\r\nbitcoin-cli estimatesmartfee 1 \"conservative\" 2\r\n```\r\n\r\n```\r\n{\r\n  \"feerate\": 0.00002133,\r\n  \"errors\": [],\r\n  \"blocks\": 2,\r\n  \"mempool_health_statistics\": [\r\n    {\r\n      \"block_height\": 927953,\r\n      \"block_weight\": 3991729,\r\n      \"mempool_txs_weight\": 3942409,\r\n      \"ratio\": 0.987644451815241\r\n    },\r\n    ...\r\n  ]\r\n}\r\n```\r\n\r\n</details>",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2025-12-15T11:53:35Z",
-      "updated_at": "2026-03-15T00:19:24Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34075",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 1,
-        "text_length": 9030,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3119599294,
       "number": 34124,
       "title": "validation: make `CCoinsView` a pure virtual interface",
@@ -2228,31 +2424,6 @@
       }
     },
     {
-      "id": 3268261877,
-      "number": 34550,
-      "title": "guix: update time-machine to 576eb72293d0c58bde6fd419916a25382a49159e",
-      "body": "Update the Guix time-machine to [576eb72293d0c58bde6fd419916a25382a49159e](https://codeberg.org/guix/guix/commit/576eb72293d0c58bde6fd419916a25382a49159e).\r\n\r\nPackage updates:\r\nbinutils 2.41 -> 2.44\r\ncmake-minimal 3.24.2 -> 3.31.10\r\ndiffutils 3.10 -> 3.12\r\nfile 5.45 -> 5.46\r\ngit-minimal 2.46.0 -> 2.52.0\r\n(base) glibc 2.39 -> 2.41\r\ngzip 1.13 -> 1.14\r\nlinux-headers 6.1.119 -> 6.1.164\r\nLLVM/Clang 19.1.4 -> 19.1.7\r\nmingw-w64 12.0.0 -> 13.0.0\r\nnsis 3.10 -> 3.11\r\npython-minimal 3.10 -> 3.11\r\n\r\nCMake 4.x becomes available.\r\nClang/LLVM 20 & 21 become available.\r\n\r\nSwitch to upstream `osslsigncode` (2.13, `python-lief` (0.17.5) and `python-oscrypto` (1.3.0) packages.\r\n\r\nUpdate glibc to the latest commit on the `2.31` branch.\r\n\r\nCould be used for #32764.",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2026-02-10T17:21:45Z",
-      "updated_at": "2026-03-14T12:17:32Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34550",
-      "labels": [
-        "Build system",
-        "DrahtBot Guix build requested"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 824,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3310263904,
       "number": 34643,
       "title": "[RFC] cluster_linearize: add O(N) fast path for chain-shaped clusters",
@@ -2297,54 +2468,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1248,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3299949354,
-      "number": 34617,
-      "title": "fees: wallet: remove block policy fee estimator internals from wallet",
-      "body": "\r\nPart of #34075\r\n\r\n#### Motivation\r\nThe wallet currently knows the block policy estimator's internals from the response returned by `estimateSmartFee`.\r\n`estimateSmartFee` logging, which is supposed to be inside the method, is done in the wallet.\r\nAlso, the source of a wallet transaction fee is saved in the `CBlockPolicyEstimator::FeeReason` enum. This shows that there is tight coupling between the wallet and `CBlockPolicyEstimator`, which results in code that is a bit messy to extend and even read.\r\nIn #34075 the wallet is going to use a response returned via a fee rate estimator manager which does not return all those internals, hence motivating this refactor.\r\nThis PR refactors the interface between the wallet and the fee estimator to improve encapsulation and separate two distinct concerns: the source of a fee rate (where it came from) and the estimator's reason (why the algorithm chose it).\r\n\r\n#### Key Changes\r\n* Separate `FeeSource` from `FeeReason`:\r\n   Introduced a new `FeeSource` enum in `src/util/fees.h` to represent the high-level origin of a fee rate (e.g., `PAYTXFEE`, `FALLBACK`, `FEE_RATE_ESTIMATOR`). The existing `FeeReason` is now strictly scoped to internal `CBlockPolicyEstimator` details.\r\n* Encapsulate `estimateSmartFee` Logging:\r\n   Moved the fee calculation logging logic into `CBlockPolicyEstimator`. This removes the need for the wallet to manage a `FeeCalculation` object just to facilitate logging, especially when the caller passes `nullptr`.\r\n* Refactor `GetMinimumFeeRate`:\r\n   Updated `wallet::GetMinimumFeeRate` to return a `MinimumFeeRateResult` struct. This avoids the use of output parameters and provides a cleaner interface for retrieving the fee rate, source, and target.\r\n* Move `StringForFeeReason`:\r\n   Moved `StringForFeeReason` to `src/policy/fees/block_policy_estimator.cpp` to align with the location of the `FeeReason` enum. The function was also refactored to use a switch statement without a default case to ensure compile-time coverage of all reasons.\r\n*  Wallet RPC field deprecation :\r\n  deprecate the `fee_reason` field in wallet RPCs ( `send` and `sendmany`).  This field now correctly returns the fee source, but does not rename the field `fee_reason` to `fee_source`; instead it deprecates to maintain backward compatibility for some time before renaming the field in the future.\r\n* Additional Logging:\r\n   Added logging for transaction fee, size, and source in `CreateTransactionInternal` to improve debugging of fee selection.",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2026-02-18T18:45:18Z",
-      "updated_at": "2026-03-14T10:46:39Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34617",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2572,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3389342528,
-      "number": 34816,
-      "title": "test: Remove vulture from ci, Remove some --min-confidence=60 unused code",
-      "body": "Currently, `vulture` is run with `--min-confidence=100`, which reduces its checks to dead code after control statements, which is nice, but not really a common nor severe issue. See the discussion in https://github.com/bitcoin/bitcoin/issues/34810#issuecomment-4045927137 and commit 5c005363a880c136cc44ff2456a402e398fcbf44, which had to remove dead code manually.\r\n\r\nReducing the confidence has shown to be too brittle/tedious in the past, so remove the tool for now from CI.\r\n\r\nOf course, removing this from CI does not prevent anyone from running it locally and removing dead code.\r\n\r\nFixes https://github.com/bitcoin/bitcoin/issues/34810",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-03-12T12:34:55Z",
-      "updated_at": "2026-03-14T10:30:24Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34816",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 715,
         "has_nack": false,
         "has_ack": false
       }
@@ -2741,31 +2864,6 @@
         "text_length": 284,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3365398031,
-      "number": 34764,
-      "title": "rpc: replace ELISION references with explicit result fields",
-      "body": "Seeking concept ACK. Partially addresses #29912. Motivated by #34683, which exports OpenRPC from existing `RPCHelpMan` metadata. [Sample OpenRPC](https://gist.github.com/natobritto/8c4a1da04968d2325082ac4bca7d2408).\r\n\r\nSome RPC help definitions currently rely on `RPCResult::Type::ELISION` entries whose structure is only described in prose. This is concise for human-readable help, but it prevents tools from deriving complete machine-readable result schemas from the metadata.\r\n\r\nThis PR replaces all non-recursive ELISION-based reuses with shared structured definitions, so the result layout is represented directly in `RPCHelpMan` metadata instead of only in text.\r\n\r\nAffected RPCs:\r\n- `decodepsbt`\r\n- `getrawtransaction`\r\n- `getblock`\r\n- `listsinceblock`\r\n\r\nThe patch also replaces `DecodeTxDoc()` with `TxDoc()` plus a `TxDocOptions` struct, so decoded transaction layouts can be reused without positional booleans and selectively extended with `prevout`, `fee`, and `hex` fields.\r\n\r\nAs a consequence, `bitcoin-cli` output for affected RPCs becomes more verbose, since prose summaries like \"Same output as verbosity = 1\" are replaced by the full field definitions. The actual RPC return values are unchanged. I opened this as a draft because I'd like to discuss whether this tradeoff is acceptable, or whether the help renderer should collapse some sub-structures via manual configuration back into short summaries while keeping the underlying metadata explicit.\r\n\r\nThis PR doesn't cover `getaddressinfo.embedded`, which is recursive — runtime output can contain nested embedded objects, and `RPCResult` has no way to express that today. Happy to discuss approaches here if anyone has thoughts.\r\n\r\nChanges:\r\n- replace `DecodeTxDoc()` with `TxDoc()` and `TxDocOptions`\r\n- replace ELISION-based reuse in `decodepsbt`, `getrawtransaction`, `getblock`, and `listsinceblock`\r\n- factor shared result layouts into `TxDoc()`, `GetBlockFields()`, and `ListSinceBlockTxFields()`\r\n- mark `getblock` transaction `fee` documentation optional where it is conditionally present",
-      "state": "open",
-      "user": "satsfy",
-      "created_at": "2026-03-06T20:18:42Z",
-      "updated_at": "2026-03-14T04:20:41Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34764",
-      "labels": [
-        "RPC/REST/ZMQ",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 2,
-        "text_length": 2128,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -6473,33 +6571,101 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
+    }
+  ],
+  "issues": [
     {
-      "id": 2598874149,
-      "number": 32764,
-      "title": "guix: Build for macOS using Clang only",
-      "body": "This PR makes macOS builds Clang-only by switching the build compiler in depends to `clang` + `libc++`.\r\n\r\nSee: https://github.com/bitcoin/bitcoin/issues/30206.",
+      "id": 2891729679,
+      "number": 31975,
+      "title": "RFC: when to drop testnet3",
+      "body": "Testnet3 was deprecated in v28 with the introduction of testnet4. #31974 implements its removal.\n\nDropping it in v30 seems reasonable to me, but let's discuss this here as to not clutter the implementation PR.\n\nNote that v29 (coming soon), which includes testnet3, will be supported for a while. See https://bitcoincore.org/en/lifecycle/\n\n@instagibbs wrote:\n\n> I've said it elsewhere, but I think it deserves a quite long deprecation cycle, along with some data gathering.\n> \n> We don't want services not upgrading for fixes because their test environment would break.\n> \n> e.g., what exchanges with testnet environments have adopted testnet4 (or signet), much less would be ok with removing testnet3?\n> \n> Does btcd support it? LND? Eclaire? CLN? etc.\n> \n> Lots of work to be done here imo.",
       "state": "open",
-      "user": "hebasto",
-      "created_at": "2025-06-17T13:39:41Z",
-      "updated_at": "2026-03-09T06:26:15Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32764",
+      "user": "Sjors",
+      "created_at": "2025-03-03T16:33:23Z",
+      "updated_at": "2026-03-16T08:28:31Z",
+      "closed_at": null,
+      "comments": 14,
+      "url": "https://github.com/bitcoin/bitcoin/issues/31975",
       "labels": [
-        "Build system"
+        "Tests",
+        "Needs Conceptual Review"
+      ],
+      "comment_data": [
+        {
+          "id": 4065851192,
+          "user": "jay-ginco",
+          "body": "When will testnet3 be drop completely, so we can plan migration to testnet4 accordingly?",
+          "created_at": "2026-03-16T08:14:03Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 88,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4065947698,
+          "user": "maflcko",
+          "body": "There are three outstanding pull requests from https://github.com/bitcoin/bitcoin/pulls?q=is%3Apr+is%3Aopen+testnet4+testnet3 :\n\n* https://github.com/bitcoin/bitcoin/pull/34420\n* https://github.com/bitcoin/bitcoin/pull/31974\n* https://github.com/bitcoin/bitcoin/pull/31117",
+          "created_at": "2026-03-16T08:28:31Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 272,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
       ],
       "drama_signals": {
         "drama_keywords": 0,
         "positive_keywords": 0,
-        "text_length": 199,
+        "text_length": 818,
         "has_nack": false,
         "has_ack": false
       }
-    }
-  ],
-  "issues": [
+    },
+    {
+      "id": 979547948,
+      "number": 22799,
+      "title": "RPC documentation cleanup ideas",
+      "body": "* Auto-formatting and sanity checking the RPCExamples with RPCMan\r\n* Checking passed-in json in self-check. Removing redundant checks (RPCTypeCheck)\r\n* De-duplicate default values (Started in #20017)\r\n* Compile the RPC documentation at compile-time to ensure it doesn't change at runtime and is completely static",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2021-08-25T19:21:38Z",
+      "updated_at": "2026-03-16T08:23:10Z",
+      "closed_at": null,
+      "comments": 4,
+      "url": "https://github.com/bitcoin/bitcoin/issues/22799",
+      "labels": [
+        "Feature",
+        "Docs",
+        "RPC/REST/ZMQ"
+      ],
+      "comment_data": [
+        {
+          "id": 4065909159,
+          "user": "maflcko",
+          "body": "> Auto-formatting and sanity checking the RPCExamples with RPCMan\n\nAn alternative idea would be to parse the example with UniValue, see https://github.com/bitcoin/bitcoin/pull/31275#issuecomment-3514327614\n\n> I'd like to include support for \"streaming\": Some RPC methods return big JSON, which is constructed in memory and then serialized as one big string.\n\nI think I want to keep this issue about documentation only.",
+          "created_at": "2026-03-16T08:23:10Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 418,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 344,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3698416643,
       "number": 34013,
@@ -6508,9 +6674,9 @@
       "state": "open",
       "user": "Sjors",
       "created_at": "2025-12-05T10:31:52Z",
-      "updated_at": "2026-03-16T01:17:42Z",
+      "updated_at": "2026-03-16T06:44:43Z",
       "closed_at": null,
-      "comments": 12,
+      "comments": 13,
       "url": "https://github.com/bitcoin/bitcoin/issues/34013",
       "labels": [
         "RPC/REST/ZMQ"
@@ -6528,12 +6694,206 @@
             "has_nack": false,
             "has_ack": false
           }
+        },
+        {
+          "id": 4065444909,
+          "user": "chriszeng1010",
+          "body": "Opened a PR to address this: #34829",
+          "created_at": "2026-03-16T06:44:24Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 35,
+            "has_nack": false,
+            "has_ack": false
+          }
         }
       ],
       "drama_signals": {
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1136,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 4061461212,
+      "number": 34810,
+      "title": "test/lint/lint-python-dead-code false positives",
+      "body": "Looks like recent versions of vulture are triggering false positives on `while True` loops with internal breaks.\n\nFailure: https://github.com/bitcoin/bitcoin/actions/runs/22981056848/job/66720754466?pr=34628\n\nUpstream issue: https://github.com/jendrikseipp/vulture/issues/412\n\nI guess the triggering change was: https://github.com/jendrikseipp/vulture/pull/378",
+      "state": "closed",
+      "user": "ajtowns",
+      "created_at": "2026-03-12T00:51:28Z",
+      "updated_at": "2026-03-16T04:46:56Z",
+      "closed_at": "2026-03-16T04:46:56Z",
+      "comments": 12,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34810",
+      "labels": [
+        "Tests"
+      ],
+      "comment_data": [
+        {
+          "id": 4044596098,
+          "user": "maflcko",
+          "body": "I wonder if this tool ever found a real true positive, given that we are running it at confidence=100%, which can only find very limited things? Sure, dead code in tests isn't ideal and possibly scary, but if this only finds the plain obvious cases, that are unlikely to be written, and trivial to catch during manual review, maybe it could be removed?\n\nNo strong opinion, just wondering. In the meantime, I've submitted https://github.com/bitcoin/bitcoin/pull/34814",
+          "created_at": "2026-03-12T07:28:14Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 466,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4044867169,
+          "user": "fanquake",
+          "body": "I was hoping that it's functionality would just be ingested by ruff at some point: https://github.com/astral-sh/ruff/issues/872",
+          "created_at": "2026-03-12T08:24:11Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 127,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4045027463,
+          "user": "willcl-ark",
+          "body": "Yes I've been hoping astral would pick this up too for some time, but it seems like for now, all astral has on this front (via `ty`) is unused variable detection and a few other easy-to-spot types. But no \"unused classes or functions\". AFAIU there seems to be some barriers on how to implement sanely for python, as there's not an obious way to do it outside of parsing all files for all usage of all classes etc. as everything in python in public.\n\nty has a similar issue here: https://github.com/astral-sh/ty/issues/2829, and I might slightly expect it to be added there rather than ruff...",
+          "created_at": "2026-03-12T08:53:07Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 592,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4045371717,
+          "user": "fanquake",
+          "body": "Closing via #34814.",
+          "created_at": "2026-03-12T09:51:13Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 19,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4045627440,
+          "user": "maflcko",
+          "body": "> all astral has on this front (via `ty`) is unused variable detection and a few other easy-to-spot types. But no \"unused classes or functions\".\n\nI think this is also what vulture does for us, no? Unused classes and functions need to be manually removed, see 5c005363a880c136cc44ff2456a402e398fcbf44\n\nI guess it could help to have a set of MWE what vulture catches today for use, and what ty catches. If they are the same, it could make sense to use ty.",
+          "created_at": "2026-03-12T10:29:14Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 453,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4045718412,
+          "user": "willcl-ark",
+          "body": "> I guess it could help to have a set of MWE what vulture catches today for use, and what ty catches. If they are the same, it could make sense to use ty.\n\nI could try and work something like that out. I do have https://github.com/bitcoin/bitcoin/pull/34547 open to switch to `ty` (amongst other things) already :)",
+          "created_at": "2026-03-12T10:44:21Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 314,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4045722150,
+          "user": "maflcko",
+          "body": "(Also, GitHub changed the merge commit refresh schedule https://github.blog/changelog/2026-02-19-changes-to-test-merge-commit-generation-for-pull-requests/, since the current commit was 10h old, not 12h, I closed and re-opened the pull to re-trigger)",
+          "created_at": "2026-03-12T10:44:55Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 250,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4045927137,
+          "user": "willcl-ark",
+          "body": "> I guess it could help to have a set of MWE what vulture catches today for use, and what ty catches. If they are the same, it could make sense to use ty.\n\nOk so `ty` does not have this capability at all yet, my bad. Ruff can detect some per-file items (unused imports/local variables/arguments), but nothing cross-file like vulture.\n\nIf we dropped vulture for ruff we'd lose:\n\n- Cross-file unused definitions (functions, classes, methods)\n- Unused attributes\n\nWe could enable unused argument rules:\n\n```\n    \"ARG001\", # unused function argument\n    \"ARG002\", # unused method argument\n    \"ARG003\", # unused classmethod argument\n    \"ARG004\", # unused staticmethod argument\n    \"ARG005\", # unused lambda argument\n```\n\nwhich when enabled (on top of 34547) find 44 \"infractions\":\n\n<details><summary>Details</summary>\n<p>\n\n```\ncore/worktrees/modernise-linter on  modernise-linter [$!?] via △ v4.1.2 via 🐍 v3.13.12 via ❄️  impure (nix-shell-env)\n❯ ruff check .\nARG001 Unused function argument: `size`\n   --> contrib/tracing/log_raw_p2p_msgs.py:159:33\n    |\n158 |     # BCC: perf buffer handle function for inbound_messages\n159 |     def handle_inbound(_, data, size):\n    |                                 ^^^^\n160 |         \"\"\" Inbound message handler.\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/log_raw_p2p_msgs.py:169:34\n    |\n167 |     # BCC: perf buffer handle function for outbound_messages\n168 |\n169 |     def handle_outbound(_, data, size):\n    |                                  ^^^^\n170 |         \"\"\" Outbound message handler.\n    |\n\nARG001 Unused function argument: `size`\n  --> contrib/tracing/log_utxocache_flush.py:84:31\n   |\n82 |     b = BPF(text=program, usdt_contexts=[bitcoind_with_usdts])\n83 |\n84 |     def handle_flush(_, data, size):\n   |                               ^^^^\n85 |         \"\"\" Coins Flush handler.\n86 |           Called each time coin caches and indexes are flushed.\"\"\"\n   |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/mempool_monitor.py:140:31\n    |\n138 |         return datetime.now(timezone.utc)\n139 |\n140 |     def handle_added(_, data, size):\n    |                               ^^^^\n141 |         event = bpf[\"added_events\"].event(data)\n142 |         events.append((get_timestamp(), \"added\", event))\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/mempool_monitor.py:144:33\n    |\n142 |         events.append((get_timestamp(), \"added\", event))\n143 |\n144 |     def handle_removed(_, data, size):\n    |                                 ^^^^\n145 |         event = bpf[\"removed_events\"].event(data)\n146 |         events.append((get_timestamp(), \"removed\", event))\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/mempool_monitor.py:148:34\n    |\n146 |         events.append((get_timestamp(), \"removed\", event))\n147 |\n148 |     def handle_rejected(_, data, size):\n    |                                  ^^^^\n149 |         event = bpf[\"rejected_events\"].event(data)\n150 |         events.append((get_timestamp(), \"rejected\", event))\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/mempool_monitor.py:152:34\n    |\n150 |         events.append((get_timestamp(), \"rejected\", event))\n151 |\n152 |     def handle_replaced(_, data, size):\n    |                                  ^^^^\n153 |         event = bpf[\"replaced_events\"].event(data)\n154 |         events.append((get_timestamp(), \"replaced\", event))\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/p2p_monitor.py:140:33\n    |\n139 |     # BCC: perf buffer handle function for inbound_messages\n140 |     def handle_inbound(_, data, size):\n    |                                 ^^^^\n141 |         \"\"\" Inbound message handler.\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/p2p_monitor.py:153:34\n    |\n152 |     # BCC: perf buffer handle function for outbound_messages\n153 |     def handle_outbound(_, data, size):\n    |                                  ^^^^\n154 |         \"\"\" Outbound message handler.\n    |\n\nARG001 Unused function argument: `kwargs`\n   --> src/crc32c/.ycm_extra_conf.py:125:30\n    |\n125 | def FlagsForFile(filename, **kwargs):\n    |                              ^^^^^^\n126 |   \"\"\"Implements the YouCompleteMe API.\"\"\"\n    |\n\nARG002 Unused method argument: `success`\n   --> test/functional/feature_segwit.py:347:52\n    |\n345 |         return [p2wpkh, p2sh_p2wpkh, p2pk, p2pkh, p2sh_p2pk, p2sh_p2pkh, p2wsh_p2pk, p2wsh_p2pkh, p2sh_p2wsh_p2pk, p2sh_p2wsh_p2pkh]\n346 |\n347 |     def create_and_mine_tx_from_txids(self, txids, success=True):\n    |                                                    ^^^^^^^\n348 |         tx = CTransaction()\n349 |         for i in txids:\n    |\n\nARG005 Unused lambda argument: `h`\n   --> test/functional/feature_taproot.py:877:16\n    |\n875 |         lambda h: h,\n876 |         # Combine with hash 0\n877 |         lambda h: bytes([0 for _ in range(32)]),\n    |                ^\n878 |         # Combine with hash 2^256-1\n879 |         lambda h: bytes([0xff for _ in range(32)]),\n    |\n\nARG005 Unused lambda argument: `h`\n   --> test/functional/feature_taproot.py:879:16\n    |\n877 |         lambda h: bytes([0 for _ in range(32)]),\n878 |         # Combine with hash 2^256-1\n879 |         lambda h: bytes([0xff for _ in range(32)]),\n    |                ^\n880 |         # Combine with itself-1 (BE)\n881 |         lambda h: (int.from_bytes(h, 'big') - 1).to_bytes(32, 'big'),\n    |\n\nARG005 Unused lambda argument: `h`\n    --> test/functional/feature_taproot.py:1217:22\n     |\n1215 |     # == Test case for https://github.com/bitcoin/bitcoin/issues/24765 ==\n1216 |\n1217 |     zero_fn = lambda h: bytes([0 for _ in range(32)])\n     |                      ^\n1218 |     tap = taproot_construct(pubs[0], [(\"leaf\", CScript([pubs[1], OP_CHECKSIG, pubs[1], OP_CHECKSIGADD, OP_2, OP_EQUAL])), zero_fn])\n1219 |     add_spender(spenders, \"case24765\", tap=tap, leaf=\"leaf\", inputs=[getter(\"sign\"), getter(\"sign\")], key=secs[1], no_fail=True)\n     |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:148:40\n    |\n146 |     def test_batch_requests(self):\n147 |         self.log.info(\"Testing empty batch request...\")\n148 |         self.test_batch_request(lambda idx: None)\n    |                                        ^^^\n149 |\n150 |         self.log.info(\"Testing basic JSON-RPC 2.0 batch request...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:151:40\n    |\n150 |         self.log.info(\"Testing basic JSON-RPC 2.0 batch request...\")\n151 |         self.test_batch_request(lambda idx: BatchOptions(version=2))\n    |                                        ^^^\n152 |\n153 |         self.log.info(\"Testing JSON-RPC 2.0 batch with notifications...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:157:40\n    |\n156 |         self.log.info(\"Testing JSON-RPC 2.0 batch of ALL notifications...\")\n157 |         self.test_batch_request(lambda idx: BatchOptions(version=2, notification=True))\n    |                                        ^^^\n158 |\n159 |         # JSONRPC 1.1 does not support batch requests, but test them for backwards compatibility.\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:161:40\n    |\n159 |         # JSONRPC 1.1 does not support batch requests, but test them for backwards compatibility.\n160 |         self.log.info(\"Testing nonstandard JSON-RPC 1.1 batch request...\")\n161 |         self.test_batch_request(lambda idx: BatchOptions(version=1))\n    |                                        ^^^\n162 |\n163 |         self.log.info(\"Testing nonstandard mixed JSON-RPC 1.1/2.0 batch request...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:167:40\n    |\n166 |         self.log.info(\"Testing nonstandard batch request without version numbers...\")\n167 |         self.test_batch_request(lambda idx: BatchOptions())\n    |                                        ^^^\n168 |\n169 |         self.log.info(\"Testing nonstandard batch request without version numbers or ids...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:170:40\n    |\n169 |         self.log.info(\"Testing nonstandard batch request without version numbers or ids...\")\n170 |         self.test_batch_request(lambda idx: BatchOptions(notification=True))\n    |                                        ^^^\n171 |\n172 |         self.log.info(\"Testing nonstandard jsonrpc 1.0 version number is accepted...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:173:40\n    |\n172 |         self.log.info(\"Testing nonstandard jsonrpc 1.0 version number is accepted...\")\n173 |         self.test_batch_request(lambda idx: BatchOptions(request_fields={\"jsonrpc\": \"1.0\"}))\n    |                                        ^^^\n174 |\n175 |         self.log.info(\"Testing unrecognized jsonrpc version number is rejected...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:176:40\n    |\n175 |         self.log.info(\"Testing unrecognized jsonrpc version number is rejected...\")\n176 |         self.test_batch_request(lambda idx: BatchOptions(\n    |                                        ^^^\n177 |             request_fields={\"jsonrpc\": \"2.1\"},\n178 |             response_fields={\"result\": None, \"error\": {\"code\": RPC_INVALID_REQUEST, \"message\": \"JSON-RPC version not supported\"}}))\n    |\n\nARG001 Unused function argument: `args`\n  --> test/functional/mocks/invalid_signer.py:20:15\n   |\n18 |             sys.exit(int(mock_result[0]))\n19 |\n20 | def enumerate(args):\n   |               ^^^^\n21 |     sys.stdout.write(json.dumps([{\"fingerprint\": \"b3c19bfc\", \"type\": \"trezor\", \"model\": \"trezor_t\"}]))\n   |\n\nARG001 Unused function argument: `args`\n  --> test/functional/mocks/multi_signers.py:10:15\n   |\n 8 | import sys\n 9 |\n10 | def enumerate(args):\n   |               ^^^^\n11 |     sys.stdout.write(json.dumps([{\"fingerprint\": \"00000001\", \"type\": \"trezor\", \"model\": \"trezor_t\"},\n12 |         {\"fingerprint\": \"00000002\", \"type\": \"trezor\", \"model\": \"trezor_one\"}]))\n   |\n\nARG001 Unused function argument: `args`\n  --> test/functional/mocks/no_signer.py:10:15\n   |\n 8 | import sys\n 9 |\n10 | def enumerate(args):\n   |               ^^^^\n11 |     sys.stdout.write(json.dumps([]))\n   |\n\nARG001 Unused function argument: `args`\n  --> test/functional/mocks/signer.py:20:15\n   |\n18 |             sys.exit(int(mock_result[0]))\n19 |\n20 | def enumerate(args):\n   |               ^^^^\n21 |     sys.stdout.write(json.dumps([{\"fingerprint\": \"00000001\", \"type\": \"trezor\", \"model\": \"trezor_t\"}]))\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_add_connections.py:23:26\n   |\n22 | class P2PFeelerReceiver(P2PInterface):\n23 |     def on_version(self, message):\n   |                          ^^^^^^^\n24 |         # The bitcoind node closes feeler connections as soon as a version\n25 |         # message is received from the test framework. Don't send any responses\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_addr_relay.py:60:26\n   |\n58 |                 assert addr.ip.startswith('123.123.')\n59 |\n60 |     def on_getaddr(self, message):\n   |                          ^^^^^^^\n61 |         # When the node sends us a getaddr, it increments the addr relay tokens for the connection by 1000\n62 |         self._tokens += 1000\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_addr_relay.py:77:26\n   |\n75 |         return self.num_ipv4_received != 0\n76 |\n77 |     def on_version(self, message):\n   |                          ^^^^^^^\n78 |         self.send_version()\n79 |         self.send_without_ping(msg_verack())\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_compactblocks.py:82:29\n   |\n80 |         self.last_sendcmpct.append(message)\n81 |\n82 |     def on_cmpctblock(self, message):\n   |                             ^^^^^^^\n83 |         self.block_announced = True\n84 |         self.announced_blockhashes.add(self.last_message[\"cmpctblock\"].header_and_shortids.header.hash_int)\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_compactblocks.py:86:26\n   |\n84 |         self.announced_blockhashes.add(self.last_message[\"cmpctblock\"].header_and_shortids.header.hash_int)\n85 |\n86 |     def on_headers(self, message):\n   |                          ^^^^^^^\n87 |         self.block_announced = True\n88 |         for x in self.last_message[\"headers\"].headers:\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_compactblocks.py:91:22\n   |\n89 |             self.announced_blockhashes.add(x.hash_int)\n90 |\n91 |     def on_inv(self, message):\n   |                      ^^^^^^^\n92 |         for x in self.last_message[\"inv\"].inv:\n93 |             if x.type == MSG_BLOCK:\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_feefilter.py:19:28\n   |\n17 |     feefilter_received = False\n18 |\n19 |     def on_feefilter(self, message):\n   |                            ^^^^^^^\n20 |         self.feefilter_received = True\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_filter.py:67:30\n   |\n65 |             self.send_without_ping(want)\n66 |\n67 |     def on_merkleblock(self, message):\n   |                              ^^^^^^^\n68 |         self._merkleblock_received = True\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_filter.py:70:21\n   |\n68 |         self._merkleblock_received = True\n69 |\n70 |     def on_tx(self, message):\n   |                     ^^^^^^^\n71 |         self._tx_received = True\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_leak.py:71:29\n   |\n69 |     def on_getblocktxn(self, message): self.bad_message(message)\n70 |     def on_blocktxn(self, message): self.bad_message(message)\n71 |     def on_wtxidrelay(self, message): self.got_wtxidrelay = True\n   |                             ^^^^^^^\n72 |     def on_sendaddrv2(self, message): self.got_sendaddrv2 = True\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_leak.py:72:29\n   |\n70 |     def on_blocktxn(self, message): self.bad_message(message)\n71 |     def on_wtxidrelay(self, message): self.got_wtxidrelay = True\n72 |     def on_sendaddrv2(self, message): self.got_sendaddrv2 = True\n   |                             ^^^^^^^\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_leak.py:85:26\n   |\n83 |     # node will give us a message that it shouldn't. This is not an exhaustive\n84 |     # list!\n85 |     def on_version(self, message):\n   |                          ^^^^^^^\n86 |         self.version_received = True\n87 |         self.send_without_ping(msg_ping())\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_sendtxrcncl.py:49:26\n   |\n48 | class P2PFeelerReceiver(SendTxrcnclReceiver):\n49 |     def on_version(self, message):\n   |                          ^^^^^^^\n50 |         # feeler connections can not send any message other than their own version\n51 |         self.send_version()\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_tx_privacy.py:41:26\n   |\n39 |         self.all_invs = []\n40 |\n41 |     def on_version(self, message):\n   |                          ^^^^^^^\n42 |         self.send_without_ping(msg_wtxidrelay())\n   |\n\nARG002 Unused method argument: `wallet`\n   --> test/functional/rpc_getdescriptoractivity.py:133:45\n    |\n131 |             node.getdescriptoractivity, [invalid_blockhash], [f\"addr({addr_1})\"], True)\n132 |\n133 |     def test_invalid_descriptor(self, node, wallet):\n    |                                             ^^^^^^\n134 |         self.log.info(\"Test that an invalid descriptor raises the correct RPC error\")\n135 |         blockhash = self.generate(node, 1)[0]\n    |\n\nARG002 Unused method argument: `wallet`\n   --> test/functional/rpc_getdescriptoractivity.py:207:37\n    |\n205 |             [blockhash_1, blockhash_2, blockhash_2], [wallet.get_descriptor()], True))\n206 |\n207 |     def test_no_address(self, node, wallet):\n    |                                     ^^^^^^\n208 |         self.log.info(\"Test that activity is still reported for scripts without an associated address\")\n209 |         raw_wallet = MiniWallet(self.nodes[0], mode=MiniWalletMode.RAW_P2PK)\n    |\n\nARG002 Unused method argument: `node`\n  --> test/functional/wallet_listdescriptors.py:29:30\n   |\n28 |     # do not create any wallet by default\n29 |     def init_wallet(self, *, node):\n   |                              ^^^^\n30 |         return\n   |\n\nARG002 Unused method argument: `split`\n  --> test/functional/wallet_simulaterawtx.py:25:29\n   |\n23 |         self.skip_if_no_wallet()\n24 |\n25 |     def setup_network(self, split=False):\n   |                             ^^^^^\n26 |         self.setup_nodes()\n   |\n\nFound 44 errors.\n```\n\n</p>\n</details> \n\nHowever I think all but 1 are false-positives due to callback interfaces and method overrides though, so not too useful for us...",
+          "created_at": "2026-03-12T11:17:43Z",
+          "drama_signals": {
+            "drama_keywords": 2,
+            "positive_keywords": 1,
+            "text_length": 17051,
+            "has_nack": false,
+            "has_ack": true
+          }
+        },
+        {
+          "id": 4045965091,
+          "user": "willcl-ark",
+          "body": "> I wonder if this tool ever found a real true positive, given that we are running it at confidence=100%, which can only find very limited things?\n\nAh, that explains why it cannot find unused functions like https://github.com/bitcoin/bitcoin/blob/136132e075fa79f1b74b48447c2d76734f57754b/test/functional/p2p_v2_encrypted.py#L49-L52 then I guess... I wondered about that for a while. (edit: ty foudn this one somehow in [this branch](https://github.com/bitcoin/bitcoin/compare/master...willcl-ark:bitcoin:typechecker-fixes), but I don't recall how now)\n\nSo as per the vulture readme at 100% we only find\n\n  1. Unreachable code after return/break/continue/raise\n  2. Unused function arguments\n\nBut we don't find unused functions, classes, methods, variables, or imports, as those are rated 60-90% confidence.\n\nSo at --min-confidence 100 we lose the cross-file dead code detection, which is the main thing vulture offers over ruff...",
+          "created_at": "2026-03-12T11:24:03Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 930,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4046018060,
+          "user": "maflcko",
+          "body": "> We could enable unused argument rules:\n\nI wouldn't mind enabling them, if the error message provides a clear solution like: Remove it or prefix it with an underscore (haven't tried if this works). Otherwise, it could be confusing for devs, not knowing what possible options exist.\n\n\n\n> So as per the vulture readme at 100% we only find\n> \n>     1. Unreachable code after return/break/continue/raise\n> \n>     2. Unused function arguments\n\nI guess \"unused function arguments\" aren't at 100% either, because ruff ARG* finds some?\n\nAnd trivially unreachable code like \n\n```py\nreturn 1\nreturn 2\n```\n\nSeems unlikely to be written/reviewed while passing tests. So if they still happen, it should mostly be harmless text, which is annoying, but not severe? So we may consider removing vulture?",
+          "created_at": "2026-03-12T11:31:52Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 787,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4046202587,
+          "user": "willcl-ark",
+          "body": "> So we may consider removing vulture?\n\nI believe so",
+          "created_at": "2026-03-12T12:03:05Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 52,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4046429347,
+          "user": "maflcko",
+          "body": "Ok suggested that in  https://github.com/bitcoin/bitcoin/pull/34816\n\nEnabling https://docs.astral.sh/ruff/rules/#flake8-unused-arguments-arg for ruff, or ty stuff can be done in a separate pull.",
+          "created_at": "2026-03-12T12:36:12Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 194,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 408,
         "has_nack": false,
         "has_ack": false
       }
@@ -7119,187 +7479,6 @@
         "text_length": 1713,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 4061461212,
-      "number": 34810,
-      "title": "test/lint/lint-python-dead-code false positives",
-      "body": "Looks like recent versions of vulture are triggering false positives on `while True` loops with internal breaks.\n\nFailure: https://github.com/bitcoin/bitcoin/actions/runs/22981056848/job/66720754466?pr=34628\n\nUpstream issue: https://github.com/jendrikseipp/vulture/issues/412\n\nI guess the triggering change was: https://github.com/jendrikseipp/vulture/pull/378",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2026-03-12T00:51:28Z",
-      "updated_at": "2026-03-12T12:36:12Z",
-      "closed_at": null,
-      "comments": 12,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34810",
-      "labels": [
-        "Tests"
-      ],
-      "comment_data": [
-        {
-          "id": 4044596098,
-          "user": "maflcko",
-          "body": "I wonder if this tool ever found a real true positive, given that we are running it at confidence=100%, which can only find very limited things? Sure, dead code in tests isn't ideal and possibly scary, but if this only finds the plain obvious cases, that are unlikely to be written, and trivial to catch during manual review, maybe it could be removed?\n\nNo strong opinion, just wondering. In the meantime, I've submitted https://github.com/bitcoin/bitcoin/pull/34814",
-          "created_at": "2026-03-12T07:28:14Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 466,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4044867169,
-          "user": "fanquake",
-          "body": "I was hoping that it's functionality would just be ingested by ruff at some point: https://github.com/astral-sh/ruff/issues/872",
-          "created_at": "2026-03-12T08:24:11Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 127,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4045027463,
-          "user": "willcl-ark",
-          "body": "Yes I've been hoping astral would pick this up too for some time, but it seems like for now, all astral has on this front (via `ty`) is unused variable detection and a few other easy-to-spot types. But no \"unused classes or functions\". AFAIU there seems to be some barriers on how to implement sanely for python, as there's not an obious way to do it outside of parsing all files for all usage of all classes etc. as everything in python in public.\n\nty has a similar issue here: https://github.com/astral-sh/ty/issues/2829, and I might slightly expect it to be added there rather than ruff...",
-          "created_at": "2026-03-12T08:53:07Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 592,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4045371717,
-          "user": "fanquake",
-          "body": "Closing via #34814.",
-          "created_at": "2026-03-12T09:51:13Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 19,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4045627440,
-          "user": "maflcko",
-          "body": "> all astral has on this front (via `ty`) is unused variable detection and a few other easy-to-spot types. But no \"unused classes or functions\".\n\nI think this is also what vulture does for us, no? Unused classes and functions need to be manually removed, see 5c005363a880c136cc44ff2456a402e398fcbf44\n\nI guess it could help to have a set of MWE what vulture catches today for use, and what ty catches. If they are the same, it could make sense to use ty.",
-          "created_at": "2026-03-12T10:29:14Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 453,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4045718412,
-          "user": "willcl-ark",
-          "body": "> I guess it could help to have a set of MWE what vulture catches today for use, and what ty catches. If they are the same, it could make sense to use ty.\n\nI could try and work something like that out. I do have https://github.com/bitcoin/bitcoin/pull/34547 open to switch to `ty` (amongst other things) already :)",
-          "created_at": "2026-03-12T10:44:21Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 314,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4045722150,
-          "user": "maflcko",
-          "body": "(Also, GitHub changed the merge commit refresh schedule https://github.blog/changelog/2026-02-19-changes-to-test-merge-commit-generation-for-pull-requests/, since the current commit was 10h old, not 12h, I closed and re-opened the pull to re-trigger)",
-          "created_at": "2026-03-12T10:44:55Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 250,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4045927137,
-          "user": "willcl-ark",
-          "body": "> I guess it could help to have a set of MWE what vulture catches today for use, and what ty catches. If they are the same, it could make sense to use ty.\n\nOk so `ty` does not have this capability at all yet, my bad. Ruff can detect some per-file items (unused imports/local variables/arguments), but nothing cross-file like vulture.\n\nIf we dropped vulture for ruff we'd lose:\n\n- Cross-file unused definitions (functions, classes, methods)\n- Unused attributes\n\nWe could enable unused argument rules:\n\n```\n    \"ARG001\", # unused function argument\n    \"ARG002\", # unused method argument\n    \"ARG003\", # unused classmethod argument\n    \"ARG004\", # unused staticmethod argument\n    \"ARG005\", # unused lambda argument\n```\n\nwhich when enabled (on top of 34547) find 44 \"infractions\":\n\n<details><summary>Details</summary>\n<p>\n\n```\ncore/worktrees/modernise-linter on  modernise-linter [$!?] via △ v4.1.2 via 🐍 v3.13.12 via ❄️  impure (nix-shell-env)\n❯ ruff check .\nARG001 Unused function argument: `size`\n   --> contrib/tracing/log_raw_p2p_msgs.py:159:33\n    |\n158 |     # BCC: perf buffer handle function for inbound_messages\n159 |     def handle_inbound(_, data, size):\n    |                                 ^^^^\n160 |         \"\"\" Inbound message handler.\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/log_raw_p2p_msgs.py:169:34\n    |\n167 |     # BCC: perf buffer handle function for outbound_messages\n168 |\n169 |     def handle_outbound(_, data, size):\n    |                                  ^^^^\n170 |         \"\"\" Outbound message handler.\n    |\n\nARG001 Unused function argument: `size`\n  --> contrib/tracing/log_utxocache_flush.py:84:31\n   |\n82 |     b = BPF(text=program, usdt_contexts=[bitcoind_with_usdts])\n83 |\n84 |     def handle_flush(_, data, size):\n   |                               ^^^^\n85 |         \"\"\" Coins Flush handler.\n86 |           Called each time coin caches and indexes are flushed.\"\"\"\n   |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/mempool_monitor.py:140:31\n    |\n138 |         return datetime.now(timezone.utc)\n139 |\n140 |     def handle_added(_, data, size):\n    |                               ^^^^\n141 |         event = bpf[\"added_events\"].event(data)\n142 |         events.append((get_timestamp(), \"added\", event))\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/mempool_monitor.py:144:33\n    |\n142 |         events.append((get_timestamp(), \"added\", event))\n143 |\n144 |     def handle_removed(_, data, size):\n    |                                 ^^^^\n145 |         event = bpf[\"removed_events\"].event(data)\n146 |         events.append((get_timestamp(), \"removed\", event))\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/mempool_monitor.py:148:34\n    |\n146 |         events.append((get_timestamp(), \"removed\", event))\n147 |\n148 |     def handle_rejected(_, data, size):\n    |                                  ^^^^\n149 |         event = bpf[\"rejected_events\"].event(data)\n150 |         events.append((get_timestamp(), \"rejected\", event))\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/mempool_monitor.py:152:34\n    |\n150 |         events.append((get_timestamp(), \"rejected\", event))\n151 |\n152 |     def handle_replaced(_, data, size):\n    |                                  ^^^^\n153 |         event = bpf[\"replaced_events\"].event(data)\n154 |         events.append((get_timestamp(), \"replaced\", event))\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/p2p_monitor.py:140:33\n    |\n139 |     # BCC: perf buffer handle function for inbound_messages\n140 |     def handle_inbound(_, data, size):\n    |                                 ^^^^\n141 |         \"\"\" Inbound message handler.\n    |\n\nARG001 Unused function argument: `size`\n   --> contrib/tracing/p2p_monitor.py:153:34\n    |\n152 |     # BCC: perf buffer handle function for outbound_messages\n153 |     def handle_outbound(_, data, size):\n    |                                  ^^^^\n154 |         \"\"\" Outbound message handler.\n    |\n\nARG001 Unused function argument: `kwargs`\n   --> src/crc32c/.ycm_extra_conf.py:125:30\n    |\n125 | def FlagsForFile(filename, **kwargs):\n    |                              ^^^^^^\n126 |   \"\"\"Implements the YouCompleteMe API.\"\"\"\n    |\n\nARG002 Unused method argument: `success`\n   --> test/functional/feature_segwit.py:347:52\n    |\n345 |         return [p2wpkh, p2sh_p2wpkh, p2pk, p2pkh, p2sh_p2pk, p2sh_p2pkh, p2wsh_p2pk, p2wsh_p2pkh, p2sh_p2wsh_p2pk, p2sh_p2wsh_p2pkh]\n346 |\n347 |     def create_and_mine_tx_from_txids(self, txids, success=True):\n    |                                                    ^^^^^^^\n348 |         tx = CTransaction()\n349 |         for i in txids:\n    |\n\nARG005 Unused lambda argument: `h`\n   --> test/functional/feature_taproot.py:877:16\n    |\n875 |         lambda h: h,\n876 |         # Combine with hash 0\n877 |         lambda h: bytes([0 for _ in range(32)]),\n    |                ^\n878 |         # Combine with hash 2^256-1\n879 |         lambda h: bytes([0xff for _ in range(32)]),\n    |\n\nARG005 Unused lambda argument: `h`\n   --> test/functional/feature_taproot.py:879:16\n    |\n877 |         lambda h: bytes([0 for _ in range(32)]),\n878 |         # Combine with hash 2^256-1\n879 |         lambda h: bytes([0xff for _ in range(32)]),\n    |                ^\n880 |         # Combine with itself-1 (BE)\n881 |         lambda h: (int.from_bytes(h, 'big') - 1).to_bytes(32, 'big'),\n    |\n\nARG005 Unused lambda argument: `h`\n    --> test/functional/feature_taproot.py:1217:22\n     |\n1215 |     # == Test case for https://github.com/bitcoin/bitcoin/issues/24765 ==\n1216 |\n1217 |     zero_fn = lambda h: bytes([0 for _ in range(32)])\n     |                      ^\n1218 |     tap = taproot_construct(pubs[0], [(\"leaf\", CScript([pubs[1], OP_CHECKSIG, pubs[1], OP_CHECKSIGADD, OP_2, OP_EQUAL])), zero_fn])\n1219 |     add_spender(spenders, \"case24765\", tap=tap, leaf=\"leaf\", inputs=[getter(\"sign\"), getter(\"sign\")], key=secs[1], no_fail=True)\n     |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:148:40\n    |\n146 |     def test_batch_requests(self):\n147 |         self.log.info(\"Testing empty batch request...\")\n148 |         self.test_batch_request(lambda idx: None)\n    |                                        ^^^\n149 |\n150 |         self.log.info(\"Testing basic JSON-RPC 2.0 batch request...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:151:40\n    |\n150 |         self.log.info(\"Testing basic JSON-RPC 2.0 batch request...\")\n151 |         self.test_batch_request(lambda idx: BatchOptions(version=2))\n    |                                        ^^^\n152 |\n153 |         self.log.info(\"Testing JSON-RPC 2.0 batch with notifications...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:157:40\n    |\n156 |         self.log.info(\"Testing JSON-RPC 2.0 batch of ALL notifications...\")\n157 |         self.test_batch_request(lambda idx: BatchOptions(version=2, notification=True))\n    |                                        ^^^\n158 |\n159 |         # JSONRPC 1.1 does not support batch requests, but test them for backwards compatibility.\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:161:40\n    |\n159 |         # JSONRPC 1.1 does not support batch requests, but test them for backwards compatibility.\n160 |         self.log.info(\"Testing nonstandard JSON-RPC 1.1 batch request...\")\n161 |         self.test_batch_request(lambda idx: BatchOptions(version=1))\n    |                                        ^^^\n162 |\n163 |         self.log.info(\"Testing nonstandard mixed JSON-RPC 1.1/2.0 batch request...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:167:40\n    |\n166 |         self.log.info(\"Testing nonstandard batch request without version numbers...\")\n167 |         self.test_batch_request(lambda idx: BatchOptions())\n    |                                        ^^^\n168 |\n169 |         self.log.info(\"Testing nonstandard batch request without version numbers or ids...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:170:40\n    |\n169 |         self.log.info(\"Testing nonstandard batch request without version numbers or ids...\")\n170 |         self.test_batch_request(lambda idx: BatchOptions(notification=True))\n    |                                        ^^^\n171 |\n172 |         self.log.info(\"Testing nonstandard jsonrpc 1.0 version number is accepted...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:173:40\n    |\n172 |         self.log.info(\"Testing nonstandard jsonrpc 1.0 version number is accepted...\")\n173 |         self.test_batch_request(lambda idx: BatchOptions(request_fields={\"jsonrpc\": \"1.0\"}))\n    |                                        ^^^\n174 |\n175 |         self.log.info(\"Testing unrecognized jsonrpc version number is rejected...\")\n    |\n\nARG005 Unused lambda argument: `idx`\n   --> test/functional/interface_rpc.py:176:40\n    |\n175 |         self.log.info(\"Testing unrecognized jsonrpc version number is rejected...\")\n176 |         self.test_batch_request(lambda idx: BatchOptions(\n    |                                        ^^^\n177 |             request_fields={\"jsonrpc\": \"2.1\"},\n178 |             response_fields={\"result\": None, \"error\": {\"code\": RPC_INVALID_REQUEST, \"message\": \"JSON-RPC version not supported\"}}))\n    |\n\nARG001 Unused function argument: `args`\n  --> test/functional/mocks/invalid_signer.py:20:15\n   |\n18 |             sys.exit(int(mock_result[0]))\n19 |\n20 | def enumerate(args):\n   |               ^^^^\n21 |     sys.stdout.write(json.dumps([{\"fingerprint\": \"b3c19bfc\", \"type\": \"trezor\", \"model\": \"trezor_t\"}]))\n   |\n\nARG001 Unused function argument: `args`\n  --> test/functional/mocks/multi_signers.py:10:15\n   |\n 8 | import sys\n 9 |\n10 | def enumerate(args):\n   |               ^^^^\n11 |     sys.stdout.write(json.dumps([{\"fingerprint\": \"00000001\", \"type\": \"trezor\", \"model\": \"trezor_t\"},\n12 |         {\"fingerprint\": \"00000002\", \"type\": \"trezor\", \"model\": \"trezor_one\"}]))\n   |\n\nARG001 Unused function argument: `args`\n  --> test/functional/mocks/no_signer.py:10:15\n   |\n 8 | import sys\n 9 |\n10 | def enumerate(args):\n   |               ^^^^\n11 |     sys.stdout.write(json.dumps([]))\n   |\n\nARG001 Unused function argument: `args`\n  --> test/functional/mocks/signer.py:20:15\n   |\n18 |             sys.exit(int(mock_result[0]))\n19 |\n20 | def enumerate(args):\n   |               ^^^^\n21 |     sys.stdout.write(json.dumps([{\"fingerprint\": \"00000001\", \"type\": \"trezor\", \"model\": \"trezor_t\"}]))\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_add_connections.py:23:26\n   |\n22 | class P2PFeelerReceiver(P2PInterface):\n23 |     def on_version(self, message):\n   |                          ^^^^^^^\n24 |         # The bitcoind node closes feeler connections as soon as a version\n25 |         # message is received from the test framework. Don't send any responses\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_addr_relay.py:60:26\n   |\n58 |                 assert addr.ip.startswith('123.123.')\n59 |\n60 |     def on_getaddr(self, message):\n   |                          ^^^^^^^\n61 |         # When the node sends us a getaddr, it increments the addr relay tokens for the connection by 1000\n62 |         self._tokens += 1000\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_addr_relay.py:77:26\n   |\n75 |         return self.num_ipv4_received != 0\n76 |\n77 |     def on_version(self, message):\n   |                          ^^^^^^^\n78 |         self.send_version()\n79 |         self.send_without_ping(msg_verack())\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_compactblocks.py:82:29\n   |\n80 |         self.last_sendcmpct.append(message)\n81 |\n82 |     def on_cmpctblock(self, message):\n   |                             ^^^^^^^\n83 |         self.block_announced = True\n84 |         self.announced_blockhashes.add(self.last_message[\"cmpctblock\"].header_and_shortids.header.hash_int)\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_compactblocks.py:86:26\n   |\n84 |         self.announced_blockhashes.add(self.last_message[\"cmpctblock\"].header_and_shortids.header.hash_int)\n85 |\n86 |     def on_headers(self, message):\n   |                          ^^^^^^^\n87 |         self.block_announced = True\n88 |         for x in self.last_message[\"headers\"].headers:\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_compactblocks.py:91:22\n   |\n89 |             self.announced_blockhashes.add(x.hash_int)\n90 |\n91 |     def on_inv(self, message):\n   |                      ^^^^^^^\n92 |         for x in self.last_message[\"inv\"].inv:\n93 |             if x.type == MSG_BLOCK:\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_feefilter.py:19:28\n   |\n17 |     feefilter_received = False\n18 |\n19 |     def on_feefilter(self, message):\n   |                            ^^^^^^^\n20 |         self.feefilter_received = True\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_filter.py:67:30\n   |\n65 |             self.send_without_ping(want)\n66 |\n67 |     def on_merkleblock(self, message):\n   |                              ^^^^^^^\n68 |         self._merkleblock_received = True\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_filter.py:70:21\n   |\n68 |         self._merkleblock_received = True\n69 |\n70 |     def on_tx(self, message):\n   |                     ^^^^^^^\n71 |         self._tx_received = True\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_leak.py:71:29\n   |\n69 |     def on_getblocktxn(self, message): self.bad_message(message)\n70 |     def on_blocktxn(self, message): self.bad_message(message)\n71 |     def on_wtxidrelay(self, message): self.got_wtxidrelay = True\n   |                             ^^^^^^^\n72 |     def on_sendaddrv2(self, message): self.got_sendaddrv2 = True\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_leak.py:72:29\n   |\n70 |     def on_blocktxn(self, message): self.bad_message(message)\n71 |     def on_wtxidrelay(self, message): self.got_wtxidrelay = True\n72 |     def on_sendaddrv2(self, message): self.got_sendaddrv2 = True\n   |                             ^^^^^^^\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_leak.py:85:26\n   |\n83 |     # node will give us a message that it shouldn't. This is not an exhaustive\n84 |     # list!\n85 |     def on_version(self, message):\n   |                          ^^^^^^^\n86 |         self.version_received = True\n87 |         self.send_without_ping(msg_ping())\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_sendtxrcncl.py:49:26\n   |\n48 | class P2PFeelerReceiver(SendTxrcnclReceiver):\n49 |     def on_version(self, message):\n   |                          ^^^^^^^\n50 |         # feeler connections can not send any message other than their own version\n51 |         self.send_version()\n   |\n\nARG002 Unused method argument: `message`\n  --> test/functional/p2p_tx_privacy.py:41:26\n   |\n39 |         self.all_invs = []\n40 |\n41 |     def on_version(self, message):\n   |                          ^^^^^^^\n42 |         self.send_without_ping(msg_wtxidrelay())\n   |\n\nARG002 Unused method argument: `wallet`\n   --> test/functional/rpc_getdescriptoractivity.py:133:45\n    |\n131 |             node.getdescriptoractivity, [invalid_blockhash], [f\"addr({addr_1})\"], True)\n132 |\n133 |     def test_invalid_descriptor(self, node, wallet):\n    |                                             ^^^^^^\n134 |         self.log.info(\"Test that an invalid descriptor raises the correct RPC error\")\n135 |         blockhash = self.generate(node, 1)[0]\n    |\n\nARG002 Unused method argument: `wallet`\n   --> test/functional/rpc_getdescriptoractivity.py:207:37\n    |\n205 |             [blockhash_1, blockhash_2, blockhash_2], [wallet.get_descriptor()], True))\n206 |\n207 |     def test_no_address(self, node, wallet):\n    |                                     ^^^^^^\n208 |         self.log.info(\"Test that activity is still reported for scripts without an associated address\")\n209 |         raw_wallet = MiniWallet(self.nodes[0], mode=MiniWalletMode.RAW_P2PK)\n    |\n\nARG002 Unused method argument: `node`\n  --> test/functional/wallet_listdescriptors.py:29:30\n   |\n28 |     # do not create any wallet by default\n29 |     def init_wallet(self, *, node):\n   |                              ^^^^\n30 |         return\n   |\n\nARG002 Unused method argument: `split`\n  --> test/functional/wallet_simulaterawtx.py:25:29\n   |\n23 |         self.skip_if_no_wallet()\n24 |\n25 |     def setup_network(self, split=False):\n   |                             ^^^^^\n26 |         self.setup_nodes()\n   |\n\nFound 44 errors.\n```\n\n</p>\n</details> \n\nHowever I think all but 1 are false-positives due to callback interfaces and method overrides though, so not too useful for us...",
-          "created_at": "2026-03-12T11:17:43Z",
-          "drama_signals": {
-            "drama_keywords": 2,
-            "positive_keywords": 1,
-            "text_length": 17051,
-            "has_nack": false,
-            "has_ack": true
-          }
-        },
-        {
-          "id": 4045965091,
-          "user": "willcl-ark",
-          "body": "> I wonder if this tool ever found a real true positive, given that we are running it at confidence=100%, which can only find very limited things?\n\nAh, that explains why it cannot find unused functions like https://github.com/bitcoin/bitcoin/blob/136132e075fa79f1b74b48447c2d76734f57754b/test/functional/p2p_v2_encrypted.py#L49-L52 then I guess... I wondered about that for a while. (edit: ty foudn this one somehow in [this branch](https://github.com/bitcoin/bitcoin/compare/master...willcl-ark:bitcoin:typechecker-fixes), but I don't recall how now)\n\nSo as per the vulture readme at 100% we only find\n\n  1. Unreachable code after return/break/continue/raise\n  2. Unused function arguments\n\nBut we don't find unused functions, classes, methods, variables, or imports, as those are rated 60-90% confidence.\n\nSo at --min-confidence 100 we lose the cross-file dead code detection, which is the main thing vulture offers over ruff...",
-          "created_at": "2026-03-12T11:24:03Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 930,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4046018060,
-          "user": "maflcko",
-          "body": "> We could enable unused argument rules:\n\nI wouldn't mind enabling them, if the error message provides a clear solution like: Remove it or prefix it with an underscore (haven't tried if this works). Otherwise, it could be confusing for devs, not knowing what possible options exist.\n\n\n\n> So as per the vulture readme at 100% we only find\n> \n>     1. Unreachable code after return/break/continue/raise\n> \n>     2. Unused function arguments\n\nI guess \"unused function arguments\" aren't at 100% either, because ruff ARG* finds some?\n\nAnd trivially unreachable code like \n\n```py\nreturn 1\nreturn 2\n```\n\nSeems unlikely to be written/reviewed while passing tests. So if they still happen, it should mostly be harmless text, which is annoying, but not severe? So we may consider removing vulture?",
-          "created_at": "2026-03-12T11:31:52Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 787,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4046202587,
-          "user": "willcl-ark",
-          "body": "> So we may consider removing vulture?\n\nI believe so",
-          "created_at": "2026-03-12T12:03:05Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 52,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4046429347,
-          "user": "maflcko",
-          "body": "Ok suggested that in  https://github.com/bitcoin/bitcoin/pull/34816\n\nEnabling https://docs.astral.sh/ruff/rules/#flake8-unused-arguments-arg for ruff, or ty stuff can be done in a separate pull.",
-          "created_at": "2026-03-12T12:36:12Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 194,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 408,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -8012,9 +8191,9 @@
     }
   ],
   "summary": {
-    "total_prs": 272,
-    "total_issues": 30,
-    "total_comments": 59,
-    "unique_participants": 82
+    "total_prs": 275,
+    "total_issues": 32,
+    "total_comments": 63,
+    "unique_participants": 83
   }
 }
