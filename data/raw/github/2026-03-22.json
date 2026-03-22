@@ -1,12 +1,467 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-03-22T08:27:51.360161+00:00",
+  "fetched_at": "2026-03-22T16:23:25.191371+00:00",
   "date_range": {
-    "since": "2026-03-15T08:27:51.360096+00:00",
-    "until": "2026-03-22T08:27:51.360096+00:00"
+    "since": "2026-03-15T16:23:25.191298+00:00",
+    "until": "2026-03-22T16:23:25.191298+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3313137140,
+      "number": 34651,
+      "title": "fuzz: Block connection and chain reorganization fuzzing harnesses",
+      "body": "Hi Bitcoin Core maintainers.\r\n\r\nThis PR is a remastered version of fuzzing harnesses developed during a Bitcoin Core audit.\r\nIt includes 1 fuzzing harnesses:\r\n\r\n* `connect_block`: Test the ConnectBlock() function responsible of validating the block and\r\n  all its transaction with consensus rules. Thanks to ``justCheck`` parameter no side effect\r\n  is performed on the internal state enabling relatively fast fuzzing.\r\n\r\nBesides pre-mining blocks, the harness initialization intends to bring a bit more of diversity by\r\nintroducing additional transactions in blocks (otherwise only coinbases), and put some transactions\r\nin the mempool so that they can be 'picked' and put in a block by means of input mutation.\r\n\r\nNote: Some additional harnesses are added in another PR: https://github.com/bitcoin/bitcoin/pull/34895\r\n\r\nAuthored by @RobinDavid and @nsurbay",
+      "state": "open",
+      "user": "RobinDavid",
+      "created_at": "2026-02-22T15:25:56Z",
+      "updated_at": "2026-03-22T16:22:14Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34651",
+      "labels": [
+        "Fuzzing"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 924,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3120160595,
+      "number": 34132,
+      "title": "coins: drop error catcher, centralize fatal read handling",
+      "body": "### Problem\r\nThe current coins database read-error handling adds unnecessary complexity to the critical path:\r\n* `CCoinsViewErrorCatcher` sits between the cache and database views, wrapping every read operation\r\n* `ExecuteBackedWrapper` adds another function call layer with lambda captures on each database read\r\n* Uses `std::vector<std::function<void()>>` for callbacks when there's only ever one callback registered\r\n* The error callback is set after database initialization rather than during construction (requiring a `cs_main` lock)\r\n\r\nThis adds unnecessary stack depth and bookkeeping overhead on every coins database read operation (`GetCoin`). Also note that `CCoinsViewDB::HaveCoin` isn't even on the hot path as far as I can tell.\r\n\r\n### Context\r\nThis is part of ongoing coins caching cleanup efforts, see https://github.com/bitcoin/bitcoin/issues/34280.\r\n\r\n### Fix\r\n**Behavior change:** Treat deserialization failures in `CDBWrapper::Read()` as fatal instead of catching and returning `false`. This makes corruption visible and avoids ambiguous missing-vs-unreadable handling at call sites: on decode failure, `CDBWrapper` logs the error, executes a provided callback, and then calls `std::abort()`.\r\n\r\nWith read-failure handling centralized in `CDBWrapper`, collapse the `CCoinsViewErrorCatcher` layer entirely by removing `ExecuteBackedWrapper` and `CCoinsViewErrorCatcher` which also enables making coins view lookups `noexcept`.\r\n\r\nA new test verifies the node aborts with a clear error message on a few database corruption paths.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-12-20T22:56:45Z",
+      "updated_at": "2026-03-22T16:17:24Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34132",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1604,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 1276577083,
+      "number": 27260,
+      "title": "Enhanced error messages for invalid network prefix during address parsing.",
+      "body": "# Improve Address Decoding Error Messages\r\n\r\n## Issue\r\n\r\n`DecodeDestination` does not properly handle errors when a user inputs a valid address for the wrong network (e.g., a testnet address while running the client on mainnet).\r\n\r\nThe previous error messages were misleading. For example, \"Invalid or unsupported Segwit (Bech32) or Base58 encoding\" was displayed for a valid Bech32 address on a different network. This occurred because the `is_bech32` variable only checked if the prefix matched the current network's HRP. If it didn't match, the code would fall through to Base58 decoding logic regardless of whether the string was actually a valid Bech32 address.\r\n\r\n## Solution\r\n\r\n### Implementation Approach\r\n\r\n1. **Decode first, then validate**: Instead of checking the prefix before decoding, we now decode the string using `bech32::Decode(str)` upfront. This takes minimal CPU cycles and is acceptable since address validation is not a frequent operation.\r\n\r\n2. **Gather decoding information**: After Bech32 decoding, we also attempt `DecodeBase58` (with a length of 100) and `DecodeBase58Check`. This provides enough information to properly diagnose errors.\r\n\r\n3. **Provide network-aware error messages**: When an address has an invalid prefix, the error message now includes the expected network values.\r\n\r\n### Changes Made\r\n\r\n#### 1. Add Base58 Encoded Prefixes to ChainParams (`src/kernel/chainparams.cpp`, `src/kernel/chainparams.h`)\r\n\r\n#### 2. Refactor Address Decoding Logic (`src/key_io.cpp`)\r\n\r\n- Decode Bech32 upfront using `bech32::Decode(str)` instead of checking prefix first\r\n- Use structured bindings for cleaner code: `auto [bech32_encoding, bech32_hrp, bech32_chars] = bech32::Decode(str)`\r\n- Improved error handling flow with clearer branching\r\n\r\n#### 3. Improved Error Messages\r\n\r\n| Scenario | Previous Error | New Error |\r\n|----------|---------------|-----------|\r\n| Base58 address with wrong prefix | \"Invalid or unsupported Base58-encoded address.\" | \"Invalid Base58 address. Expected prefix 3, or 1\" |\r\n| Bech32 address with wrong HRP | \"Invalid or unsupported Segwit (Bech32) or Base58 encoding.\" | \"Invalid or unsupported prefix for Segwit (Bech32) address (expected bc, got tb)\" |\r\n| Invalid Base58 checksum | \"Invalid or unsupported Segwit (Bech32) or Base58 encoding.\" | \"Invalid checksum or length of Base58 address (P2PKH or P2SH)\" |\r\n| Ambiguous invalid address | \"Invalid or unsupported Segwit (Bech32) or Base58 encoding.\" | \"Address is not valid Base58 or Bech32\" |\r\n| Bech32 with checksum error | N/A | \"Bech32 address decoded with error: Invalid Bech32 checksum\" |\r\n\r\n#### 4. Test Updates\r\n\r\n- Added `test/functional/data/rpc_validateaddress.json` with comprehensive test vectors for both mainnet and signet\r\n- Updated `test/functional/rpc_validateaddress.py` to use data-driven testing across multiple networks\r\n- Updated `test/functional/rpc_invalid_address_message.py` with new error message expectations\r\n\r\n### Consistency Improvements\r\n\r\n- Removed inconsistent periods at the end of some error messages\r\n- Changed \"Bech32 v0\" to \"SegWit v0\" for clarity\r\n\r\n## Reference\r\n\r\n- Issue: #26290\r\n",
+      "state": "open",
+      "user": "portlandhodl",
+      "created_at": "2023-03-15T10:17:16Z",
+      "updated_at": "2026-03-22T16:05:28Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/27260",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 2,
+        "positive_keywords": 0,
+        "text_length": 3213,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3427465966,
+      "number": 34887,
+      "title": "fuzz: target CDBWrapper",
+      "body": "Inspired by https://github.com/bitcoin/bitcoin/pull/34866#issuecomment-4090291488.\r\n\r\nWe currently don't have a dedicated harness targeting `CDBWrapper`. OSS-Fuzz has a [rudimentary harness](https://github.com/google/oss-fuzz/blob/master/projects/leveldb/fuzz_db.cc) for levelDB [which fails](https://issues.oss-fuzz.com/issues/447252244), so doesn't appear maintained.\r\n\r\nThis PR adds a harness targeting `CDBWrapper` against an in-memory oracle to verify correctness.\r\n\r\nA `DeterministicEnv` wraps levelDB's `memenv` to eliminate non-determinism by capturing background compaction and running it at fuzzer-chosen points.\r\nThe fuzzer also controls the cache_bytes and max_file_size sizes so that small values trigger memtable flushes and compaction.",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2026-03-21T01:12:00Z",
+      "updated_at": "2026-03-22T16:01:47Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34887",
+      "labels": [
+        "Fuzzing"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 774,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3429716868,
+      "number": 34890,
+      "title": "test: add coin-grinder TOTAL_TRIES coverage",
+      "body": "The `TOTAL_TRIES` exit condition in CoinGrinder (`src/wallet/coinselection.cpp`)\r\nhas no test coverage — the guard and `SetAlgoCompleted(false)` can be removed\r\nwithout any test failing (see corecheck mutation report).\r\n\r\nThis adds a unit test in `coinselection_tests.cpp` that constructs a UTXO set\r\nlarge enough to exhaust `TOTAL_TRIES` iterations before finding an optimal\r\nsolution, then asserts the result has `GetAlgoCompleted() == false`.\r\n\r\nModeled after the existing BnB TOTAL_TRIES test at L166 of the same file.\r\n\r\nCloses #33419\r\n",
+      "state": "open",
+      "user": "HouseOfHufflepuff",
+      "created_at": "2026-03-21T23:25:21Z",
+      "updated_at": "2026-03-22T15:40:02Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34890",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 585,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3430875438,
+      "number": 34895,
+      "title": "fuzz: Fuzzing harnesses for ActivateBestChainStep and ActivateBestChain",
+      "body": "Hi Bitcoin Core maintainers.\r\n\r\nThis PR is the second part of https://github.com/bitcoin/bitcoin/pull/34651 and provides the following two fuzzing harnesses:\r\n\r\n* `activate_best_chain_step`: Test the ActivateBestChainStep() function responsible of activating\r\n  the most worked-chain (not selecting it). The harness is written in a way that enable the fuzzer\r\n  triggering a chain reorganization if it generates two valid branches.\r\n* `activate_best_chain`: Test the ActivateBestChain() function responsible of selecting and activating\r\n  the most worked-chain.\r\n\r\nIn the two later harnesses, some internal state cleaning is required to avoid non-reproducibility issues.\r\nAlso they might produce file artifacts on disk by means of writing blocks.\r\n\r\nThese two harnesses are built upon the  `connect_block` harness thus the PR shall be merged first.\r\n\r\nThese harnesses enables improving function coverage on `ActivateBestChainStep`, `removeForBlock` and to\r\ncover function uncovered by fuzzing at the time of fuzzing harness development (mid-2025).\r\nFunctions newly covered include `DisconnectTip`, `DisconnectBlock`, `ApplyTxInUndo`, `MaybeUpdateMempoolForReorg`, `removeForReorg` etc.\r\n\r\nAuthored by @RobinDavid and @nsurbay\r\n\r\n*(note shall be rebased on the other PR so that it only contains 1 commit)*",
+      "state": "open",
+      "user": "RobinDavid",
+      "created_at": "2026-03-22T15:29:51Z",
+      "updated_at": "2026-03-22T15:30:27Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34895",
+      "labels": [
+        "Fuzzing"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1376,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3259815827,
+      "number": 34534,
+      "title": "rpc: Manual prune lock management (Take 2)",
+      "body": "This is a refreshed version of #19463, which was closed due to inactivity.\r\n\r\nMotivation: On pruned nodes, if a wallet is not loaded while the node is running, blocks necessary for rescanning when the wallet is loaded may be pruned. This PR allows users and external wallet software to manually manage prune locks via RPC, so they can protect blocks needed for future rescans and also clean up locks that are no longer relevant (e.g. after permanently unloading a wallet from a node). This is useful both for Bitcoin Core's own wallet and for external wallets that use Bitcoin Core as a backend. Usage of temporary prune locking may also be helpful in other functional test scenarios but I didn't spend time to check where might apply.\r\n\r\nThis PR leverages the existing prune locks system we already have. The interface of the RPCs of the old PR has been slightly updated, it now matches the pattern used by `setban`/`listbanned` exactly. The locks are prefixed to distinguish them from the systems locks and prevent naming colissions. They are not persisted across restarts.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2026-02-08T14:01:05Z",
+      "updated_at": "2026-03-22T13:43:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34534",
+      "labels": [
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1118,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3181854676,
+      "number": 34320,
+      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
+      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the DB.\r\nOne tries to deserialize; the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin`, which delegates to `GetCoin`).\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the backing view's `::GetCoin` (not `::HaveCoin`) on cache miss and checks the cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: The latest version of the change keeps most `HaveCoin` calls for convenience; a previous version removed all of them.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-16T16:17:29Z",
+      "updated_at": "2026-03-22T13:43:08Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1186,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3405136954,
+      "number": 34833,
+      "title": "test: add addnode connection limit test to rpc_net.py",
+      "body": "Add `test_addnode_connection_limit` to `NetTest` in `rpc_net.py`, replacing the standalone `p2p_addnode_limit.py`.\n\nThe test restarts node 0 with `-maxconnections=0` to verify that addnode connections bypass the general connection limit and are independently capped at `MAX_ADDNODE_CONNECTIONS` (8). Nodes 2-10 serve as addnode targets (9 targets, only 8 can connect). The test verifies the cap is enforced, then removes one peer and confirms the previously-blocked node takes the freed slot.\n\nAdded as a separate test method rather than inline in `test_addnode_getaddednodeinfo` because the limit test requires different node configuration (no proxy, `-maxconnections=0`), necessitating a `restart_node` call.\n\nAddresses #28635",
+      "state": "open",
+      "user": "Bortlesboat",
+      "created_at": "2026-03-16T15:41:32Z",
+      "updated_at": "2026-03-22T13:34:20Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34833",
+      "labels": [
+        "Tests",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 782,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3239243501,
+      "number": 34489,
+      "title": "index: batch db writes during initial sync",
+      "body": "Decouples part of #26966.\r\n\r\nRight now, index initial sync writes to disk for every block, which is not the best for HDD. This change batches those, so disk writes are less frequent during initial sync. This also cuts down `cs_main` contention by reducing the number of `NextBlockSync` calls (instead of calling it for every block, we will call it once per block window), making the node more responsive (IBD and validation) while indexes sync up. On top of that, it lays the groundwork for the bigger speedups, since part of the parallelization pre-work is already in place.\r\n\r\nJust as a small summary:\r\n\r\n* Batch DB writes instead of flushing per block, which improves sync time on HDD due to the reduced number of disk write operations.\r\n* Reduce `cs_main` lock contention, which improves the overall node responsiveness (and primarily IBD) while the indexes threads are syncing.\r\n* Lays the groundwork for the real speedups, since part of #26966 parallelization pre-work is introduced here as well.\r\n* Reduces the number of generated LDB files. See l0rinc's [comment](https://github.com/bitcoin/bitcoin/pull/34489#issuecomment-3876972773).",
+      "state": "open",
+      "user": "furszy",
+      "created_at": "2026-02-03T04:06:34Z",
+      "updated_at": "2026-03-22T13:30:01Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34489",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1186,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3214986859,
+      "number": 34420,
+      "title": "consensus: disable min difficulty blocks on testnet4 after height 201,600",
+      "body": "  ## Summary                                                                                                                                \r\n                                                                                                                                            \r\n  Disable the min-difficulty block rule on testnet4 after block height 151,200 (epoch 75 boundary) and reset difficulty to 1,000,000 at the fork.                                                                                                                                     \r\n                                                                                                                                            \r\n  ## Motivation                                                                                                                             \r\n                                                                                                                                            \r\n  Testnet4's min-difficulty rule (allowing difficulty-1 blocks after 20 minutes) is being exploited, causing ~85-90% of blocks to be CPU-mined min-difficulty blocks. This results in a race of CPU miners broadcasting blocks at exactly the second that it's acceptable. This race is so intense that CPU miners have figured out sending empty blocks, as they propagate faster than those that contain transactions, resulting in a network where transactions are confirmed at only the remaining ASIC blocks, that have ~1 hour average block times.                                                                                                     \r\n                                                                                                                                            \r\n  After the fork:                                                                                                                           \r\n  - Min-difficulty blocks will no longer be allowed                                                                                         \r\n  - Difficulty resets to 1,000,000 (not 1, to avoid a block storm of thousands of blocks in seconds)                                        \r\n  - Normal difficulty retargeting resumes                                                                                                   \r\n                                                                                                                                            \r\n  ## Changes                                                                                                                                \r\n                                                                                                                                            \r\n  - Add `nMinDifficultyBlocksForkHeight` consensus parameter (default 0 = disabled)                                                         \r\n  - Set fork height to 151,200 for testnet4 (epoch 75 boundary, ~31,000 blocks from current height ~120,000)                                \r\n  - Modify `GetNextWorkRequired()` to disable min-difficulty rule and reset difficulty at fork                                              \r\n  - Modify `PermittedDifficultyTransition()` to enforce the new rules                                                                       \r\n  - Modify `WaitAndCreateNewBlock()` in miner to respect the fork                                                                           \r\n  - Add unit tests covering pre-fork, at-fork, and post-fork behavior                                                                       \r\n                                                                                                                                            \r\n  ## Test Plan                                                                                                                              \r\n                                                                                                                                            \r\n  - `./build/bin/test_bitcoin --run_test=pow_tests` - all 21 tests pass                                                                     \r\n                                                                                                                                            \r\n  ## Discussion                                                                                                                             \r\n                                                                                                                                            \r\n  [bitcoin-dev mailing list thread #1](https://groups.google.com/g/bitcoindev/c/iVLHJ1HWhoU)\r\n  [bitcoin-dev mailing list thread #2](https://groups.google.com/g/bitcoindev/c/Jsv1VYpewuU)     \r\n  [Bitcointalk thread](https://bitcointalk.org/index.php?topic=5569103.0)     ",
+      "state": "open",
+      "user": "batmanbytes",
+      "created_at": "2026-01-27T15:08:13Z",
+      "updated_at": "2026-03-22T13:17:10Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34420",
+      "labels": [
+        "Consensus"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 4958,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3428510020,
+      "number": 34888,
+      "title": "wallet: fix amount computed as boolean in coin selection",
+      "body": "Stumbled upon this tiny bug. This has been working by accident.\r\n\r\nThe comparison is evaluated first, so `total_amount` ends up holding a boolean instead of the actual amount.\r\nIt can be verified by adding the value to the returned error message and running the `wallet_create_tx.py`\r\ntest.\r\n\r\nNote:\r\nI assume something like `-Wparentheses` in CI (or similar) should help us catching similar issues elsewhere.\r\n",
+      "state": "open",
+      "user": "furszy",
+      "created_at": "2026-03-21T12:50:27Z",
+      "updated_at": "2026-03-22T12:35:53Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34888",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 468,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3207254787,
+      "number": 34400,
+      "title": "wallet: parallel fast rescan (approx 5x speed up with 16 threads)",
+      "body": "EDIT: Some parts of this PR have been split into https://github.com/bitcoin/bitcoin/pull/34667 and  https://github.com/bitcoin/bitcoin/pull/34681 to ease review. This PR will be put in draft until the previous PRs have been merged.\r\n\r\nThis PR uses the [ThreadPool](https://github.com/bitcoin/bitcoin/blob/master/src/util/threadpool.h) to implement parallel fast rescan.\r\n\r\nThis PR:\r\n- Adds a `ThreadPool` to the `WalletContext` to be shared by all the wallets\r\n- Adds `-walletpar` parameter to configure the number of threads to be used for parallel scanning \r\n- Updates the `wallet_fast_rescan.py` test to ensure it catches cases where the FastRescan filter wasn't properly updated. This is crucial to ensure that changes in the PR do not cause newly added output scripts to be missed.\r\n- Refactors `ScanForWalletTransactions` to make the implementation of parallel scanning easier.\r\n- Implements parallel scanning\r\n\r\nBenchmarks:\r\n**NOTE: to reproduce, please tune your system with `pyperf system tune`**\r\n\r\n_EDIT\r\nSet up your node to use block filters by setting `blockfilterindex=1` in your bitcoin.conf file and ensure your blockfilterindex is synced to tip before attempting to reproduce._\r\n\r\nUsing the following command on mainnet with a wallet with no scripts and hyperfine version `1.20.0`:\r\n```\r\nhyperfine --show-output --export-markdown results.md --export-json results.json  \\\r\n--sort command \\\r\n--runs 3 \\\r\n-L commit ef847e8,37d356b \\\r\n-L num_threads 1,2,4,8,16 \\\r\n--prepare 'git checkout {commit} && cmake --build build -j 20 && build/bin/bitcoind -blockfilterindex=1 -walletpar={num_threads} && sleep 10 && build/bin/bitcoin-cli loadwalllet <wallet-name>' \\\r\n--conclude 'build/bin/bitcoin-cli stop && sleep 10' \\\r\n'build/bin/bitcoin-cli rescanblockchain 500000 900000'\r\n```\r\nI obtained the following results:\r\n| Command | Mean [s] | Min [s] | Max [s] | Relative |\r\n|:---|---:|---:|---:|---:|\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = baseline, num_threads = ..)` | 536.996 ± 0.722 | 536.257 | 537.701 | 4.64 ± 0.01 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 1)` | 540.210 ± 2.696 | 537.172 | 542.320 | 4.67 ± 0.03 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 2)` | 358.190 ± 0.515 | 357.675 | 358.706 | 3.10 ± 0.01 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 4)` | 230.217 ± 2.321 | 228.814 | 232.896 | 1.99 ± 0.02 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 8)` | 151.144 ± 1.748 | 149.506 | 152.984 | 1.31 ± 0.02 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 16)` | 115.642 ± 0.305 | 115.390 | 115.982 | 1.00 |\r\n\r\nSystem information:\r\n```\r\nArchitecture:             x86_64\r\n  CPU op-mode(s):         32-bit, 64-bit\r\n  Address sizes:          46 bits physical, 48 bits virtual\r\n  Byte Order:             Little Endian\r\nCPU(s):                   20\r\n  On-line CPU(s) list:    0-19\r\nVendor ID:                GenuineIntel\r\n  Model name:             Intel(R) Core(TM) Ultra 7 265\r\n    CPU family:           6\r\n    Model:                198\r\n    Thread(s) per core:   1\r\n    Core(s) per socket:   1\r\n    Socket(s):            20\r\n    Stepping:             2\r\n    CPU(s) scaling MHz:   41%\r\n    CPU max MHz:          4800.0000\r\n    CPU min MHz:          800.0000\r\n    BogoMIPS:             4761.60\r\n```\r\n\r\nFurther benchmarks were performed using a [python script](https://github.com/Eunovo/rescan-benchmark) with custom chains designed with payments at specified intervals, and the following graph was produced:\r\n\r\n<img width=\"4760\" height=\"8950\" alt=\"benchmark_comparison\" src=\"https://github.com/user-attachments/assets/1ba8c64d-cfca-4360-af06-1f034a30e307\" />\r\n\r\nThis graph was produced from a laptop with the following CPU specifications:\r\n```\r\nArchitecture:                x86_64\r\n  CPU op-mode(s):            32-bit, 64-bit\r\n  Address sizes:             48 bits physical, 48 bits virtual\r\n  Byte Order:                Little Endian\r\nCPU(s):                      16\r\n  On-line CPU(s) list:       0-15\r\nVendor ID:                   AuthenticAMD\r\n  Model name:                AMD Ryzen 9 8945HS w/ Radeon 780M Graphics\r\n    CPU family:              25\r\n    Model:                   117\r\n    Thread(s) per core:      2\r\n    Core(s) per socket:      8\r\n    Socket(s):               1\r\n    Stepping:                2\r\n    Frequency boost:         enabled\r\n    CPU(s) scaling MHz:      63%\r\n    CPU max MHz:             5263.0000\r\n    CPU min MHz:             400.0000\r\n```\r\n\r\nAll materials for the custom benchmarks can be found [here](https://github.com/Eunovo/rescan-benchmark).\r\n\r\nAlthough not explicitly checked with Valgrind, hyperfine reported that memory usage stayed the same across all runs. I'm not sure to what degree hyperfine's memory usage report can be trusted, but the PR limits the amount of block hashes that can be held in memory for processing to `1000` (not configurable by the user).\r\n\r\n\r\nAll benchmarks were performed against https://github.com/bitcoin/bitcoin/pull/34400/commits/37d356bbbe3efed3c7c9e64fae1bac3f4d0ec6eb instead of master because `-walletpar` is implemented here, and the benchmark scripts would otherwise break, or more complicated scripts would be required to accommodate master.\r\n",
+      "state": "open",
+      "user": "Eunovo",
+      "created_at": "2026-01-24T19:46:16Z",
+      "updated_at": "2026-03-22T12:15:18Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34400",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 5492,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3209325275,
+      "number": 34405,
+      "title": "wallet: skip APS when no partial spend exists",
+      "body": "Fixes #25150\n\nAPS (Avoid Partial Spends) runs a second coin selection pass to fully spend\nUTXOs sharing a scriptPubKey. This currently runs unconditionally, even when\nthe first selection has no partial spend. Running APS unnecessarily wastes\ncomputation and can produce a worse result when there was nothing to fix.\n\nDetect partial spends by comparing selected vs available UTXO counts per\nscriptPubKey, reusing available_coins. Skip APS if none found.\n\nTest updated to create partial spend scenarios so tracepoints fire.\n\n---\n\n*Supersedes #34362 which was corrupted by a shallow clone force-push.*",
+      "state": "open",
+      "user": "8144225309",
+      "created_at": "2026-01-26T04:36:55Z",
+      "updated_at": "2026-03-22T11:56:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34405",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 644,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3223998841,
+      "number": 34448,
+      "title": "ci, iwyu: Fix warnings in `src/util` and treat them as errors",
+      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2026-01-29T15:38:39Z",
+      "updated_at": "2026-03-22T11:02:26Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34448",
+      "labels": [
+        "Refactoring",
+        "Utils/log/libs"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 305,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3243034362,
+      "number": 34495,
+      "title": "Replace boost signals with minimal compatible implementation",
+      "body": "This drops our dependency on `boost::signals2`, leaving `boost::multi_index` as the only remaining boost dependency for bitcoind.\r\n\r\n`boost::signals2` is a complex beast, but we only use a small portion of it. Namely: it's a way for multiple subscribers to connect to the same event, and the ability to later disconnect individual subscribers from that event.\r\n\r\n`btcsignals` adheres to the subset of the `boost::signals2` API that we currently use, and thus is a drop-in replacement. Rather than implementing a complex `slot` tracking class that we never used anyway (and which was much more useful in the days before std::function existed), callbacks are simply wrapped directly in `std::function`s.\r\n\r\nThe new tests work with either `boost::signals2` or the new `btcsignals` implementation. Reviewers can verify\r\nfunctional equivalency by running the tests in the commit that introduces them against `boost::signals2`, then again with `btcsignals`.\r\n\r\nThe majority of the commits in this PR are preparation and cleanup. Once `boost::signals2` is no longer needed, it is removed from depends. Additionally, a few CMake targets no longer need boost includes as they were previously only required for signals.\r\n\r\nI think this is actually pretty straightforward to review. I kept things simple, including keeping types unmovable/uncopyable where possible rather than trying to define those semantics. In doing so, the new implementation has even fewer type requirements than boost, which I believe is due to a boost bug. I've opened a PR upstream for that to attempt to maintain parity between the implementations.\r\n\r\nSee individual commits for more details.\r\n\r\nCloses #26442.",
+      "state": "open",
+      "user": "theuni",
+      "created_at": "2026-02-03T21:27:43Z",
+      "updated_at": "2026-03-22T09:54:46Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34495",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1736,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3250214855,
+      "number": 34514,
+      "title": "refactor: remove unnecessary std::move for trivially copyable types",
+      "body": "Inspired by https://github.com/bitcoin/bitcoin/pull/34320#discussion_r2751764873.\r\n\r\n### Problem\r\nA few function signatures in the codebase use rvalue references for trivially copyable types, forcing callers to `std::move()` values where there is no benefit - for trivially copyable types, moving is semantically identical to copying (see https://godbolt.org/z/hdrn17v9b).\r\n\r\nAdditionally, some call sites use `std::move()` on plain enums and primitive types where it is basically just noise.\r\n\r\nNote: `CheckTriviallyCopyableMove` remains `false` - `std::move()` on trivially copyable types is still permitted where it serves as intent documentation (e.g. signaling that a value should not be reused after a call).\r\n\r\n### Fix\r\n* Document why `CheckTriviallyCopyableMove` is kept disabled (to preserve `bugprone-use-after-move` coverage on trivially copyable types where `std::move` signals intent), cherry-picked from #34523\r\n* Change `EmplaceCoinInternalDANGER` to take `const COutPoint&` instead of `COutPoint&&`\r\n* Change logging functions to take `const SourceLocation&` instead of `SourceLocation&&`\r\n* Remove `std::move()` on enum types in RPC constructors and on `bool`/`int` members in `txgraph.cpp`",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-02-05T13:27:48Z",
+      "updated_at": "2026-03-22T09:27:57Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34514",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1275,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3424887099,
+      "number": 34879,
+      "title": "test, wallet: overhaul wallet_reindex test to wallet_birthtime",
+      "body": "The need for this change was ideated during the review of PR 34857.\r\n\r\n- The node doesn't need to be restarted (with reindex or without) because\r\nrescanblockchain RPC already updates the wallet birthtime, which is the property\r\nthat needs to be tested - this allows us to rename the test class to highlight\r\nthe change in intention of the test.\r\n- Generate 9 blocks fewer to fund the miner wallet.\r\n- Generate 30 blocks fewer to accommodate for the wallet scan start time while\r\nimporting descriptor with \"now\" timestamp.\r\n- Use common bumpmocktime helper instead of custom advance_time function.\r\n- Unload miner wallet before 20 blocks generation to avoid notifications from\r\nbeing processed by that wallet.\r\n- Change the order of arguments in assert_equal for consistency.\r\n- Add few constant and verbose comments for test clarity.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "open",
+      "user": "rkrux",
+      "created_at": "2026-03-20T12:57:19Z",
+      "updated_at": "2026-03-22T08:38:00Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34879",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 2,
+        "text_length": 2962,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 578665495,
+      "number": 21283,
+      "title": "Implement BIP 370 PSBTv2",
+      "body": "BIP 370 PSBTv2 introduces several new fields and different invariants for PSBT. This PR implements those new fields and restructures the PSBT implementation to match PSBTv2 but still remain compatible with PSBTv0.",
+      "state": "open",
+      "user": "achow101",
+      "created_at": "2021-02-23T18:29:20Z",
+      "updated_at": "2026-03-22T08:31:34Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/21283",
+      "labels": [
+        "Wallet",
+        "RPC/REST/ZMQ"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 238,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3419090967,
       "number": 34861,
@@ -318,31 +773,6 @@
       }
     },
     {
-      "id": 578665495,
-      "number": 21283,
-      "title": "Implement BIP 370 PSBTv2",
-      "body": "BIP 370 PSBTv2 introduces several new fields and different invariants for PSBT. This PR implements those new fields and restructures the PSBT implementation to match PSBTv2 but still remain compatible with PSBTv0.",
-      "state": "open",
-      "user": "achow101",
-      "created_at": "2021-02-23T18:29:20Z",
-      "updated_at": "2026-03-22T05:04:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/21283",
-      "labels": [
-        "Wallet",
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 238,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3309768200,
       "number": 34641,
       "title": "node: scale default `-dbcache` with system RAM",
@@ -384,30 +814,6 @@
         "drama_keywords": 1,
         "positive_keywords": 0,
         "text_length": 478,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3429716868,
-      "number": 34890,
-      "title": "test: add coin-grinder TOTAL_TRIES coverage",
-      "body": "The `TOTAL_TRIES` exit condition in CoinGrinder (`src/wallet/coinselection.cpp`)\r\nhas no test coverage — the guard and `SetAlgoCompleted(false)` can be removed\r\nwithout any test failing (see corecheck mutation report).\r\n\r\nThis adds a unit test in `coinselection_tests.cpp` that constructs a UTXO set\r\nlarge enough to exhaust `TOTAL_TRIES` iterations before finding an optimal\r\nsolution, then asserts the result has `GetAlgoCompleted() == false`.\r\n\r\nModeled after the existing BnB TOTAL_TRIES test at L166 of the same file.\r\n\r\nCloses #33419\r\n",
-      "state": "open",
-      "user": "HouseOfHufflepuff",
-      "created_at": "2026-03-21T23:25:21Z",
-      "updated_at": "2026-03-22T04:34:53Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34890",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 585,
         "has_nack": false,
         "has_ack": false
       }
@@ -629,54 +1035,6 @@
       }
     },
     {
-      "id": 3428510020,
-      "number": 34888,
-      "title": "wallet: fix amount computed as boolean in coin selection",
-      "body": "Stumbled upon this tiny bug. This has been working by accident.\r\n\r\nThe comparison is evaluated first, so `total_amount` ends up holding a boolean instead of the actual amount.\r\nIt can be verified by adding the value to the returned error message and running the `wallet_create_tx.py`\r\ntest.\r\n\r\nNote:\r\nI assume something like `-Wparentheses` in CI (or similar) should help us catching similar issues elsewhere.\r\n",
-      "state": "open",
-      "user": "furszy",
-      "created_at": "2026-03-21T12:50:27Z",
-      "updated_at": "2026-03-22T01:45:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34888",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 468,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 1276577083,
-      "number": 27260,
-      "title": "Enhanced error messages for invalid network prefix during address parsing.",
-      "body": "# Improve Address Decoding Error Messages\r\n\r\n## Issue\r\n\r\n`DecodeDestination` does not properly handle errors when a user inputs a valid address for the wrong network (e.g., a testnet address while running the client on mainnet).\r\n\r\nThe previous error messages were misleading. For example, \"Invalid or unsupported Segwit (Bech32) or Base58 encoding\" was displayed for a valid Bech32 address on a different network. This occurred because the `is_bech32` variable only checked if the prefix matched the current network's HRP. If it didn't match, the code would fall through to Base58 decoding logic regardless of whether the string was actually a valid Bech32 address.\r\n\r\n## Solution\r\n\r\n### Implementation Approach\r\n\r\n1. **Decode first, then validate**: Instead of checking the prefix before decoding, we now decode the string using `bech32::Decode(str)` upfront. This takes minimal CPU cycles and is acceptable since address validation is not a frequent operation.\r\n\r\n2. **Gather decoding information**: After Bech32 decoding, we also attempt `DecodeBase58` (with a length of 100) and `DecodeBase58Check`. This provides enough information to properly diagnose errors.\r\n\r\n3. **Provide network-aware error messages**: When an address has an invalid prefix, the error message now includes the expected network values.\r\n\r\n### Changes Made\r\n\r\n#### 1. Add Base58 Encoded Prefixes to ChainParams (`src/kernel/chainparams.cpp`, `src/kernel/chainparams.h`)\r\n\r\n#### 2. Refactor Address Decoding Logic (`src/key_io.cpp`)\r\n\r\n- Decode Bech32 upfront using `bech32::Decode(str)` instead of checking prefix first\r\n- Use structured bindings for cleaner code: `auto [bech32_encoding, bech32_hrp, bech32_chars] = bech32::Decode(str)`\r\n- Improved error handling flow with clearer branching\r\n\r\n#### 3. Improved Error Messages\r\n\r\n| Scenario | Previous Error | New Error |\r\n|----------|---------------|-----------|\r\n| Base58 address with wrong prefix | \"Invalid or unsupported Base58-encoded address.\" | \"Invalid Base58 address. Expected prefix 3, or 1\" |\r\n| Bech32 address with wrong HRP | \"Invalid or unsupported Segwit (Bech32) or Base58 encoding.\" | \"Invalid or unsupported prefix for Segwit (Bech32) address (expected bc, got tb)\" |\r\n| Invalid Base58 checksum | \"Invalid or unsupported Segwit (Bech32) or Base58 encoding.\" | \"Invalid checksum or length of Base58 address (P2PKH or P2SH)\" |\r\n| Ambiguous invalid address | \"Invalid or unsupported Segwit (Bech32) or Base58 encoding.\" | \"Address is not valid Base58 or Bech32\" |\r\n| Bech32 with checksum error | N/A | \"Bech32 address decoded with error: Invalid Bech32 checksum\" |\r\n\r\n#### 4. Test Updates\r\n\r\n- Added `test/functional/data/rpc_validateaddress.json` with comprehensive test vectors for both mainnet and signet\r\n- Updated `test/functional/rpc_validateaddress.py` to use data-driven testing across multiple networks\r\n- Updated `test/functional/rpc_invalid_address_message.py` with new error message expectations\r\n\r\n### Consistency Improvements\r\n\r\n- Removed inconsistent periods at the end of some error messages\r\n- Changed \"Bech32 v0\" to \"SegWit v0\" for clarity\r\n\r\n## Reference\r\n\r\n- Issue: #26290\r\n",
-      "state": "open",
-      "user": "portlandhodl",
-      "created_at": "2023-03-15T10:17:16Z",
-      "updated_at": "2026-03-22T01:06:38Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/27260",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 2,
-        "positive_keywords": 0,
-        "text_length": 3213,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3374032861,
       "number": 34778,
       "title": "logging: rewrite macros to add ratelimit option, avoid unused strprintf, clarify confusing errors",
@@ -740,31 +1098,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 1289,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3427465966,
-      "number": 34887,
-      "title": "fuzz: target CDBWrapper",
-      "body": "Inspired by https://github.com/bitcoin/bitcoin/pull/34866#issuecomment-4090291488.\r\n\r\nWe currently don't have a dedicated harness targeting `CDBWrapper`. OSS-Fuzz has a [rudimentary harness](https://github.com/google/oss-fuzz/blob/master/projects/leveldb/fuzz_db.cc) for levelDB [which fails](https://issues.oss-fuzz.com/issues/447252244), so doesn't appear maintained.\r\n\r\nThis PR adds a harness targeting `CDBWrapper` against an in-memory oracle to verify correctness.\r\n\r\nA `DeterministicEnv` wraps levelDB's `memenv` to eliminate non-determinism by capturing background compaction into a queue and draining it at fuzzer-chosen points.\r\nThe fuzzer also controls the cache_bytes size so that small values trigger memtable flushes and compaction.",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2026-03-21T01:12:00Z",
-      "updated_at": "2026-03-22T00:25:54Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34887",
-      "labels": [
-        "CI failed",
-        "Fuzzing"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 769,
         "has_nack": false,
         "has_ack": true
       }
@@ -1053,28 +1386,6 @@
       }
     },
     {
-      "id": 3424887099,
-      "number": 34879,
-      "title": "test, wallet: overhaul wallet_reindex test to wallet_birthtime",
-      "body": "- The node doesn't need to be restarted (with reindex or without) because\r\nrescanblockchain RPC already updates the wallet birthtime, which is the property\r\nthat needs to be tested - this allows us to rename the test class to highlight\r\nthe change in intention of the test.\r\n- Generate 9 blocks fewer to fund the miner wallet.\r\n- Generate 30 blocks fewer to accommodate for the wallet scan start time while\r\nimporting descriptor with \"now\" timestamp.\r\n- Use common bumpmocktime helper instead of custom advance_time function.\r\n- Unload miner wallet before 20 blocks generation to avoid notifications from\r\nbeing processed by that wallet.\r\n- Change the order of arguments in assert_equal for consistency.\r\n- Add few constant and verbose comments for test clarity.\r\n\r\nThe need for this change was ideated during the review of PR 34857.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
-      "state": "open",
-      "user": "rkrux",
-      "created_at": "2026-03-20T12:57:19Z",
-      "updated_at": "2026-03-22T08:04:55Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34879",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 2,
-        "text_length": 2962,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3425543873,
       "number": 34883,
       "title": "ci: vcpkg-specific cleanups",
@@ -1189,30 +1500,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 1540,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3259815827,
-      "number": 34534,
-      "title": "rpc: Manual prune lock management (Take 2)",
-      "body": "This is a refreshed version of #19463, which was closed due to inactivity.\r\n\r\nMotivation: On pruned nodes, if a wallet is not loaded while the node is running, blocks necessary for rescanning when the wallet is loaded may be pruned. This PR allows users and external wallet software to manually manage prune locks via RPC, so they can protect blocks needed for future rescans and also clean up locks that are no longer relevant (e.g. after permanently unloading a wallet from a node). This is useful both for Bitcoin Core's own wallet and for external wallets that use Bitcoin Core as a backend. Usage of temporary prune locking may also be helpful in other functional test scenarios but I didn't spend time to check where might apply.\r\n\r\nThis PR leverages the existing prune locks system we already have. The interface of the RPCs of the old PR has been slightly updated, it now matches the pattern used by `setban`/`listbanned` exactly. The locks are prefixed to distinguish them from the systems locks and prevent naming colissions. They are not persisted across restarts.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2026-02-08T14:01:05Z",
-      "updated_at": "2026-03-21T12:17:09Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34534",
-      "labels": [
-        "RPC/REST/ZMQ"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1118,
         "has_nack": false,
         "has_ack": true
       }
@@ -1719,30 +2006,6 @@
       }
     },
     {
-      "id": 3214986859,
-      "number": 34420,
-      "title": "consensus: disable min difficulty blocks on testnet4 after height 151200",
-      "body": "  ## Summary                                                                                                                                \r\n                                                                                                                                            \r\n  Disable the min-difficulty block rule on testnet4 after block height 151,200 (epoch 75 boundary) and reset difficulty to 1,000,000 at the fork.                                                                                                                                     \r\n                                                                                                                                            \r\n  ## Motivation                                                                                                                             \r\n                                                                                                                                            \r\n  Testnet4's min-difficulty rule (allowing difficulty-1 blocks after 20 minutes) is being exploited, causing ~85-90% of blocks to be CPU-mined min-difficulty blocks. This results in a race of CPU miners broadcasting blocks at exactly the second that it's acceptable. This race is so intense that CPU miners have figured out sending empty blocks, as they propagate faster than those that contain transactions, resulting in a network where transactions are confirmed at only the remaining ASIC blocks, that have ~1 hour average block times.                                                                                                     \r\n                                                                                                                                            \r\n  After the fork:                                                                                                                           \r\n  - Min-difficulty blocks will no longer be allowed                                                                                         \r\n  - Difficulty resets to 1,000,000 (not 1, to avoid a block storm of thousands of blocks in seconds)                                        \r\n  - Normal difficulty retargeting resumes                                                                                                   \r\n                                                                                                                                            \r\n  ## Changes                                                                                                                                \r\n                                                                                                                                            \r\n  - Add `nMinDifficultyBlocksForkHeight` consensus parameter (default 0 = disabled)                                                         \r\n  - Set fork height to 151,200 for testnet4 (epoch 75 boundary, ~31,000 blocks from current height ~120,000)                                \r\n  - Modify `GetNextWorkRequired()` to disable min-difficulty rule and reset difficulty at fork                                              \r\n  - Modify `PermittedDifficultyTransition()` to enforce the new rules                                                                       \r\n  - Modify `WaitAndCreateNewBlock()` in miner to respect the fork                                                                           \r\n  - Add unit tests covering pre-fork, at-fork, and post-fork behavior                                                                       \r\n                                                                                                                                            \r\n  ## Test Plan                                                                                                                              \r\n                                                                                                                                            \r\n  - `./build/bin/test_bitcoin --run_test=pow_tests` - all 21 tests pass                                                                     \r\n                                                                                                                                            \r\n  ## Discussion                                                                                                                             \r\n                                                                                                                                            \r\n  [bitcoin-dev mailing list thread #1](https://groups.google.com/g/bitcoindev/c/iVLHJ1HWhoU)\r\n  [bitcoin-dev mailing list thread #2](https://groups.google.com/g/bitcoindev/c/Jsv1VYpewuU)     \r\n  [Bitcointalk thread](https://bitcointalk.org/index.php?topic=5569103.0)     ",
-      "state": "open",
-      "user": "batmanbytes",
-      "created_at": "2026-01-27T15:08:13Z",
-      "updated_at": "2026-03-21T05:27:27Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34420",
-      "labels": [
-        "Consensus"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 4957,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2517768893,
       "number": 32489,
       "title": "wallet: Add `exportwatchonlywallet` RPC to export a watchonly version of a wallet",
@@ -2167,31 +2430,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 217,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3223998841,
-      "number": 34448,
-      "title": "ci, iwyu: Fix warnings in `src/util` and treat them as errors",
-      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2026-01-29T15:38:39Z",
-      "updated_at": "2026-03-20T16:53:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34448",
-      "labels": [
-        "Refactoring",
-        "Utils/log/libs"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 305,
         "has_nack": false,
         "has_ack": false
       }
@@ -2729,31 +2967,6 @@
       }
     },
     {
-      "id": 3405136954,
-      "number": 34833,
-      "title": "test: add addnode connection limit test to rpc_net.py",
-      "body": "Add `test_addnode_connection_limit` to `NetTest` in `rpc_net.py`, replacing the standalone `p2p_addnode_limit.py`.\n\nThe test restarts node 0 with `-maxconnections=0` to verify that addnode connections bypass the general connection limit and are independently capped at `MAX_ADDNODE_CONNECTIONS` (8). Nodes 2-10 serve as addnode targets (9 targets, only 8 can connect). The test verifies the cap is enforced, then removes one peer and confirms the previously-blocked node takes the freed slot.\n\nAdded as a separate test method rather than inline in `test_addnode_getaddednodeinfo` because the limit test requires different node configuration (no proxy, `-maxconnections=0`), necessitating a `restart_node` call.\n\nAddresses #28635",
-      "state": "open",
-      "user": "Bortlesboat",
-      "created_at": "2026-03-16T15:41:32Z",
-      "updated_at": "2026-03-20T10:43:04Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34833",
-      "labels": [
-        "Tests",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 782,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 1685623460,
       "number": 29278,
       "title": "Wallet:  Add `maxfeerate` wallet startup option",
@@ -3043,30 +3256,6 @@
       }
     },
     {
-      "id": 3207254787,
-      "number": 34400,
-      "title": "wallet: parallel fast rescan (approx 5x speed up with 16 threads)",
-      "body": "EDIT: Some parts of this PR have been split into https://github.com/bitcoin/bitcoin/pull/34667 and  https://github.com/bitcoin/bitcoin/pull/34681 to ease review. This PR will be put in draft until the previous PRs have been merged.\r\n\r\nThis PR uses the [ThreadPool](https://github.com/bitcoin/bitcoin/blob/master/src/util/threadpool.h) to implement parallel fast rescan.\r\n\r\nThis PR:\r\n- Adds a `ThreadPool` to the `WalletContext` to be shared by all the wallets\r\n- Adds `-walletpar` parameter to configure the number of threads to be used for parallel scanning \r\n- Updates the `wallet_fast_rescan.py` test to ensure it catches cases where the FastRescan filter wasn't properly updated. This is crucial to ensure that changes in the PR do not cause newly added output scripts to be missed.\r\n- Refactors `ScanForWalletTransactions` to make the implementation of parallel scanning easier.\r\n- Implements parallel scanning\r\n\r\nBenchmarks:\r\n**NOTE: to reproduce, please tune your system with `pyperf system tune`**\r\n\r\n_EDIT\r\nSet up your node to use block filters by setting `blockfilterindex=1` in your bitcoin.conf file and ensure your blockfilterindex is synced to tip before attempting to reproduce._\r\n\r\nUsing the following command on mainnet with a wallet with no scripts and hyperfine version `1.20.0`:\r\n```\r\nhyperfine --show-output --export-markdown results.md --export-json results.json  \\\r\n--sort command \\\r\n--runs 3 \\\r\n-L commit ef847e8,37d356b \\\r\n-L num_threads 1,2,4,8,16 \\\r\n--prepare 'git checkout {commit} && cmake --build build -j 20 && build/bin/bitcoind -blockfilterindex=1 -walletpar={num_threads} && sleep 10 && build/bin/bitcoin-cli loadwalllet <wallet-name>' \\\r\n--conclude 'build/bin/bitcoin-cli stop && sleep 10' \\\r\n'build/bin/bitcoin-cli rescanblockchain 500000 900000'\r\n```\r\nI obtained the following results:\r\n| Command | Mean [s] | Min [s] | Max [s] | Relative |\r\n|:---|---:|---:|---:|---:|\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = baseline, num_threads = ..)` | 536.996 ± 0.722 | 536.257 | 537.701 | 4.64 ± 0.01 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 1)` | 540.210 ± 2.696 | 537.172 | 542.320 | 4.67 ± 0.03 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 2)` | 358.190 ± 0.515 | 357.675 | 358.706 | 3.10 ± 0.01 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 4)` | 230.217 ± 2.321 | 228.814 | 232.896 | 1.99 ± 0.02 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 8)` | 151.144 ± 1.748 | 149.506 | 152.984 | 1.31 ± 0.02 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 16)` | 115.642 ± 0.305 | 115.390 | 115.982 | 1.00 |\r\n\r\nSystem information:\r\n```\r\nArchitecture:             x86_64\r\n  CPU op-mode(s):         32-bit, 64-bit\r\n  Address sizes:          46 bits physical, 48 bits virtual\r\n  Byte Order:             Little Endian\r\nCPU(s):                   20\r\n  On-line CPU(s) list:    0-19\r\nVendor ID:                GenuineIntel\r\n  Model name:             Intel(R) Core(TM) Ultra 7 265\r\n    CPU family:           6\r\n    Model:                198\r\n    Thread(s) per core:   1\r\n    Core(s) per socket:   1\r\n    Socket(s):            20\r\n    Stepping:             2\r\n    CPU(s) scaling MHz:   41%\r\n    CPU max MHz:          4800.0000\r\n    CPU min MHz:          800.0000\r\n    BogoMIPS:             4761.60\r\n```\r\n\r\nFurther benchmarks were performed using a [python script](https://github.com/Eunovo/rescan-benchmark) with custom chains designed with payments at specified intervals, and the following graph was produced:\r\n\r\n<img width=\"4760\" height=\"8950\" alt=\"benchmark_comparison\" src=\"https://github.com/user-attachments/assets/1ba8c64d-cfca-4360-af06-1f034a30e307\" />\r\n\r\nThis graph was produced from a laptop with the following CPU specifications:\r\n```\r\nArchitecture:                x86_64\r\n  CPU op-mode(s):            32-bit, 64-bit\r\n  Address sizes:             48 bits physical, 48 bits virtual\r\n  Byte Order:                Little Endian\r\nCPU(s):                      16\r\n  On-line CPU(s) list:       0-15\r\nVendor ID:                   AuthenticAMD\r\n  Model name:                AMD Ryzen 9 8945HS w/ Radeon 780M Graphics\r\n    CPU family:              25\r\n    Model:                   117\r\n    Thread(s) per core:      2\r\n    Core(s) per socket:      8\r\n    Socket(s):               1\r\n    Stepping:                2\r\n    Frequency boost:         enabled\r\n    CPU(s) scaling MHz:      63%\r\n    CPU max MHz:             5263.0000\r\n    CPU min MHz:             400.0000\r\n```\r\n\r\nAll materials for the custom benchmarks can be found [here](https://github.com/Eunovo/rescan-benchmark).\r\n\r\nAlthough not explicitly checked with Valgrind, hyperfine reported that memory usage stayed the same across all runs. I'm not sure to what degree hyperfine's memory usage report can be trusted, but the PR limits the amount of block hashes that can be held in memory for processing to `1000` (not configurable by the user).\r\n\r\n\r\nAll benchmarks were performed against https://github.com/bitcoin/bitcoin/pull/34400/commits/37d356bbbe3efed3c7c9e64fae1bac3f4d0ec6eb instead of master because `-walletpar` is implemented here, and the benchmark scripts would otherwise break, or more complicated scripts would be required to accommodate master.\r\n",
-      "state": "open",
-      "user": "Eunovo",
-      "created_at": "2026-01-24T19:46:16Z",
-      "updated_at": "2026-03-20T08:28:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34400",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 5492,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3260481659,
       "number": 34535,
       "title": "test: Add wallet reorg test during assumeutxo background sync",
@@ -3253,52 +3442,6 @@
       }
     },
     {
-      "id": 3239243501,
-      "number": 34489,
-      "title": "index: batch db writes during initial sync",
-      "body": "Decouples part of #26966.\r\n\r\nRight now, index initial sync writes to disk for every block, which is not the best for HDD. This change batches those, so disk writes are less frequent during initial sync. This also cuts down `cs_main` contention by reducing the number of `NextBlockSync` calls (instead of calling it for every block, we will call it once per block window), making the node more responsive (IBD and validation) while indexes sync up. On top of that, it lays the groundwork for the bigger speedups, since part of the parallelization pre-work is already in place.\r\n\r\nJust as a small summary:\r\n\r\n* Batch DB writes instead of flushing per block, which improves sync time on HDD due to the reduced number of disk write operations.\r\n* Reduce `cs_main` lock contention, which improves the overall node responsiveness (and primarily IBD) while the indexes threads are syncing.\r\n* Lays the groundwork for the real speedups, since part of #26966 parallelization pre-work is introduced here as well.\r\n* Reduces the number of generated LDB files. See l0rinc's [comment](https://github.com/bitcoin/bitcoin/pull/34489#issuecomment-3876972773).",
-      "state": "open",
-      "user": "furszy",
-      "created_at": "2026-02-03T04:06:34Z",
-      "updated_at": "2026-03-20T06:07:38Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34489",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1186,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3243034362,
-      "number": 34495,
-      "title": "Replace boost signals with minimal compatible implementation",
-      "body": "This drops our dependency on `boost::signals2`, leaving `boost::multi_index` as the only remaining boost dependency for bitcoind.\r\n\r\n`boost::signals2` is a complex beast, but we only use a small portion of it. Namely: it's a way for multiple subscribers to connect to the same event, and the ability to later disconnect individual subscribers from that event.\r\n\r\n`btcsignals` adheres to the subset of the `boost::signals2` API that we currently use, and thus is a drop-in replacement. Rather than implementing a complex `slot` tracking class that we never used anyway (and which was much more useful in the days before std::function existed), callbacks are simply wrapped directly in `std::function`s.\r\n\r\nThe new tests work with either `boost::signals2` or the new `btcsignals` implementation. Reviewers can verify\r\nfunctional equivalency by running the tests in the commit that introduces them against `boost::signals2`, then again with `btcsignals`.\r\n\r\nThe majority of the commits in this PR are preparation and cleanup. Once `boost::signals2` is no longer needed, it is removed from depends. Additionally, a few CMake targets no longer need boost includes as they were previously only required for signals.\r\n\r\nI think this is actually pretty straightforward to review. I kept things simple, including keeping types unmovable/uncopyable where possible rather than trying to define those semantics. In doing so, the new implementation has even fewer type requirements than boost, which I believe is due to a boost bug. I've opened a PR upstream for that to attempt to maintain parity between the implementations.\r\n\r\nSee individual commits for more details.\r\n\r\nCloses #26442.",
-      "state": "open",
-      "user": "theuni",
-      "created_at": "2026-02-03T21:27:43Z",
-      "updated_at": "2026-03-20T05:30:11Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34495",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1736,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3411013993,
       "number": 34843,
       "title": "kernel: add block locator to the C API",
@@ -3318,30 +3461,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 978,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3250214855,
-      "number": 34514,
-      "title": "refactor: remove unnecessary std::move for trivially copyable types",
-      "body": "Inspired by https://github.com/bitcoin/bitcoin/pull/34320#discussion_r2751764873.\r\n\r\n### Problem\r\nA few function signatures in the codebase use rvalue references for trivially copyable types, forcing callers to `std::move()` values where there is no benefit - for trivially copyable types, moving is semantically identical to copying (see https://godbolt.org/z/hdrn17v9b).\r\n\r\nAdditionally, some call sites use `std::move()` on plain enums and primitive types where it is basically just noise.\r\n\r\nNote: `CheckTriviallyCopyableMove` remains `false` - `std::move()` on trivially copyable types is still permitted where it serves as intent documentation (e.g. signaling that a value should not be reused after a call).\r\n\r\n### Fix\r\n* Document why `CheckTriviallyCopyableMove` is kept disabled (to preserve `bugprone-use-after-move` coverage on trivially copyable types where `std::move` signals intent), cherry-picked from #34523\r\n* Change `EmplaceCoinInternalDANGER` to take `const COutPoint&` instead of `COutPoint&&`\r\n* Change logging functions to take `const SourceLocation&` instead of `SourceLocation&&`\r\n* Remove `std::move()` on enum types in RPC constructors and on `bool`/`int` members in `txgraph.cpp`",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-02-05T13:27:48Z",
-      "updated_at": "2026-03-20T04:54:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34514",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1275,
         "has_nack": false,
         "has_ack": false
       }
@@ -4853,30 +4972,6 @@
       }
     },
     {
-      "id": 3313137140,
-      "number": 34651,
-      "title": "fuzz: Block connection and chain reorganization fuzzing harnesses",
-      "body": "Hi Bitcoin Core maintainers.\r\n\r\nThis PR is a remastered version of fuzzing harnesses developed during a Bitcoin Core audit.\r\nIt includes three different fuzzing harnesses which motivation was the following:\r\n\r\n* `connect_block`: Test the ConnectBlock() function responsible of validating the block and\r\n  all its transaction with consensus rules. Thanks to ``justCheck`` parameter no side effect\r\n  is performed on the internal state enabling relatively fast fuzzing.\r\n* `activate_best_chain_step`: Test the ActivateBestChainStep() function responsible of activating\r\n  the most worked-chain (not selecting it). The harness is written in a way that enable the fuzzer\r\n  triggering a chain reorganization if it generates two valid branches.\r\n* `activate_best_chain`: Test the ActivateBestChain() function responsible of selecting and activating\r\n  the most worked-chain.\r\n\r\nIn the two later harnesses, some internal state cleaning is required to avoid non-reproducibility issues.\r\nAlso they might produce file artifacts on disk by means of writing blocks.\r\n\r\nBesides pre-mining blocks, the harness initialization intends to bring a bit more of diversity by\r\nintroducing additional transactions in blocks (otherwise only coinbases), and put some transactions\r\nin the mempool so that they can be 'picked' and put in a block by means of input mutation.\r\n\r\nThese harnesses enables improving function coverage on `ActivateBestChainStep`, `removeForBlock` and to\r\ncover function uncovered by fuzzing at the time of fuzzing harness development (mid-2025).\r\nFunctions newly covered include `DisconnectTip`, `DisconnectBlock`, `ApplyTxInUndo`, `MaybeUpdateMempoolForReorg`, `removeForReorg` etc. The [attached figure](https://github.com/user-attachments/assets/19e985db-0a05-4b2d-b62a-c0e1826c5ed5) shows in red function previously uncovered. *(This might have slightly changed since then)*.\r\n\r\nWe tried to make the implementation as lean as possible but we are eager of any improvement feedbacks.\r\n\r\nAuthored by @RobinDavid and @nsurbay",
-      "state": "open",
-      "user": "RobinDavid",
-      "created_at": "2026-02-22T15:25:56Z",
-      "updated_at": "2026-03-18T16:15:57Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34651",
-      "labels": [
-        "Fuzzing"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2093,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3236363653,
       "number": 34479,
       "title": "fuzz: Add and use NodeClockContext",
@@ -6118,80 +6213,137 @@
         "has_nack": false,
         "has_ack": true
       }
-    },
+    }
+  ],
+  "issues": [
     {
-      "id": 2635595853,
-      "number": 32857,
-      "title": "wallet: allow skipping script paths",
-      "body": "While testing MuSig2 integration in #29675 I ran into a Ledger bug https://github.com/LedgerHQ/app-bitcoin-new/issues/329 that was triggered because we signed for a script path in addition to the key path. The bug itself will be fixed, but it seems useful in general to be able to skip script path signing.\r\n\r\nFor example, you may have a 2-of-2 musig() descriptor with some sort of fallback after coins are N blocks old. For both on chain privacy and fee reasons, you don't want to use this path unless absolutely necessary. But our wallet can't know if our co-signer still has their key, so we sign the script path at all times. This could lead to accidental broadcast.\r\n\r\nThis PR introduces a `keypath_only` option (default `false` for now) to:\r\n- the `send` RPC \r\n- the `walletprocesspsbt` RPC.\r\n\r\nThe resulting PSBT won't include `taproot_script_path_sigs`. It does still have `taproot_bip32_derivs` and `musig2_participant_pubkeys`.\r\n\r\nThe `wallet_taproot.py` tests are expanded to cover this behavior.\r\n\r\nIt can also be tested with https://github.com/Sjors/bitcoin/pull/91 and a slightly modified [Moosig](https://github.com/LedgerHQ/moosig). See https://github.com/LedgerHQ/app-bitcoin-new/issues/329 for the rough steps.\r\n\r\nBased on:\r\n- [ ] #32876\r\n\r\nTODO:\r\n- [ ] maybe refactor `MutableTransactionSignatureCreator`\r\n- [ ] add test coverage for `send`\r\n\r\nPotential followups:\r\n- make this default for `musig()` (after #29675)",
+      "id": 4116234113,
+      "number": 34894,
+      "title": "Usage suggests Core has become less relevant than Knots",
+      "body": "### Please describe the feature you'd like to see added.\n\n<img width=\"967\" height=\"466\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/c7053cfa-3320-4378-8863-8cd2b7c69eec\" />\n\nFor some time now, my node is seeing significantly more Knots nodes than Core nodes. Could this be considered an issue if relevance is important?\n\nNote, my node favors nodes that provide transactions that make it into the mempool, so it's possible that other people are not seeing this unless their node also has this preference.\n",
       "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-07-02T14:13:31Z",
-      "updated_at": "2026-03-15T13:17:46Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32857",
+      "user": "rebroad",
+      "created_at": "2026-03-22T14:45:03Z",
+      "updated_at": "2026-03-22T14:58:37Z",
+      "closed_at": null,
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34894",
       "labels": [
-        "Wallet",
-        "CI failed"
+        "Feature"
       ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 2,
-        "text_length": 1469,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 2641394506,
-      "number": 32876,
-      "title": "refactor: use options struct for signing and PSBT operations",
-      "body": "Replace the `sign`, `finalize` , `bip32derivs` and `sighash_type` arguments that are passed to `FillPSBT()` and `SignPSBTInput()` with a `PSBTFillOptions` struct.\r\n\r\n```cpp\r\nstruct PSBTFillOptions {\r\n    bool sign{true};\r\n    std::optional<int> sighash_type{std::nullopt};\r\n    bool finalize{true};\r\n    bool bip32_derivs{true};\r\n};\r\n```\r\n\r\nAdditionally this PR introduces:\r\n\r\n```cpp\r\nstruct SignOptions {\r\n    int sighash_type{SIGHASH_DEFAULT};\r\n};\r\n```\r\n\r\nThis is used by `SignTransaction` and the `MutableTransactionSignatureCreator` constructor.\r\n\r\nThese changes make it easier to add additional options later without large code churn, such as `avoid_script_path` proposed in #32857. It also makes the use of default boolean options safer compared to positional arguments that can easily get mixed up.",
-      "state": "open",
-      "user": "Sjors",
-      "created_at": "2025-07-04T12:40:44Z",
-      "updated_at": "2026-03-15T12:54:32Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/32876",
-      "labels": [
-        "Refactoring"
+      "comment_data": [
+        {
+          "id": 4106393597,
+          "user": "pinheadmz",
+          "body": "Can you explain the \"my node favors...\" a bit more? What's the version and actual configuration?",
+          "created_at": "2026-03-22T14:49:21Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 96,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4106402195,
+          "user": "rebroad",
+          "body": "> Can you explain the \"my node favors...\" a bit more? What's the version and actual configuration?\n\nit's custom code that I've been using since 2022 - it rates a node based on how much of the data received ends up in the mempool and evicts the node with the lowest score.",
+          "created_at": "2026-03-22T14:54:59Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 271,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4106407688,
+          "user": "pinheadmz",
+          "body": "I'm curious what your mempool policy is. \n\nBut I also think you should close this issue until you can reproduce it with bitcoin core. ",
+          "created_at": "2026-03-22T14:58:37Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 134,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
       ],
       "drama_signals": {
         "drama_keywords": 0,
         "positive_keywords": 0,
-        "text_length": 866,
+        "text_length": 576,
         "has_nack": false,
         "has_ack": false
       }
     },
     {
-      "id": 2803909911,
-      "number": 33324,
-      "title": "blocks: add `-reobfuscate-blocks` argument to enable (de)obfuscating existing blocks",
-      "body": "### Context\r\n\r\nRecent discussions highlighted that many nodes which synced before Bitcoin Core v28 have their block and undo files stored effectively in the clear (zero XOR key). This patch adds a simple, resumable maintenance tool to obfuscate previously raw block files, rotate an existing key to a fresh random one, or de-obfuscate (set key to zero) if consciously chosen, all without requiring resync. The operation can be cancelled and restarted safely.\r\n\r\n### Implementation\r\n\r\nThe new startup option `-reobfuscate-blocks[=VALUE]` accepts either 16 hex characters as an exact 8-byte XOR key (little-endian in-memory layout) or a boolean to generate a random 64-bit key. e.g. `-reobfuscate-blocks=0000000000000000` sets the key to zero, effectively removing obfuscation.\r\n\r\nIf we detect unobfuscated blocks at start time we suggest this new option in a warning.\r\n\r\nAt startup, we iterate over all undo and block files (grouping the block and undo files for more uniform iteration), read them with the old XOR key and write them back with the new key (`<name>.reobfuscated`). The implementation actually combines the two keys and reads directly into the new obfuscated version to only do a single iteration over the data. This works if the original blocks aren't obfuscated or if the new blocks aren't or if both are.\r\nAfter successful write, we immediately delete the old file. Once all files are staged, we rename them back and atomically swap `xor.dat.reobfuscated` → `xor.dat` and continue operation.\r\n\r\nWe log the old and new keys and print progress roughly per-percent as files complete (i.e. max 100 progress logs).\r\n\r\n### Constraints\r\n\r\n* Re-obfuscation resumes automatically (detected via `xor.dat.reobfuscated`) even without the flag. In worst-case a crash should only force us to redo previous work.\r\n* Single-threaded, processing one file at a time to keep code simple and avoid complexity of interleaving renames and key swaps across threads.\r\n* Fast in practice with sequential read/modify/write per blockfile - after recent obfuscation vectorization, this path is very quick.\r\n\r\n### Reproducer\r\n\r\n```bash\r\ncmake -B build -DBUILD_GUI=ON && cmake --build build -j$(nproc)\r\n# command line\r\n./build/bin/bitcoind -reobfuscate-blocks -stopatheight=1\r\n# same with GUI\r\n./build/bin/bitcoin-qt -reobfuscate-blocks -stopatheight=1\r\n```\r\n\r\n### Single-threaded Performance\r\n\r\n cpu                 | hdd/ssd | block count | size    | files  | time (min) | blocks/min \r\n---------------------|---------|-------------|---------|--------|------------|------------\r\n Apple M4 Max laptop | SSD     | ~909k       | ~707 GB | 9,982  | 8.4        | 146,613    \r\n Intel Core i9       | SSD     | ~909k       | ~725 GB | 10,238 | 23.1       | 39,351     \r\n Raspberry Pi 5      | SSD     | ~914k       | ~728 GB | 10,276 | 72.78      | 12,558     \r\n Intel Core i7       | HDD     | ~909k       | ~720 GB | 10,156 | 208.7      | 4,356      \r\n Raspberry Pi 4B     | HDD     | ~915k       | ~730 GB | 10,304 | 1467       | 624        \r\n\r\n----\r\n\r\nSimilar work:\r\n\r\n* https://github.com/bitcoin/bitcoin/pull/32451\r\n* https://github.com/andrewtoth/blocks-xor\r\n",
+      "id": 4087156718,
+      "number": 34840,
+      "title": "v31.0 Testing",
+      "body": "Umbrella issue for `31.0` testing. Please help testing on a wide variety of supported platforms, as well as interaction with different software.\n\nLet us know which version you tested on which operating system.\n\nIf you find an issue, please search Github for known issues first and then open a new Github issue.\n\nThis meta issue should not be used to report bugs, as a single thread makes it impossible to track more than one topic.\n\nSee [31.0 Release Notes Draft](https://github.com/bitcoin-core/bitcoin-devwiki/wiki/31.0-Release-Notes-Draft) for a list of changes.\n\nSee here for the testing guide: https://github.com/bitcoin-core/bitcoin-devwiki/wiki/31.0-Release-Candidate-Testing-Guide",
       "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-09-05T23:51:29Z",
-      "updated_at": "2026-03-15T09:09:00Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33324",
-      "labels": [],
+      "user": "fanquake",
+      "created_at": "2026-03-17T09:05:47Z",
+      "updated_at": "2026-03-22T09:51:21Z",
+      "closed_at": null,
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/34840",
+      "labels": [
+        "Tracking Issue"
+      ],
+      "comment_data": [
+        {
+          "id": 4073396103,
+          "user": "fanquake",
+          "body": "`v31.0rc1` bins are availalble here: https://bitcoincore.org/bin/bitcoin-core-31.0/test.rc1/.",
+          "created_at": "2026-03-17T09:06:44Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 93,
+            "has_nack": false,
+            "has_ack": false
+          }
+        },
+        {
+          "id": 4089523958,
+          "user": "l0rinc",
+          "body": "Tested [private broadcast](https://github.com/bitcoin/bitcoin/pull/29415) with the follow-up [debug logging](https://github.com/bitcoin/bitcoin/pull/34267) and [RPC queue inspection](https://github.com/bitcoin/bitcoin/pull/34329) across multiple transactions on mainnet.\n\nOne of them completed in ~30s: requested 3 connections, one onion failed and retried, two peers connected (v2 + v1), both received the INV and PONGed back, then the tx was received back from the network via a regular peer - stopping private broadcast. A third connection that completed after the tx was already confirmed was correctly disconnected as \"connected in vain\".\nRPC showed the tx in the queue after `sendrawtransaction`, present during retries, and cleared once received back from mempool.\n",
+          "created_at": "2026-03-19T11:37:02Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 2,
+            "text_length": 772,
+            "has_nack": false,
+            "has_ack": true
+          }
+        },
+        {
+          "id": 4105913717,
+          "user": "enirox001",
+          "body": "Tested on Fedora x86_64, compiled from source, v31.0rc1. \n\nAll guide tests passed as expected. I went beyond the guide and tested cluster mempool with longer tx chains, mixed fee rates, and submission order, all behaved correctly, cluster rejected at tx 65 with `too-large-cluster` as expected. \n\nPrivate broadcast behaved correctly in all scenarios including `getprivatebroadcastinfo` and `abortprivatebroadcast`. \n\nFor `coinbase_tx` I tested across all verbosity levels, confirmed the field matches the actual first transaction in the block, and verified the block height encoding in the coinbase hex. One thing worth flagging is that `getblock` returns `coinbase_tx.witness` as a string while `getrawtransaction` returns the same data via `vin[0].txinwitness` as an array. Same data, inconsistent types. May be intentional given the simplified nature of `coinbase_tx` but thought it was worth mentioning.\n",
+          "created_at": "2026-03-22T09:51:21Z",
+          "drama_signals": {
+            "drama_keywords": 1,
+            "positive_keywords": 1,
+            "text_length": 908,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
       "drama_signals": {
         "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 3232,
+        "positive_keywords": 2,
+        "text_length": 702,
         "has_nack": false,
         "has_ack": true
       }
-    }
-  ],
-  "issues": [
+    },
     {
       "id": 3586989882,
       "number": 33777,
@@ -7137,57 +7289,6 @@
       }
     },
     {
-      "id": 4087156718,
-      "number": 34840,
-      "title": "v31.0 Testing",
-      "body": "Umbrella issue for `31.0` testing. Please help testing on a wide variety of supported platforms, as well as interaction with different software.\n\nLet us know which version you tested on which operating system.\n\nIf you find an issue, please search Github for known issues first and then open a new Github issue.\n\nThis meta issue should not be used to report bugs, as a single thread makes it impossible to track more than one topic.\n\nSee [31.0 Release Notes Draft](https://github.com/bitcoin-core/bitcoin-devwiki/wiki/31.0-Release-Notes-Draft) for a list of changes.\n\nSee here for the testing guide: https://github.com/bitcoin-core/bitcoin-devwiki/wiki/31.0-Release-Candidate-Testing-Guide",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2026-03-17T09:05:47Z",
-      "updated_at": "2026-03-19T11:37:02Z",
-      "closed_at": null,
-      "comments": 2,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34840",
-      "labels": [
-        "Tracking Issue"
-      ],
-      "comment_data": [
-        {
-          "id": 4073396103,
-          "user": "fanquake",
-          "body": "`v31.0rc1` bins are availalble here: https://bitcoincore.org/bin/bitcoin-core-31.0/test.rc1/.",
-          "created_at": "2026-03-17T09:06:44Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 93,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
-          "id": 4089523958,
-          "user": "l0rinc",
-          "body": "Tested [private broadcast](https://github.com/bitcoin/bitcoin/pull/29415) with the follow-up [debug logging](https://github.com/bitcoin/bitcoin/pull/34267) and [RPC queue inspection](https://github.com/bitcoin/bitcoin/pull/34329) across multiple transactions on mainnet.\n\nOne of them completed in ~30s: requested 3 connections, one onion failed and retried, two peers connected (v2 + v1), both received the INV and PONGed back, then the tx was received back from the network via a regular peer - stopping private broadcast. A third connection that completed after the tx was already confirmed was correctly disconnected as \"connected in vain\".\nRPC showed the tx in the queue after `sendrawtransaction`, present during retries, and cleared once received back from mempool.\n",
-          "created_at": "2026-03-19T11:37:02Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 2,
-            "text_length": 772,
-            "has_nack": false,
-            "has_ack": true
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 2,
-        "text_length": 702,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3172029759,
       "number": 32802,
       "title": "IPC via TCP Sockets",
@@ -7909,9 +8010,9 @@
     }
   ],
   "summary": {
-    "total_prs": 259,
-    "total_issues": 35,
-    "total_comments": 65,
-    "unique_participants": 89
+    "total_prs": 260,
+    "total_issues": 36,
+    "total_comments": 69,
+    "unique_participants": 91
   }
 }
