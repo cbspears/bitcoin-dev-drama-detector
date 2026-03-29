@@ -1,12 +1,227 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-03-29T01:54:52.212556+00:00",
+  "fetched_at": "2026-03-29T08:34:11.601130+00:00",
   "date_range": {
-    "since": "2026-03-22T01:54:52.212452+00:00",
-    "until": "2026-03-29T01:54:52.212452+00:00"
+    "since": "2026-03-22T08:34:11.601083+00:00",
+    "until": "2026-03-29T08:34:11.601083+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3088060609,
+      "number": 34038,
+      "title": "logging: replace -loglevel with -trace, expose trace logging via RPC",
+      "body": " * A new -trace option controls trace-level logging, using the same syntax as -debug. So `-debug=net` enables debug logs for net, `-trace=net` adds trace logs too. This replaces the `-loglevel` option, which had different syntax and had to be combined with `-debug` to take effect.\r\n * The logging RPC gains trace support: a new trace parameter enables trace-level logging per category, and the output now distinguishes excluded/debug/trace categories. (`-deprecatedrpc=logging` preserves the old format.)",
+      "state": "open",
+      "user": "ajtowns",
+      "created_at": "2025-12-10T05:56:20Z",
+      "updated_at": "2026-03-29T08:31:55Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34038",
+      "labels": [
+        "Needs release note"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 574,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3413660470,
+      "number": 34847,
+      "title": "test: throttle large orphan transactions while being sent in RPCs",
+      "body": "Addresses #34731\r\n\r\nReasons why I don't believe it is a deadlock issue based on the debug logs and debugger thread backtrace output shared in the issue:\r\n- The HTTP worker threads (b-http_pool_x) are waiting on the condition variable and not on the mutex that signals that these threads are idle & waiting for work to be assigned to them.\r\n- The HTTP thread (b-http) is epoll waiting that means it is waiting for a request (or a part of it) to be received.\r\n- The added logs show that the first few testmempool RPCs were successful and the next one timed out. But the logs don't show a request for it being logged unlike in the previous ones, hinting that the server never received such a request (or in full) and thus never processed it. Even then the functional test client timed out, which means that it did send it (at least a part of it).\r\n- The large orphan transactions being sent are each 780KB in size that are sent sequentially by the test. It tries to send 60 of them in a loop amounting to 46MB of data over a single HTTP connection that is reused.\r\n\r\nMore details are shared in the first commit message.\r\n\r\nThis PR throttles the RPCs on client side. I've not been able to reproduce this intermittent issue and thus I don't gurantee that this fixes the issue altogether. \r\n\r\nNote: A previous approach in this PR tried to not reuse the HTTP connection for the RPCs in this test instead. But I noticed a CI run where this affected test took around 75mins to complete that led me to move to this approach where the HTTP connection is reused like before but with some throttling.\r\n\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "open",
+      "user": "rkrux",
+      "created_at": "2026-03-18T08:56:45Z",
+      "updated_at": "2026-03-29T07:41:19Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34847",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 3721,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3120160595,
+      "number": 34132,
+      "title": "coins: drop error catcher, centralize fatal read handling",
+      "body": "### Problem\r\nThe current coins database read-error handling adds unnecessary complexity to the critical path:\r\n* `CCoinsViewErrorCatcher` sits between the cache and database views, wrapping every read operation\r\n* `ExecuteBackedWrapper` adds another function call layer with lambda captures on each database read\r\n* Uses `std::vector<std::function<void()>>` for callbacks when there's only ever one callback registered\r\n* The error callback is set after database initialization rather than during construction (requiring a `cs_main` lock)\r\n\r\nThis adds unnecessary stack depth and bookkeeping overhead on every coins database read operation (`GetCoin`). Also note that `CCoinsViewDB::HaveCoin` isn't even on the hot path as far as I can tell.\r\n\r\n### Context\r\nThis is part of ongoing coins caching cleanup efforts, see https://github.com/bitcoin/bitcoin/issues/34280.\r\n\r\n### Fix\r\n**Behavior change:** Treat deserialization failures in `CDBWrapper::Read()` as fatal instead of catching and returning `false`. This makes corruption visible and avoids ambiguous missing-vs-unreadable handling at call sites: on decode failure, `CDBWrapper` logs the error, executes a provided callback, and then calls `std::abort()`.\r\n\r\nWith read-failure handling centralized in `CDBWrapper`, collapse the `CCoinsViewErrorCatcher` layer entirely by removing `ExecuteBackedWrapper` and `CCoinsViewErrorCatcher` which also enables making coins view lookups `noexcept`.\r\n\r\nA new test verifies the node aborts with a clear error message on a few database corruption paths.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-12-20T22:56:45Z",
+      "updated_at": "2026-03-29T07:29:23Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34132",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1604,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3132300728,
+      "number": 34158,
+      "title": "torcontrol: Remove libevent usage",
+      "body": "This is part of the effort to remove the libevent dependency from our code base: https://github.com/bitcoin/bitcoin/issues/31194\r\n\r\nThe current approach tries to reuse existing code and follows roughly similar design decisions. It replaces the libevent-based async I/O with blocking I/O utilizing the existing `Sock` and `CThreadInterrupt`. The controller runs in a dedicated thread.\r\n\r\nThere are some optional code modernizations thrown in made along the way (namings, constexpr etc.). These are not strictly necessary but make the end result with the new code more consistent.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-12-27T14:20:31Z",
+      "updated_at": "2026-03-29T07:15:11Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34158",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 612,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3134270217,
+      "number": 34170,
+      "title": "fuzz: Extend `scriptpubkeyman` coverage",
+      "body": "Add fuzzing coverage for several missing `DescriptorScriptPubKeyMan` methods.",
+      "state": "open",
+      "user": "Chand-ra",
+      "created_at": "2025-12-29T12:04:50Z",
+      "updated_at": "2026-03-29T06:48:54Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34170",
+      "labels": [
+        "Fuzzing"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 117,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3150717332,
+      "number": 34213,
+      "title": "net: preserve anchors when network is disabled",
+      "body": "### Problem \r\n\r\nWhen a node is shut down while network activity is disabled (e.g. via -networkactive=0 or `setnetworkactive` false), `anchors.dat` is overwritten with an empty list. This happens because `StopNodes()` collects anchors via `GetCurrentBlockRelayOnlyConns()`, which returns nothing when there are no active connections. The node then loses its anchors and cannot reconnect to them on the next startup.\r\n\r\n### Fix \r\n\r\n- In `SetNetworkActive(false)`, save the current block-relay-only connections into `m_anchors` before the connections are closed, so the anchor list is preserved even after the network is deactivated.\r\n- In `StopNodes()`, if the network is inactive and m_anchors is non-empty, use those stored anchors as the source for anchors.dat instead of the (empty) live connection list. Also skip `DumpAnchors` entirely when the network is inactive and there is nothing to write.\r\n\r\nAlso, log that \"X anchors will be tried for connections\" only if network is active. ",
+      "state": "open",
+      "user": "brunoerg",
+      "created_at": "2026-01-06T21:26:09Z",
+      "updated_at": "2026-03-29T05:43:04Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34213",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1034,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3181854676,
+      "number": 34320,
+      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
+      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the DB.\r\nOne tries to deserialize; the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin`, which delegates to `GetCoin`).\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the backing view's `::GetCoin` (not `::HaveCoin`) on cache miss and checks the cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: The latest version of the change keeps most `HaveCoin` calls for convenience; a previous version removed all of them.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-16T16:17:29Z",
+      "updated_at": "2026-03-29T04:31:15Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
+      "labels": [
+        "UTXO Db and Indexes"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1186,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3460523184,
+      "number": 34943,
+      "title": "ci: ancestor commits [draft, ignore]",
+      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
+      "state": "open",
+      "user": "rkrux",
+      "created_at": "2026-03-28T11:12:04Z",
+      "updated_at": "2026-03-29T04:17:51Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34943",
+      "labels": [
+        "Tests",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 2099,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3187823761,
+      "number": 34342,
+      "title": "cli: Replace libevent usage with simple http client",
+      "body": "Part of the effort to remove the libevent dependency altogether, see #31194\r\n\r\nThis takes the [`HTTPHeaders` class](https://github.com/bitcoin/bitcoin/pull/32061/commits/d549f01caab659f1c431ccabf0f5ff1800debcfe) from #32061 and puts it into [`common/http.h|cpp`](https://github.com/bitcoin/bitcoin/pull/34342/commits/634d4dcfa428f17f0a12c2e2742c2c08e2345033). While it would not be strictly required for that PR to go in first, it might be better to review it first or simultaneously.\r\n\r\nOtherwise the change itself replaces the libevent-based HTTP client with a simple synchronous implementation which uses the `Sock` class directly.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2026-01-19T13:27:54Z",
+      "updated_at": "2026-03-29T03:50:39Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34342",
+      "labels": [
+        "Scripts and tools"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 686,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3402827901,
       "number": 34829,
@@ -222,30 +437,6 @@
       }
     },
     {
-      "id": 3413660470,
-      "number": 34847,
-      "title": "test: throttle large orphan transactions while being sent in RPCs",
-      "body": "Addresses #34731\r\n\r\nReasons why I don't believe it is a deadlock issue based on the debug logs and debugger thread backtrace output shared in the issue:\r\n- The HTTP worker threads (b-http_pool_x) are waiting on the condition variable and not on the mutex that signals that these threads are idle & waiting for work to be assigned to them.\r\n- The HTTP thread (b-http) is epoll waiting that means it is waiting for a request (or a part of it) to be received.\r\n- The added logs show that the first few testmempool RPCs were successful and the next one timed out. But the logs don't show a request for it being logged unlike in the previous ones, hinting that the server never received such a request (or in full) and thus never processed it. Even then the functional test client timed out, which means that it did send it (at least a part of it).\r\n- The large orphan transactions being sent are each 780KB in size that are sent sequentially by the test. It tries to send 60 of them in a loop amounting to 46MB of data over a single HTTP connection that is reused.\r\n\r\nMore details are shared in the first commit message.\r\n\r\nThis PR throttles the RPCs on client side. I've not been able to reproduce this intermittent issue and thus I don't gurantee that this fixes the issue altogether. \r\n\r\nNote: A previous approach in this PR tried to not reuse the HTTP connection for the RPCs in this test instead. But I noticed a CI run where this affected test took around 75mins to complete that led me to move to this approach where the HTTP connection is reused like before but with some throttling.\r\n\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
-      "state": "open",
-      "user": "rkrux",
-      "created_at": "2026-03-18T08:56:45Z",
-      "updated_at": "2026-03-28T16:10:57Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34847",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 3721,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3460604204,
       "number": 34944,
       "title": "guix: Clean up module list in manifest",
@@ -317,31 +508,6 @@
         "text_length": 168,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3460523184,
-      "number": 34943,
-      "title": "ci: ancestor commits [draft, ignore]",
-      "body": "<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
-      "state": "open",
-      "user": "rkrux",
-      "created_at": "2026-03-28T11:12:04Z",
-      "updated_at": "2026-03-28T13:30:29Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34943",
-      "labels": [
-        "Tests",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 2099,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -1087,30 +1253,6 @@
       }
     },
     {
-      "id": 3150717332,
-      "number": 34213,
-      "title": "net: preserve anchors when network is disabled",
-      "body": "### Problem \r\n\r\nWhen a node is shut down while network activity is disabled (e.g. via -networkactive=0 or `setnetworkactive` false), `anchors.dat` is overwritten with an empty list. This happens because `StopNodes()` collects anchors via `GetCurrentBlockRelayOnlyConns()`, which returns nothing when there are no active connections. The node then loses its anchors and cannot reconnect to them on the next startup.\r\n\r\n### Fix \r\n\r\n- In `SetNetworkActive(false)`, save the current block-relay-only connections into `m_anchors` before the connections are closed, so the anchor list is preserved even after the network is deactivated.\r\n- In `StopNodes()`, if the network is inactive and m_anchors is non-empty, use those stored anchors as the source for anchors.dat instead of the (empty) live connection list. Also skip `DumpAnchors` entirely when the network is inactive and there is nothing to write.\r\n\r\nAlso, log that \"X anchors will be tried for connections\" only if network is active. ",
-      "state": "open",
-      "user": "brunoerg",
-      "created_at": "2026-01-06T21:26:09Z",
-      "updated_at": "2026-03-27T15:34:44Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34213",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1034,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3439805320,
       "number": 34911,
       "title": "rpc, mempool: remove fullrbf remnants",
@@ -1224,28 +1366,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1512,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3132300728,
-      "number": 34158,
-      "title": "torcontrol: Remove libevent usage",
-      "body": "This is part of the effort to remove the libevent dependency from our code base: https://github.com/bitcoin/bitcoin/issues/31194\r\n\r\nThe current approach tries to reuse existing code and follows roughly similar design decisions. It replaces the libevent-based async I/O with blocking I/O utilizing the existing `Sock` and `CThreadInterrupt`. The controller runs in a dedicated thread.\r\n\r\nThere are some optional code modernizations thrown in made along the way (namings, constexpr etc.). These are not strictly necessary but make the end result with the new code more consistent.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2025-12-27T14:20:31Z",
-      "updated_at": "2026-03-27T14:49:02Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34158",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 612,
         "has_nack": false,
         "has_ack": false
       }
@@ -1922,30 +2042,6 @@
       }
     },
     {
-      "id": 3088060609,
-      "number": 34038,
-      "title": "logging: replace -loglevel with -trace, expose trace logging via RPC",
-      "body": " * A new -trace option controls trace-level logging, using the same syntax as -debug. So `-debug=net` enables debug logs for net, `-trace=net` adds trace logs too. This replaces the `-loglevel` option, which had different syntax and had to be combined with `-debug` to take effect.\r\n * The logging RPC gains trace support: a new trace parameter enables trace-level logging per category, and the output now distinguishes excluded/debug/trace categories. (`-deprecatedrpc=logging` preserves the old format.)",
-      "state": "open",
-      "user": "ajtowns",
-      "created_at": "2025-12-10T05:56:20Z",
-      "updated_at": "2026-03-27T03:34:50Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34038",
-      "labels": [
-        "Needs release note"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 574,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3091431534,
       "number": 34049,
       "title": "rpc: Disallow captures in RPCMethodImpl",
@@ -1991,54 +2087,6 @@
         "text_length": 1175,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3120160595,
-      "number": 34132,
-      "title": "coins: drop error catcher, centralize fatal read handling",
-      "body": "### Problem\r\nThe current coins database read-error handling adds unnecessary complexity to the critical path:\r\n* `CCoinsViewErrorCatcher` sits between the cache and database views, wrapping every read operation\r\n* `ExecuteBackedWrapper` adds another function call layer with lambda captures on each database read\r\n* Uses `std::vector<std::function<void()>>` for callbacks when there's only ever one callback registered\r\n* The error callback is set after database initialization rather than during construction (requiring a `cs_main` lock)\r\n\r\nThis adds unnecessary stack depth and bookkeeping overhead on every coins database read operation (`GetCoin`). Also note that `CCoinsViewDB::HaveCoin` isn't even on the hot path as far as I can tell.\r\n\r\n### Context\r\nThis is part of ongoing coins caching cleanup efforts, see https://github.com/bitcoin/bitcoin/issues/34280.\r\n\r\n### Fix\r\n**Behavior change:** Treat deserialization failures in `CDBWrapper::Read()` as fatal instead of catching and returning `false`. This makes corruption visible and avoids ambiguous missing-vs-unreadable handling at call sites: on decode failure, `CDBWrapper` logs the error, executes a provided callback, and then calls `std::abort()`.\r\n\r\nWith read-failure handling centralized in `CDBWrapper`, collapse the `CCoinsViewErrorCatcher` layer entirely by removing `ExecuteBackedWrapper` and `CCoinsViewErrorCatcher` which also enables making coins view lookups `noexcept`.\r\n\r\nA new test verifies the node aborts with a clear error message on a few database corruption paths.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-12-20T22:56:45Z",
-      "updated_at": "2026-03-27T03:17:58Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34132",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1604,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3134270217,
-      "number": 34170,
-      "title": "fuzz: Extend `scriptpubkeyman` coverage",
-      "body": "Add fuzzing coverage for several missing `DescriptorScriptPubKeyMan` methods.",
-      "state": "open",
-      "user": "Chand-ra",
-      "created_at": "2025-12-29T12:04:50Z",
-      "updated_at": "2026-03-27T03:07:38Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34170",
-      "labels": [
-        "Fuzzing"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 117,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -2157,30 +2205,6 @@
         "text_length": 677,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3181854676,
-      "number": 34320,
-      "title": "coins: remove redundant and confusing `CCoinsViewDB::HaveCoin`",
-      "body": "Split out of https://github.com/bitcoin/bitcoin/pull/34132#discussion_r2692307054.\r\n\r\n### Problem\r\nWe have two ways to check if a coin exists in the DB.\r\nOne tries to deserialize; the other just returns whether any value is associated with the key.\r\nBut we usually need the full value we probed for, and `HaveCoin` cannot cache the returned value, so it can trigger an extra lookup if `HaveCoin` uses `Exists` and the caller later needs the actual value.\r\nWe're already delegating most `HaveCoin` calls to `GetCoin` anyway for the above reasons, so the `CCoinsViewDB` implementation of `HaveCoin` is redundant.\r\n\r\n### Fix\r\nRemove `CCoinsViewDB::HaveCoin` (falls back to the base `CCoinsView::HaveCoin`, which delegates to `GetCoin`).\r\n\r\n### Testing\r\nA unit test was added to confirm that `HaveInputs` calls the backing view's `::GetCoin` (not `::HaveCoin`) on cache miss and checks the cache first.\r\nAlso added a benchmark to track throughput before/after changes to ensure no regression.\r\n\r\n----\r\n\r\nNote: The latest version of the change keeps most `HaveCoin` calls for convenience; a previous version removed all of them.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-16T16:17:29Z",
-      "updated_at": "2026-03-27T01:17:23Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34320",
-      "labels": [
-        "UTXO Db and Indexes"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1186,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -5861,100 +5885,6 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 3280499535,
-      "number": 34580,
-      "title": "build: Add a compiler minimum version check",
-      "body": "Adds a compiler features check. If failed, it returns a fatal error.\r\nThis early stop at configure time will avoid contributors losing time trying to fix compilation errors because of not fitting the requirements.\r\n\r\nExample of the output for GCC:\r\nVersion requirement satisfied:\r\n```\r\n$ cmake -B build\r\n-- The CXX compiler identification is GNU 13.3.0\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n-- Check for working CXX compiler: /usr/bin/c++ - skipped\r\n-- Detecting CXX compile features\r\n-- Detecting CXX compile features - done\r\n...\r\n-- Checking for required C++ features\r\n-- Checking for required C++ features - done\r\n....\r\n```\r\nVersion requirement not satisfied:\r\n```\r\n$ cmake -B build -DCMAKE_C_COMPILER=/usr/bin/gcc-10 -DCMAKE_CXX_COMPILER=/usr/bin/g++-10\r\n-- The CXX compiler identification is GNU 10.5.0\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n-- Check for working CXX compiler: /usr/bin/g++-10 - skipped\r\n-- Detecting CXX compile features\r\n-- Detecting CXX compile features - done\r\n-- Setting build type to \"RelWithDebInfo\" as none was specified\r\n-- Performing Test CXX_SUPPORTS__WERROR\r\n-- Performing Test CXX_SUPPORTS__WERROR - Success\r\n-- Found SQLite3: /usr/include (found suitable version \"3.45.1\", minimum required is \"3.7.17\")\r\n-- Checking for required C++ features\r\nCMake Error at cmake/module/CheckCXXFeatures.cmake:32 (message):\r\n  Compiler lacks Class Template Argument Deduction (CTAD) for aggregates.\r\n\r\n  This C++ feature is required for src/util/overloaded.h.\r\n\r\n  Recommended compiler versions:\r\n\r\n    - GCC >= 12.1\r\n    - Clang >= 17.0\r\n    - MSVC >= 19.50\r\nCall Stack (most recent call first):\r\n  CMakeLists.txt:200 (check_cxx_features)\r\n\r\n\r\n-- Configuring incomplete, errors occurred!\r\n\r\n```\r\n\r\nExample of the output for Clang:\r\nVersion requirement satisfied:\r\n```\r\n$ cmake -B build -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20\r\n-- The CXX compiler identification is Clang 20.1.2\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n-- Check for working CXX compiler: /usr/bin/clang++-20 - skipped\r\n-- Detecting CXX compile features\r\n-- Detecting CXX compile features - done\r\n...\r\n-- Checking for required C++ features\r\n-- Checking for required C++ features - done\r\n...\r\n```\r\n\r\nVersion requirement not satisfied:\r\n```\r\n$ cmake -B build -DCMAKE_C_COMPILER=clang-16 -DCMAKE_CXX_COMPILER=clang++-16\r\n-- The CXX compiler identification is Clang 16.0.6\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n-- Check for working CXX compiler: /usr/bin/clang++-16 - skipped\r\n-- Detecting CXX compile features\r\n-- Detecting CXX compile features - done\r\n-- Setting build type to \"RelWithDebInfo\" as none was specified\r\n-- Performing Test CXX_SUPPORTS__WERROR\r\n-- Performing Test CXX_SUPPORTS__WERROR - Success\r\n-- Performing Test CXX_SUPPORTS__G3\r\n-- Performing Test CXX_SUPPORTS__G3 - Success\r\n-- Performing Test LINKER_SUPPORTS__G3\r\n-- Performing Test LINKER_SUPPORTS__G3 - Success\r\n-- Performing Test CXX_SUPPORTS__FTRAPV\r\n-- Performing Test CXX_SUPPORTS__FTRAPV - Success\r\n-- Performing Test LINKER_SUPPORTS__FTRAPV\r\n-- Performing Test LINKER_SUPPORTS__FTRAPV - Success\r\n-- Found SQLite3: /usr/include (found suitable version \"3.45.1\", minimum required is \"3.7.17\")\r\n-- Checking for required C++ features\r\nCMake Error at cmake/module/CheckCXXFeatures.cmake:32 (message):\r\n  Compiler lacks Class Template Argument Deduction (CTAD) for aggregates.\r\n\r\n  This C++ feature is required for src/util/overloaded.h.\r\n\r\n  Recommended compiler versions:\r\n\r\n    - GCC >= 12.1\r\n    - Clang >= 17.0\r\n    - MSVC >= 19.50\r\nCall Stack (most recent call first):\r\n  CMakeLists.txt:200 (check_cxx_features)\r\n\r\n\r\n-- Configuring incomplete, errors occurred!\r\n```\r\n\r\n\r\nEdit: The first version of the PR was to check hardcoded compiler versions. See previous PR description for context here.\r\n<details>\r\n\r\nAdds a compiler minimum version check. If failed, it returns a fatal error.\r\nThis early stop at configure time will avoid contributors losing time trying to fix compilation errors because of not fitting the requirements.\r\n\r\nExample of the output for GCC:\r\nVersion requirement satisfied:\r\n```\r\nsliv3r@sliv3r-tuxedo:~/Documentos/Projectes/BitcoinCore/bitcoin$ cmake -B BUILD\r\n-- The CXX compiler identification is GNU 13.3.0\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n....\r\n```\r\nVersion requirement not satisfied:\r\n```\r\n$ cmake -B build -S .   -DCMAKE_C_COMPILER=/usr/bin/gcc-11   -DCMAKE_CXX_COMPILER=/usr/bin/g++-11\r\n-- The CXX compiler identification is GNU 11.5.0\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n-- Check for working CXX compiler: /usr/bin/g++-11 - skipped\r\n-- Detecting CXX compile features\r\n-- Detecting CXX compile features - done\r\nCMake Error at CMakeLists.txt:91 (message):\r\n  GCC >= 12.1 required.\r\n\r\n\r\n-- Configuring incomplete, errors occurred!\r\n\r\n```\r\n\r\n\r\nExample of the output for Clang:\r\nVersion requirement satisfied:\r\n```\r\nsliv3r@sliv3r-tuxedo:~/Documentos/Projectes/BitcoinCore/bitcoin$ cmake -B build\r\n-- The CXX compiler identification is Clang 18.1.3\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n...\r\n```\r\n\r\nVersion requirement not satisfied:\r\n```\r\n$ cmake -B build -DCMAKE_C_COMPILER=clang-16       -DCMAKE_CXX_COMPILER=clang++-16\r\n-- The CXX compiler identification is Clang 16.0.6\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n-- Check for working CXX compiler: /usr/bin/clang++-16 - skipped\r\n-- Detecting CXX compile features\r\n-- Detecting CXX compile features - done\r\nCMake Error at CMakeLists.txt:86 (message):\r\n  Clang >= 17.0 required.\r\n\r\n\r\n-- Configuring incomplete, errors occurred!\r\n```\r\n<\\detail>",
-      "state": "open",
-      "user": "polespinasa",
-      "created_at": "2026-02-13T11:31:21Z",
-      "updated_at": "2026-03-22T07:11:21Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34580",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 5876,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3299949354,
-      "number": 34617,
-      "title": "fees: wallet: remove block policy fee estimator internals from wallet",
-      "body": "\r\nPart of #34075\r\n\r\n#### Motivation\r\nThe wallet currently knows the block policy estimator's internals from the response returned by `estimateSmartFee`.\r\n`estimateSmartFee` logging, which is supposed to be inside the method, is done in the wallet.\r\nAlso, the source of a wallet transaction fee is saved in the `CBlockPolicyEstimator::FeeReason` enum. This shows that there is tight coupling between the wallet and `CBlockPolicyEstimator`, which results in code that is a bit messy to extend and even read.\r\nIn #34075 the wallet is going to use a response returned via a fee rate estimator manager which does not return all those internals, hence motivating this refactor.\r\nThis PR refactors the interface between the wallet and the fee estimator to improve encapsulation and separate two distinct concerns: the source of a fee rate (where it came from) and the estimator's reason (why the algorithm chose it).\r\n\r\n#### Key Changes\r\n* Separate `FeeSource` from `FeeReason`:\r\n   Introduced a new `FeeSource` enum in `src/util/fees.h` to represent the high-level origin of a fee rate (e.g., `PAYTXFEE`, `FALLBACK`, `FEE_RATE_ESTIMATOR`). The existing `FeeReason` is now strictly scoped to internal `CBlockPolicyEstimator` details.\r\n* Encapsulate `estimateSmartFee` Logging:\r\n   Moved the fee calculation logging logic into `CBlockPolicyEstimator`. This removes the need for the wallet to manage a `FeeCalculation` object just to facilitate logging, especially when the caller passes `nullptr`.\r\n* Refactor `GetMinimumFeeRate`:\r\n   Updated `wallet::GetMinimumFeeRate` to return a `MinimumFeeRateResult` struct. This avoids the use of output parameters and provides a cleaner interface for retrieving the fee rate, source, and target.\r\n* Move `StringForFeeReason`:\r\n   Moved `StringForFeeReason` to `src/policy/fees/block_policy_estimator.cpp` to align with the location of the `FeeReason` enum. The function was also refactored to use a switch statement without a default case to ensure compile-time coverage of all reasons.\r\n*  Wallet RPC field deprecation :\r\n  deprecate the `fee_reason` field in wallet RPCs ( `send` and `sendmany`).  This field now correctly returns the fee source, but does not rename the field `fee_reason` to `fee_source`; instead it deprecates to maintain backward compatibility for some time before renaming the field in the future.\r\n* Additional Logging:\r\n   Added logging for transaction fee, size, and source in `CreateTransactionInternal` to improve debugging of fee selection.",
-      "state": "open",
-      "user": "ismaelsadeeq",
-      "created_at": "2026-02-18T18:45:18Z",
-      "updated_at": "2026-03-22T06:21:56Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34617",
-      "labels": [
-        "TX fees and policy"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 2572,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3429671224,
-      "number": 34889,
-      "title": "verifybinaries: fix trusted signature count",
-      "body": "The threshold check currently counts both trusted and untrusted signatures. Count only trusted signatures toward the threshold.",
-      "state": "closed",
-      "user": "dplusplus1024",
-      "created_at": "2026-03-21T22:59:37Z",
-      "updated_at": "2026-03-22T05:50:43Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34889",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 171,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3331553763,
-      "number": 34683,
-      "title": "RFC: Support a formal description of our JSON-RPC interface",
-      "body": "Ref #29912.\r\n\r\nThis draft PR adds a machine-readable[ OpenRPC](https://www.open-rpc.org/) 1.3.2 specification of out JSON-RPC interface, auto-generated from existing `RPCHelpMan` metadata.\r\n\r\nThere is currently no formal, machine-readable specification of the RPC API. As discussed in #29912, this has knock-on consequences:\r\n\r\n- Client libraries re-implement the API manually, leading to bugs like unit mistakes (sats vs BTC, vB vs kvB) and missing/incorrect argument types. No existing client library fully and correctly implements the API in a type-safe manner.\r\n- When the API changes, every downstream client must manually discover and adapt, creating downstream maintenance burden. There is no artifact they can diff between releases.\r\n- Implementing a new client in a new language requires reading C++ source or help text and transcribing it, which is error-prone and tedious, and represents an on-going porting cost.\r\n- Existing documentation is either stale or not machine-readable. The developer.bitcoin.org docs are wrong/outdated in places, and the bitcoincore.org/en/doc/ pages are rendered from help output but not in a standard schema format.\r\n- (new/extra) AI/LLM tooling increasingly builds on structured API specifications. A standard spec format enables AI-assisted client generation and integration without the ambiguity of parsing human-readable help text.\r\n\r\nThis draft builds on prior art by @casey and the observations by @laanwj, @stickies-v, @kilianmh, @hodlinator, and @cdecker in #29912. Casey's work demonstrated that RPCHelpMan already contains all the structured information needed, which makes this feasible without duplicating any API definitions.\r\n\r\nThis differs from Casey's branches in that it uses the OpenRPC standard rather than an ad-hoc format or raw JSON Schema.\r\n\r\n### Why OpenRPC\r\n\r\nI seletced OpenRPC for a number of reasons:\r\n\r\n- It's purpose-built for JSON-RPC APIs (suggested by @stickies-v, @nflatrea, and @kilianmh).\r\n- It wraps JSON schema for params/results, so consumers get both the method-level structure and the type-level schemas.\r\n- Unlike OpenAPI, it is not path-centric, which better fits our single-endpoint JSON-RPC model (concern raised by @hodlinator).\r\n  - Although it therefore does not cover our REST interface.\r\n- It's _kind of_ a standard format with (_some_) existing tooling for type generation (TypeScript, Rust, Python, Go) and client scaffolding, though maturity varies by language. More importantly though, IMO, a ~standardised format is inherently more useful than any ad-hoc one: any JSON Schema validator works, any LLM can consume it directly, and anyone can write a bespoke generator against a known schema rather than parsing help text.\r\n\r\n### Approach\r\n\r\n`RPCHelpMan metadata → getopenrpcinfo RPC → OpenRPC JSON`\r\n\r\n### Tradeoffs\r\n\r\nvs an ad-hoc format OpenRPC gives us interoperability with the (admittedly surprisingly limited) tooling, documentation generators, code generators, and validators, at the cost of needing x-bitcoin-* extensions for Bitcoin-specific concepts. As Casey noted after trying both approaches, JSON Schema \"is probably not a great fit\". OpenRPC's method-level framing on top of JSON Schema addresses the ergonomic issues while keeping the schema benefits. After testing both, I think I agree.\r\n\r\nTypes: JSON Schema cannot natively express units like \"BTC/kvB\" or semantic distinctions like \"this hex string is a txid.\" These are preserved in description text and x-bitcoin-type-str extensions, but are *not* machine-enforceable from the schema alone. This was recognized as a fundamental limitation by several commenters in the issue. Future work could enrich the x-bitcoin-* extensions with a more structured unit vocabulary.\r\n\r\nSome RPCs return different types depending on argument values (e.g. verbosity levels). These are represented as `oneOf` in the result schema with free-text condition descriptions. This is accurate but not fully machine-parseable — a code generator cannot automatically determine which result variant corresponds to which argument value without parsing the description. I still we have enough information to satisfy humans an agents alike though.\r\n\r\n### Regenerating the spec\r\n\r\nThe current functional test simply tests that the RPC runs, and produces valid JSON. We might want to consider extending this..\r\n\r\nThe RPC output documents which RPCs are available for any given built binary.\r\n\r\n### Discussion questions\r\n\r\n- Is this valuable/wanted?\r\n- Do we like openrpc format? (less relevant if we don't want this in this repo, as another repo could generate one or many definitions).\r\n- Should we cover \"hidden\" RPCs? They are currently hidden, but don't have to be...\r\n\r\nMy personal thoughts are that this is very nice to have.",
-      "state": "open",
-      "user": "willcl-ark",
-      "created_at": "2026-02-26T15:22:35Z",
-      "updated_at": "2026-03-22T03:50:24Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34683",
-      "labels": [
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 4825,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "issues": [
@@ -7725,9 +7655,9 @@
     }
   ],
   "summary": {
-    "total_prs": 249,
+    "total_prs": 246,
     "total_issues": 31,
     "total_comments": 76,
-    "unique_participants": 92
+    "unique_participants": 91
   }
 }
