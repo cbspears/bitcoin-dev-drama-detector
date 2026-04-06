@@ -1,12 +1,220 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-04-06T01:58:11.394954+00:00",
+  "fetched_at": "2026-04-06T09:02:46.068801+00:00",
   "date_range": {
-    "since": "2026-03-30T01:58:11.394876+00:00",
-    "until": "2026-04-06T01:58:11.394876+00:00"
+    "since": "2026-03-30T09:02:46.068731+00:00",
+    "until": "2026-04-06T09:02:46.068731+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3207254787,
+      "number": 34400,
+      "title": "wallet: parallel fast rescan (approx 5x speed up with 16 threads)",
+      "body": "EDIT: Some parts of this PR have been split into https://github.com/bitcoin/bitcoin/pull/34667 and  https://github.com/bitcoin/bitcoin/pull/34681 to ease review. This PR will be put in draft until the previous PRs have been merged.\r\n\r\nThis PR uses the [ThreadPool](https://github.com/bitcoin/bitcoin/blob/master/src/util/threadpool.h) to implement parallel fast rescan.\r\n\r\nThis PR:\r\n- Adds a `ThreadPool` to the `WalletContext` to be shared by all the wallets\r\n- Adds `-walletpar` parameter to configure the number of threads to be used for parallel scanning \r\n- Updates the `wallet_fast_rescan.py` test to ensure it catches cases where the FastRescan filter wasn't properly updated. This is crucial to ensure that changes in the PR do not cause newly added output scripts to be missed.\r\n- Refactors `ScanForWalletTransactions` to make the implementation of parallel scanning easier.\r\n- Implements parallel scanning\r\n\r\nBenchmarks:\r\n**NOTE: to reproduce, please tune your system with `pyperf system tune`**\r\n\r\n_EDIT\r\nSet up your node to use block filters by setting `blockfilterindex=1` in your bitcoin.conf file and ensure your blockfilterindex is synced to tip before attempting to reproduce._\r\n\r\nUsing the following command on mainnet with a wallet with no scripts and hyperfine version `1.20.0`:\r\n```\r\nhyperfine --show-output --export-markdown results.md --export-json results.json  \\\r\n--sort command \\\r\n--runs 3 \\\r\n-L commit ef847e8,37d356b \\\r\n-L num_threads 1,2,4,8,16 \\\r\n--prepare 'git checkout {commit} && cmake --build build -j 20 && build/bin/bitcoind -blockfilterindex=1 -walletpar={num_threads} && sleep 10 && build/bin/bitcoin-cli loadwalllet <wallet-name>' \\\r\n--conclude 'build/bin/bitcoin-cli stop && sleep 10' \\\r\n'build/bin/bitcoin-cli rescanblockchain 500000 900000'\r\n```\r\nI obtained the following results:\r\n| Command | Mean [s] | Min [s] | Max [s] | Relative |\r\n|:---|---:|---:|---:|---:|\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = baseline, num_threads = ..)` | 536.996 ± 0.722 | 536.257 | 537.701 | 4.64 ± 0.01 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 1)` | 540.210 ± 2.696 | 537.172 | 542.320 | 4.67 ± 0.03 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 2)` | 358.190 ± 0.515 | 357.675 | 358.706 | 3.10 ± 0.01 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 4)` | 230.217 ± 2.321 | 228.814 | 232.896 | 1.99 ± 0.02 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 8)` | 151.144 ± 1.748 | 149.506 | 152.984 | 1.31 ± 0.02 |\r\n| `build/bin/bitcoin-cli rescanblockchain 500000 900000 (commit = parallel_scan, num_threads = 16)` | 115.642 ± 0.305 | 115.390 | 115.982 | 1.00 |\r\n\r\nSystem information:\r\n```\r\nArchitecture:             x86_64\r\n  CPU op-mode(s):         32-bit, 64-bit\r\n  Address sizes:          46 bits physical, 48 bits virtual\r\n  Byte Order:             Little Endian\r\nCPU(s):                   20\r\n  On-line CPU(s) list:    0-19\r\nVendor ID:                GenuineIntel\r\n  Model name:             Intel(R) Core(TM) Ultra 7 265\r\n    CPU family:           6\r\n    Model:                198\r\n    Thread(s) per core:   1\r\n    Core(s) per socket:   1\r\n    Socket(s):            20\r\n    Stepping:             2\r\n    CPU(s) scaling MHz:   41%\r\n    CPU max MHz:          4800.0000\r\n    CPU min MHz:          800.0000\r\n    BogoMIPS:             4761.60\r\n```\r\n\r\nFurther benchmarks were performed using a [python script](https://github.com/Eunovo/rescan-benchmark) with custom chains designed with payments at specified intervals, and the following graph was produced:\r\n\r\n<img width=\"4760\" height=\"8950\" alt=\"benchmark_comparison\" src=\"https://github.com/user-attachments/assets/1ba8c64d-cfca-4360-af06-1f034a30e307\" />\r\n\r\nThis graph was produced from a laptop with the following CPU specifications:\r\n```\r\nArchitecture:                x86_64\r\n  CPU op-mode(s):            32-bit, 64-bit\r\n  Address sizes:             48 bits physical, 48 bits virtual\r\n  Byte Order:                Little Endian\r\nCPU(s):                      16\r\n  On-line CPU(s) list:       0-15\r\nVendor ID:                   AuthenticAMD\r\n  Model name:                AMD Ryzen 9 8945HS w/ Radeon 780M Graphics\r\n    CPU family:              25\r\n    Model:                   117\r\n    Thread(s) per core:      2\r\n    Core(s) per socket:      8\r\n    Socket(s):               1\r\n    Stepping:                2\r\n    Frequency boost:         enabled\r\n    CPU(s) scaling MHz:      63%\r\n    CPU max MHz:             5263.0000\r\n    CPU min MHz:             400.0000\r\n```\r\n\r\nAll materials for the custom benchmarks can be found [here](https://github.com/Eunovo/rescan-benchmark).\r\n\r\nAlthough not explicitly checked with Valgrind, hyperfine reported that memory usage stayed the same across all runs. I'm not sure to what degree hyperfine's memory usage report can be trusted, but the PR limits the amount of block hashes that can be held in memory for processing to `1000` (not configurable by the user).\r\n\r\n\r\nAll benchmarks were performed against https://github.com/bitcoin/bitcoin/pull/34400/commits/37d356bbbe3efed3c7c9e64fae1bac3f4d0ec6eb instead of master because `-walletpar` is implemented here, and the benchmark scripts would otherwise break, or more complicated scripts would be required to accommodate master.\r\n",
+      "state": "open",
+      "user": "Eunovo",
+      "created_at": "2026-01-24T19:46:16Z",
+      "updated_at": "2026-04-06T08:57:51Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34400",
+      "labels": [
+        "Wallet"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 5492,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3492152019,
+      "number": 35011,
+      "title": "ci, iwyu: Fix warnings in src/script and treat them as errors",
+      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
+      "state": "open",
+      "user": "BrandonOdiwuor",
+      "created_at": "2026-04-06T08:14:48Z",
+      "updated_at": "2026-04-06T08:48:11Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/35011",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 305,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3119599294,
+      "number": 34124,
+      "title": "validation: make `CCoinsView` a pure virtual interface",
+      "body": "### Problem\r\n`CCoinsView` is the coins view interface, but historically it also provided built-in no-op behavior:\r\n\r\n* It provided default no-op implementations (returning `std::nullopt`, `uint256()`, `false`, or `nullptr`) instead of being pure virtual.\r\n* Callers could instantiate a bare `CCoinsView` and get silent no-op behavior.\r\n* Mixing the interface definition with a built-in dummy implementation blurred the abstraction boundary.\r\n\r\n### Context\r\nThis is part of the ongoing coins caching cleanup in #34280.\r\n\r\n### Fix\r\nThis PR separates the interface from no-op behavior and makes `CCoinsView` pure virtual in incremental steps:\r\n* Add `CoinsViewEmpty` as an explicit no-op coins view for tests, benchmarks, and temporary backends.\r\n* Replace direct bare-`CCoinsView` test and dummy instantiations with `CoinsViewEmpty`.\r\n* Make all `CCoinsView` methods pure virtual (`PeekCoin`, `GetCoin`, `HaveCoin`, `GetBestBlock`, `GetHeadBlocks`, `BatchWrite`, `Cursor`, `EstimateSize`).\r\n* Remove the legacy default implementations from `coins.cpp`.\r\n* Update fuzz and dummy backends to use `CoinsViewEmpty` explicitly.",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2025-12-20T08:47:33Z",
+      "updated_at": "2026-04-06T08:22:41Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34124",
+      "labels": [
+        "Refactoring"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1175,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3163940035,
+      "number": 34256,
+      "title": "test: support `get_bind_addrs` and `feature_bind_extra` on macOS & BSD",
+      "body": "### Problem\r\n\r\nSome functional tests are shown as skipped when running on macOS & BSD because `test_framework/netutil.py` only implemented the Linux-specific logic for checking which TCP sockets a node is listening on.\r\n\r\n### Fix\r\n\r\nAdd macOS and BSD implementations in `test/functional/test_framework/netutil.py` so tests can query:\r\n\r\n* which TCP sockets a node is listening on (`get_bind_addrs()`, via `lsof`)\r\n* a non-loopback interface address (`all_interfaces()`, via `ifconfig`)\r\n\r\nThen enable the previously Linux-only tests by switching to a shared POSIX platform guard.\r\n\r\n### Commands\r\n<details>\r\n<summary><code>get_bind_addrs()</code> (<code>lsof</code> + regex)</summary>\r\n\r\n\r\n> Command used\r\n```bash\r\nlsof -nP -a -p <pid> -iTCP -sTCP:LISTEN -Ftn\r\n```\r\n\r\n\r\n> Flags\r\n\r\n- -D: device cache warnings\r\n- -n: no hostname resolution\r\n- -P: no service/port-name resolution\r\n- -a: AND all conditions\r\n- -p <pid>: filter by process ID\r\n- -iTCP: TCP sockets only\r\n- -sTCP:LISTEN: listening sockets only\r\n- -Ftn: machine-readable output (fields: type `t`, name `n`)\r\n\r\n> Regex parser\r\n\r\n```regex\r\nt(IPv[46])\\nn(\\*|\\[.+?]|[^:]+):(\\d+)\r\n```\r\n> Captured groups\r\n\r\n- group 1: IPv4 / IPv6 (used to disambiguate `*`)\r\n- group 2: host (`*`, `[::1]`, `127.0.0.1`, ...)\r\n- group 3: port\r\n</details>\r\n\r\n\r\n<details>\r\n<summary><code>all_interfaces()</code> (<code>ifconfig</code> + regex)</summary>\r\n\r\n\r\n> Command used\r\n\r\n```bash\r\nifconfig -au\r\n```\r\n\r\n\r\n> Regex parsing\r\n\r\nInterface blocks:\r\n```regex\r\n(?m)^(?P<iface>\\S+):(?P<block>[^\\n]*(?:\\n[ \\t]+[^\\n]*)*)\r\n```\r\n\r\nIPv4 extraction within each block:\r\n```regex\r\ninet (\\S+)\r\n```\r\n</details>\r\n\r\n### Notes\r\n\r\nThe only remaining platform skips on macOS are the USDT/BPF tracing tests (`interface_usdt_*.py`).\r\n\r\n",
+      "state": "open",
+      "user": "l0rinc",
+      "created_at": "2026-01-11T21:42:11Z",
+      "updated_at": "2026-04-06T08:10:08Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34256",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 1819,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3418581404,
+      "number": 34856,
+      "title": "[30.x] Backports",
+      "body": "Backports:\r\n* #34832\r\n* #34848\r\n* #34869\r\n* #34870\r\n* #34888\r\n* #34956",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-03-19T06:50:07Z",
+      "updated_at": "2026-04-06T07:36:53Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34856",
+      "labels": [
+        "Backport"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 87,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3364554727,
+      "number": 34757,
+      "title": "guix: re-enable riscv exported symbol checking",
+      "body": "Switching to binutils `2.46.0` fixes the spurious exported symbols (2.45.1 was still broken). \r\nWill find the relevant upstream change. \r\nNo updates on our upstream issue: https://sourceware.org/bugzilla/show_bug.cgi?id=32783.\r\n\r\nFixes #28095.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-03-06T16:15:37Z",
+      "updated_at": "2026-04-06T07:33:37Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34757",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 290,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2858375622,
+      "number": 33477,
+      "title": "Rollback for dumptxoutset without invalidating blocks",
+      "body": "This is an alternative approach to implement `dumptxoutset` with rollback that was discussed a few times. It does not rely on `invalidateblock` and `reconsiderblock` and instead creates a temporary copy of the coins DB, modifies this copy by rolling back as many blocks as necessary and then creating the dump from this temp copy DB. See also https://github.com/bitcoin/bitcoin/pull/29553#issuecomment-1978480989, https://github.com/bitcoin/bitcoin/issues/32817#issuecomment-3012406102 and #29565 discussions.\r\n\r\nThe nice side-effects of this are that forks can not interfere with the rollback and network activity does not have to be suspended. But there are also some downsides when comparing to the current approach: this does require some additional disk space for the copied coins DB and performance is slower (master took 3m 17s vs 9m 16s in my last test with the code here, rolling back ~1500 blocks). However, there is also not much code being added here, network can stay active throughout and performance would stay constant with this approach while it would impact master if there were forks that needed to be invalidated as well (see #33444 for the alternative approach), so this could still be considered a good trade-off.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2025-09-24T21:15:11Z",
+      "updated_at": "2026-04-06T07:25:49Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33477",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1289,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3491992750,
+      "number": 35010,
+      "title": "fix: multiple memcpy operations in ipc serialization... in...",
+      "body": "## Summary\nFix critical severity security issue in `src/ipc/capnp/common-types.h`.\n\n## Vulnerability\n| Field | Value |\n|-------|-------|\n| **ID** | V-001 |\n| **Severity** | CRITICAL |\n| **Scanner** | multi_agent_ai |\n| **Rule** | `V-001` |\n| **File** | `src/ipc/capnp/common-types.h:75` |\n\n**Description**: Multiple memcpy operations in IPC serialization code copy data from source buffers to destination buffers without validating that the destination has sufficient capacity. The code assumes result.begin() points to a buffer large enough to hold stream.size() or str.size() bytes, but there is no explicit validation that result.capacity() >= source.size(). If an attacker can control the size of the source data through crafted IPC messages, they can write beyond the allocated destination buffer boundaries.\n\n## Changes\n- `src/ipc/capnp/common-types.h`\n\n## Verification\n- [ ] Build not verified\n- [ ] Scanner re-scan not performed\n- [ ] LLM code review not performed\n\n---\n*Automated security fix by [OrbisAI Security](https://orbisappsec.com)*\n",
+      "state": "open",
+      "user": "orbisai0security",
+      "created_at": "2026-04-06T07:18:37Z",
+      "updated_at": "2026-04-06T07:18:54Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/35010",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 2,
+        "text_length": 1112,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3491102393,
+      "number": 35009,
+      "title": "wallet, rpc: add include_change parameter to listtransactions",
+      "body": "Currently, `listtransactions` silently hides transactions whose outputs go exclusively to change addresses. This can be confusing, as reported in #34632: a user created a consolidation transaction sending funds to a change address, and the transaction disappeared from `listtransactions`, making it appear as though funds were lost.\r\n\r\n`listsinceblock` already supports an `include_change` parameter for this purpose. The internal `ListTransactions` helper also already accepts it. This PR simply wires the parameter through the `listtransactions` RPC handler for consistency.\r\n\r\n- Adds `include_change` (bool, default `false`) as a new argument after the existing `include_watchonly`\r\n- No behavior change for existing callers\r\n- Includes functional test coverage\r\n\r\nThis approach was suggested by @mossein in #34632. A more comprehensive `listrawtransactions` RPC as mentioned by @achow101 could be pursued separately.\r\n\r\nFixes #34632",
+      "state": "open",
+      "user": "alfonsoromanz",
+      "created_at": "2026-04-05T23:04:50Z",
+      "updated_at": "2026-04-06T07:17:02Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/35009",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 998,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
     {
       "id": 3135104327,
       "number": 34176,
@@ -27,28 +235,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 1125,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3491102393,
-      "number": 35009,
-      "title": "wallet, rpc: add include_change parameter to listtransactions",
-      "body": "Currently, `listtransactions` silently hides transactions whose outputs go exclusively to change addresses. This can be confusing, as reported in #34632: a user created a consolidation transaction sending funds to a change address, and the transaction disappeared from `listtransactions`, making it appear as though funds were lost.\r\n\r\n`listsinceblock` already supports an `include_change` parameter for this purpose. The internal `ListTransactions` helper also already accepts it. This PR simply wires the parameter through the `listtransactions` RPC handler for consistency.\r\n\r\n- Adds `include_change` (bool, default `false`) as a new argument after the existing `include_watchonly`\r\n- No behavior change for existing callers\r\n- Includes functional test coverage\r\n\r\nThis approach was suggested by @mossein in #34632. A more comprehensive `listrawtransactions` RPC as mentioned by @achow101 could be pursued separately.\r\n\r\nFixes #34632",
-      "state": "open",
-      "user": "alfonsoromanz",
-      "created_at": "2026-04-05T23:04:50Z",
-      "updated_at": "2026-04-06T00:10:13Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/35009",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 998,
         "has_nack": false,
         "has_ack": false
       }
@@ -498,30 +684,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 616,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3119599294,
-      "number": 34124,
-      "title": "validation: make `CCoinsView` a pure virtual interface",
-      "body": "### Problem\r\n`CCoinsView` is the coins view interface, but historically it also provided built-in no-op behavior:\r\n\r\n* It provided default no-op implementations (returning `std::nullopt`, `uint256()`, `false`, or `nullptr`) instead of being pure virtual.\r\n* Callers could instantiate a bare `CCoinsView` and get silent no-op behavior.\r\n* Mixing the interface definition with a built-in dummy implementation blurred the abstraction boundary.\r\n\r\n### Context\r\nThis is part of the ongoing coins caching cleanup in #34280.\r\n\r\n### Fix\r\nThis PR separates the interface from no-op behavior and makes `CCoinsView` pure virtual in incremental steps:\r\n* Add `CoinsViewEmpty` as an explicit no-op coins view for tests, benchmarks, and temporary backends.\r\n* Replace direct bare-`CCoinsView` test and dummy instantiations with `CoinsViewEmpty`.\r\n* Make all `CCoinsView` methods pure virtual (`PeekCoin`, `GetCoin`, `HaveCoin`, `GetBestBlock`, `GetHeadBlocks`, `BatchWrite`, `Cursor`, `EstimateSize`).\r\n* Remove the legacy default implementations from `coins.cpp`.\r\n* Update fuzz and dummy backends to use `CoinsViewEmpty` explicitly.",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2025-12-20T08:47:33Z",
-      "updated_at": "2026-04-04T16:27:07Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34124",
-      "labels": [
-        "Refactoring"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1175,
         "has_nack": false,
         "has_ack": true
       }
@@ -3036,28 +3198,6 @@
       }
     },
     {
-      "id": 2858375622,
-      "number": 33477,
-      "title": "Rollback for dumptxoutset without invalidating blocks",
-      "body": "This is an alternative approach to implement `dumptxoutset` with rollback that was discussed a few times. It does not rely on `invalidateblock` and `reconsiderblock` and instead creates a temporary copy of the coins DB, modifies this copy by rolling back as many blocks as necessary and then creating the dump from this temp copy DB. See also https://github.com/bitcoin/bitcoin/pull/29553#issuecomment-1978480989, https://github.com/bitcoin/bitcoin/issues/32817#issuecomment-3012406102 and #29565 discussions.\r\n\r\nThe nice side-effects of this are that forks can not interfere with the rollback and network activity does not have to be suspended. But there are also some downsides when comparing to the current approach: this does require some additional disk space for the copied coins DB and performance is slower (master took 3m 17s vs 9m 16s in my last test with the code here, rolling back ~1500 blocks). However, there is also not much code being added here, network can stay active throughout and performance would stay constant with this approach while it would impact master if there were forks that needed to be invalidated as well (see #33444 for the alternative approach), so this could still be considered a good trade-off.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2025-09-24T21:15:11Z",
-      "updated_at": "2026-04-02T22:14:39Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33477",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1289,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3250214855,
       "number": 34514,
       "title": "refactor: remove unnecessary std::move for trivially copyable types",
@@ -4763,30 +4903,6 @@
       }
     },
     {
-      "id": 3418581404,
-      "number": 34856,
-      "title": "[30.x] Backports",
-      "body": "Backports:\r\n* #34832\r\n* #34848\r\n* #34869\r\n* #34870\r\n* #34888\r\n* #34956",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2026-03-19T06:50:07Z",
-      "updated_at": "2026-04-01T00:36:20Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34856",
-      "labels": [
-        "Backport"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 87,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3461474188,
       "number": 34946,
       "title": "wallet: detect cycles in BDB page traversal during migration",
@@ -5407,30 +5523,6 @@
         "drama_keywords": 1,
         "positive_keywords": 1,
         "text_length": 2811,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3163940035,
-      "number": 34256,
-      "title": "test: support `get_bind_addrs` and `feature_bind_extra` on macOS & BSD",
-      "body": "### Problem\r\n\r\nSome functional tests are shown as skipped when running on macOS & BSD because `test_framework/netutil.py` only implemented the Linux-specific logic for checking which TCP sockets a node is listening on.\r\n\r\n### Fix\r\n\r\nAdd macOS and BSD implementations in `test/functional/test_framework/netutil.py` so tests can query:\r\n\r\n* which TCP sockets a node is listening on (`get_bind_addrs()`, via `lsof`)\r\n* a non-loopback interface address (`all_interfaces()`, via `ifconfig`)\r\n\r\nThen enable the previously Linux-only tests by switching to a shared POSIX platform guard.\r\n\r\n### Commands\r\n<details>\r\n<summary><code>get_bind_addrs()</code> (<code>lsof</code> + regex)</summary>\r\n\r\n\r\n> Command used\r\n```bash\r\nlsof -nP -a -p <pid> -iTCP -sTCP:LISTEN -Ftn\r\n```\r\n\r\n\r\n> Flags\r\n\r\n- -D: device cache warnings\r\n- -n: no hostname resolution\r\n- -P: no service/port-name resolution\r\n- -a: AND all conditions\r\n- -p <pid>: filter by process ID\r\n- -iTCP: TCP sockets only\r\n- -sTCP:LISTEN: listening sockets only\r\n- -Ftn: machine-readable output (fields: type `t`, name `n`)\r\n\r\n> Regex parser\r\n\r\n```regex\r\nt(IPv[46])\\nn(\\*|\\[.+?]|[^:]+):(\\d+)\r\n```\r\n> Captured groups\r\n\r\n- group 1: IPv4 / IPv6 (used to disambiguate `*`)\r\n- group 2: host (`*`, `[::1]`, `127.0.0.1`, ...)\r\n- group 3: port\r\n</details>\r\n\r\n\r\n<details>\r\n<summary><code>all_interfaces()</code> (<code>ifconfig</code> + regex)</summary>\r\n\r\n\r\n> Command used\r\n\r\n```bash\r\nifconfig -au\r\n```\r\n\r\n\r\n> Regex parsing\r\n\r\nInterface blocks:\r\n```regex\r\n(?m)^(?P<iface>\\S+):(?P<block>[^\\n]*(?:\\n[ \\t]+[^\\n]*)*)\r\n```\r\n\r\nIPv4 extraction within each block:\r\n```regex\r\ninet (\\S+)\r\n```\r\n</details>\r\n\r\n### Notes\r\n\r\nThe only remaining platform skips on macOS are the USDT/BPF tracing tests (`interface_usdt_*.py`).\r\n\r\n",
-      "state": "open",
-      "user": "l0rinc",
-      "created_at": "2026-01-11T21:42:11Z",
-      "updated_at": "2026-03-30T15:49:36Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34256",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 1819,
         "has_nack": false,
         "has_ack": true
       }
@@ -6805,19 +6897,6 @@
       "labels": [],
       "comment_data": [
         {
-          "id": 4151717413,
-          "user": "ryanofsky",
-          "body": "There was new report of this issue with a real client in https://github.com/bitcoin-core/libmultiprocess/issues/226#issuecomment-4148301426. The issue should be resolved by https://github.com/bitcoin-core/libmultiprocess/commit/f5509a31fccaebbb0587dbe0d99b62837d870773 from https://github.com/bitcoin-core/libmultiprocess/pull/249 and https://github.com/bitcoin/bitcoin/pull/34804 and https://github.com/bitcoin/bitcoin/pull/34952",
-          "created_at": "2026-03-30T02:22:08Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 430,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
           "id": 4170656859,
           "user": "maflcko",
           "body": "closing. fixed after subtree bump?",
@@ -7672,51 +7751,12 @@
         "has_nack": false,
         "has_ack": true
       }
-    },
-    {
-      "id": 3800461331,
-      "number": 34250,
-      "title": "crash during IPC cleanup after `interruptWait()` is called",
-      "body": "while working on https://github.com/stratum-mining/sv2-apps/pull/177, I'm noticing a new crash\n\nsteps to reproduce:\n- run Bitcoin Core `v30.2` on `mainnet`\n- `git clone https://github.com/plebhash/sv2-apps -b 2026-01-09-bitcoin-core-v30-2`\n- edit `sv2-apps/pool-apps/pool/config-examples/mainnet/pool-config-bitcoin-core-ipc-example.toml` so that `unix_socket_path` field points to `node.sock`\n- launch Pool via: `cd sv2-apps/pool-apps/pool; cargo run -- -c config-examples/mainnet/pool-config-bitcoin-core-ipc-example.toml`\n- let Pool run for a while\n- kill Pool with ctrl+c\n\nthis does not happen deterministically, so a few attempts of launching then killing Pool might be needed \n\nbut eventually Bitcoin Core crashes with a few different log variations:\n```\n2026-01-10T22:48:03Z [ipc] {bitcoin-node-35006/b-capnp-loop-203488} IPC server recv request  #96 BlockTemplate.getCoinbaseMerklePath$Params\n2026-01-10T22:48:03Z [ipc] {bitcoin-node-35006/b-capnp-loop-203488} IPC server post request  #96 {bitcoin-node-35006/206817 (from )}\n2026-01-10T22:48:03Z [ipc] {bitcoin-node-35006/b-capnp-loop-203488} IPC server send response #96 BlockTemplate.getCoinbaseMerklePath$Results\n2026-01-10T22:48:07Z [ipc] {bitcoin-node-35006/b-capnp-loop-203488} IPC server recv request  #97 BlockTemplate.waitNext$Params\n2026-01-10T22:48:07Z [ipc] {bitcoin-node-35006/b-capnp-loop-203488} IPC server post request  #97 {bitcoin-node-35006/206817 (from )}\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages6MiningEEE\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server: socket disconnected.\n2026-01-10T22:48:07Z [ipc:info] {bitcoin-node-35006/b-capnp-loop-203488} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages4InitEEE\n2026-01-10T22:48:08Z CreateNewBlock(): block weight: 3998742 txs: 599 fees: 515599 sigops 13307\nlibc++abi: terminating due to uncaught exception of type std::__1::system_error: mutex lock failed: Invalid argument\n[1]    35006 abort      ./bitcoin-30.2/bin/bitcoin -m node -ipcbind=unix -prune=555 -debug=ipc\n```\n\n```\n2026-01-10T22:22:02Z [ipc] {bitcoin-node-19528/b-capnp-loop-144717} IPC server send response #134 BlockTemplate.getCoinbaseMerklePath$Results\n2026-01-10T22:22:03Z [ipc] {bitcoin-node-19528/b-capnp-loop-144717} IPC server recv request  #135 BlockTemplate.waitNext$Params\n2026-01-10T22:22:03Z [ipc] {bitcoin-node-19528/b-capnp-loop-144717} IPC server post request  #135 {bitcoin-node-19528/147843 (from )}\n2026-01-10T22:22:04Z CreateNewBlock(): block weight: 3998510 txs: 4931 fees: 315281 sigops 999\n2026-01-10T22:22:04Z [ipc:info] {bitcoin-node-19528/b-capnp-loop-144717} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:22:04Z [ipc:info] {bitcoin-node-19528/b-capnp-loop-144717} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:22:04Z [ipc:info] {bitcoin-node-19528/b-capnp-loop-144717} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:22:04Z [ipc:info] {bitcoin-node-19528/b-capnp-loop-144717} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages13BlockTemplateEEE\n2026-01-10T22:22:04Z [ipc:info] {bitcoin-node-19528/b-capnp-loop-144717} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages6MiningEEE\n2026-01-10T22:22:04Z [ipc:info] {bitcoin-node-19528/b-capnp-loop-144717} IPC server: socket disconnected.\n2026-01-10T22:22:04Z [ipc:info] {bitcoin-node-19528/b-capnp-loop-144717} IPC server destroy N2mp11ProxyServerIN3ipc5capnp8messages4InitEEE\n2026-01-10T22:22:05Z CreateNewBlock(): block weight: 3998649 txs: 4928 fees: 336652 sigops 1030\nAssertion failed: (m_loop), function operator*, file proxy.h, line 59.\n[1]    19528 abort      ./bitcoin-30.2/bin/bitcoin -m node -ipcbind=unix -prune=555 -debug=ipc \n```\n\ncc @ryanofsky @ismaelsadeeq ",
-      "state": "closed",
-      "user": "plebhash",
-      "created_at": "2026-01-10T22:51:23Z",
-      "updated_at": "2026-03-30T02:19:00Z",
-      "closed_at": "2026-03-03T21:37:01Z",
-      "comments": 15,
-      "url": "https://github.com/bitcoin/bitcoin/issues/34250",
-      "labels": [
-        "Bug",
-        "interfaces"
-      ],
-      "comment_data": [
-        {
-          "id": 4151707904,
-          "user": "ryanofsky",
-          "body": "Note the bug reported here (crash after disconnecting during a waitNext call that returns a non-null pointer) was actually reported earlier in https://github.com/bitcoin/bitcoin/issues/33554#issuecomment-3378637474 and https://github.com/bitcoin-core/libmultiprocess/issues/226, but I didn't notice the connection until now. The bug was fixed in   https://github.com/bitcoin-core/libmultiprocess/commit/0174450ca2e95a4bd1f22e4fd38d83b1d432ac1f from https://github.com/bitcoin-core/libmultiprocess/pull/240 and https://github.com/bitcoin/bitcoin/pull/34422\n\n",
-          "created_at": "2026-03-30T02:19:00Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 557,
-            "has_nack": false,
-            "has_ack": false
-          }
-        }
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 5017,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "summary": {
-    "total_prs": 238,
-    "total_issues": 41,
-    "total_comments": 79,
-    "unique_participants": 103
+    "total_prs": 242,
+    "total_issues": 40,
+    "total_comments": 77,
+    "unique_participants": 105
   }
 }
