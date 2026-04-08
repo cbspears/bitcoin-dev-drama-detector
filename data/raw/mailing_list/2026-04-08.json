@@ -1,39 +1,39 @@
 {
   "source": "mailing_list",
   "list": "bitcoin-dev",
-  "fetched_at": "2026-04-08T08:56:20.649820+00:00",
+  "fetched_at": "2026-04-08T16:56:57.222487+00:00",
   "date_range": {
-    "since": "2026-04-01T08:55:21.474065+00:00",
-    "until": "2026-04-08T08:55:21.474065+00:00"
+    "since": "2026-04-01T16:55:58.037841+00:00",
+    "until": "2026-04-08T16:55:58.037841+00:00"
   },
   "threads": [
     {
-      "title": "[bitcoindev] Post-Quantum BIP-86 Recovery via zk-STARK Proof of BIP-32 Seed Knowledge",
+      "title": "Re: [bitcoindev] Post-Quantum BIP-86 Recovery via zk-STARK Proof of BIP-32 Seed Knowledge",
       "message_count": 1,
       "participants": [
-        "Olaoluwa Osuntokun"
+        "\"'conduition' via Bitcoin Development Mailing List\""
       ],
       "participant_count": 1,
-      "first_date": "Tue, 7 Apr 2026 20:39:41 -0700",
-      "last_date": "Tue, 7 Apr 2026 20:39:41 -0700",
+      "first_date": "Wed, 08 Apr 2026 15:53:42 +0000",
+      "last_date": "Wed, 08 Apr 2026 15:53:42 +0000",
       "messages": [
         {
-          "url": "https://gnusha.org/pi/bitcoindev/CAO3Pvs_PciUi+zBrCps3acO14sgeHVUANx9w6TVwUf_AYcd_qQ@mail.gmail.com",
-          "title": "[bitcoindev] Post-Quantum BIP-86 Recovery via zk-STARK Proof of BIP-32 Seed Knowledge",
-          "author": "Olaoluwa Osuntokun <laolu32@gmail@com>",
-          "date": "Tue, 7 Apr 2026 20:39:41 -0700",
-          "body": "[-- Attachment #1: Type: text/plain, Size: 16590 bytes --]\n\nHi y'all,\n\nI found some spare time this last weekend to dust off a little side project\nI started last August: extend TinyGo [1] to be able to produce RISC-V ELF\nbinaries capable of being run as a guest on the risc0 platform to generate\nzk-STARK proofs of arbitrary programs. Initially, I didn't really have a\nclear end target application, it was mainly a technical challenge to force\nme to learn a bit more about the RISC-V platform, and also the host/guest\narchitecture of risc0. Fast forward ~9 months later, and an initial killer\nuse case popped into my mind: a zk-STARK proof that a Taproot output public\nkey was generated using BIP-32, via a given BIP-86 derivation path.\n\nMore formally:\n```math\n\\mathcal{R} = \\left\\lbrace\\;\n(\\overbrace{K,\\, C}^{\\textsf{public}} ;\\; \\underbrace{s,\\,\n\\mathbf{p}}_{\\textsf{witness}})\n\\;\\middle|\\;\n\\begin{aligned}\n  K &= \\textsf{BIP86Taproot}\\bigl(\\textsf{BIP32Derive}(s,\\,\n\\mathbf{p})\\bigr) \\\\\n  C &= \\textsf{SHA256}\\bigl(\\texttt{\"bip32-pq-zkp:path:v1\"} \\;\\|\\;\n\\mathbf{p}\\bigr)\n\\end{aligned}\n\\;\\right\\rbrace\n```\n\nwhere $K$ is the Taproot output key, $C$ is the path commitment, $s$ is the\nBIP-32 seed, and $\\mathbf{p}$ is the derivation path.\n\n\nI was able to get everything working e2e over the weekend, after making\nsome tweaks to my initial architectural game plan!\n\nThe TL;DR is that:\n\n  * Given that the Taproot commitment scheme is post-quantum secure [3], in\n    the future we can deploy a soft fork to _disable_ the keyspend path,\n    and force all Taproot spends to instead flow through the script path\n    (not my idea, commonly discussed amongst developers, not sure who\n    proposed it first). At that point, Taproot starts to resemble BIP-360.\n\n  * That works for script path spends, but then leaves all the BIP-86\n    wallets in a bad position, as they generated outputs that provably\n    don't commit to a script path at all.\n\n  * A 2023 paper (Protecting Quantum Procrastinators with Sign",
+          "url": "https://gnusha.org/pi/bitcoindev/ciibnh-b0x-rLwA8pY5NURBfPvG58gLcS7yPLIIkFV5IzA1k-PTsPZqYU8uUyQRxLCnEFhGcrRCTM39N2AYEy0Db2H_UwIse3Hg9XEXNEYg=@proton.me",
+          "title": "Re: [bitcoindev] Post-Quantum BIP-86 Recovery via zk-STARK Proof of BIP-32 Seed Knowledge",
+          "author": "\"'conduition' via Bitcoin Development Mailing List\" <bitcoindev@googlegroups.com>",
+          "date": "Wed, 08 Apr 2026 15:53:42 +0000",
+          "body": "[-- Attachment #1.1.1: Type: text/plain, Size: 22508 bytes --]\n\nHi Laolu,\nGreat work getting this working in the real world. I've heard many people on delving and the mailing list conjecture based on this idea, but you're the first person i've seen who's willing to put their money where their mouth is, and actually build a prototype. Bravo!\n\nIt seems to me the circuit (guest program) could be simplified. Notice how the guest code computes the entire HD wallet key path, including hardened and non-hardened derivation steps, and also computes the taproot output key with key-tweaking. I'd argue these steps are extraneous to the core hard relation you want the STARK to prove, and could be safely removed to reduce proof size and improve performance.\n\nIn reality, you needn't go so far as to prove (1) \"I know a BIP39 seed which derives this taproot output key\". You need only prove this much more general statement (2): \"I know a BIP32 xpriv which derives this xpub via one or more hardened steps\". The latter statement (2) still cannot be forged by a quantum adversary even if they know your account-level xpub, but it entails far less computation to prove and verify. The rest of the original statement (1) can be done externally outside the circuit.\n\nExample. If i have a wallet with a taproot address at `m/86'/0'/0'/1/2`, I could prove I know the xpriv at `m/86'/0'` which derives the xpub at `m/86'/0'/0'`. Then I provide the remaining key path elements /`1/2` in the witness. Note, i do not mean we derive the xpriv at `m/86'/0'` inside the guest program. I mean the prover derives `m/86'/0'` first (in the host), and then writes that xpriv into the guest program's inputs. The guest program derives and outputs the xpub at `m/86'/0'/0'`. The verifier may check the STARK output (xpub) is correctly computed, then use the given key-path to manually derive the taproot address from the xpub themselves, outside the circuit, and validate that address against the UTXO i'm spending. The verif",
           "drama_signals": {
-            "drama_keywords": 2,
+            "drama_keywords": 0,
             "positive_keywords": 0,
-            "text_length": 2086,
+            "text_length": 2090,
             "has_nack": false,
             "has_ack": false
           }
         }
       ],
       "drama_signals": {
-        "drama_keywords": 2,
+        "drama_keywords": 0,
         "positive_keywords": 0,
         "nack_count": 0,
         "ack_count": 0
@@ -1899,6 +1899,6 @@
   "summary": {
     "total_threads": 59,
     "total_messages": 59,
-    "unique_participants": 39
+    "unique_participants": 38
   }
 }
