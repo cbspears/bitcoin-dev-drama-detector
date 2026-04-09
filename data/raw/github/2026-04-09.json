@@ -1,12 +1,419 @@
 {
   "source": "github",
   "repo": "bitcoin/bitcoin",
-  "fetched_at": "2026-04-09T01:47:05.163566+00:00",
+  "fetched_at": "2026-04-09T09:01:25.916887+00:00",
   "date_range": {
-    "since": "2026-04-02T01:47:05.163501+00:00",
-    "until": "2026-04-09T01:47:05.163501+00:00"
+    "since": "2026-04-02T09:01:25.916828+00:00",
+    "until": "2026-04-09T09:01:25.916828+00:00"
   },
   "pull_requests": [
+    {
+      "id": 3486081205,
+      "number": 34995,
+      "title": "ci, iwyu: Fix warnings in `src/common` and treat them as errors",
+      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2026-04-03T11:52:21Z",
+      "updated_at": "2026-04-09T09:00:09Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34995",
+      "labels": [
+        "Refactoring",
+        "Needs rebase",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 307,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3395217307,
+      "number": 34821,
+      "title": "txgraph: Add ChainClusterImpl for chain-shaped cluster topologies",
+      "body": "This one replaces https://github.com/bitcoin/bitcoin/pull/34643\r\n### Summary                                                                      \r\n                                                                                 \r\nThis PR adds an optimized `ChainClusterImpl` for chain-shaped transaction topologies (A→B→C→D…). It replaces the generic `DepGraph`-based cluster with a compact linear representation (`m_txdata`) and a backward-absorbing chunk algorithm, reducing memory and improving performance for common chain patterns.\r\n                                                                                 \r\n### Key changes                                                                  \r\n                                                                                 \r\n- **`m_maybe_chain` flag** on `GroupEntry` to hint at chain-shaped merges        \r\n- **`ChainClusterImpl`** with `m_txdata` (chain order) and `m_split_segments` (contiguous segments after removals)\r\n- **`TryChainMerge`** in `ApplyDependencies` to detect and merge chains via the fast path\r\n- **`ApplyRemovals` / `Split`** correctly split chains when middle transactions are removed (no spurious dependencies)\r\n- **Removal of `m_linearization`** from `ChainClusterImpl` (always `[0,1,…,n-1]`)\r\n- **`ComputeChunks()`** helper to centralize the backward-absorbing chunk logic  \r\n- **`SetFee` / `Relinearize`** fix: downgrade to `NEEDS_RELINEARIZE` on fee change to avoid dereferencing destroyed Refs; `Relinearize` promotes back to OPTIMAL and recomputes chunks\r\n                                                                                 \r\n                                                                          \r\n### Testing                                                                      \r\n                                                                                 \r\n- **Unit tests**: `txgraph_chain_merge` (TryChainMerge), `txgraph_chain_split_on_removal` (ApplyRemovals/Split)\r\n- **Benchmarks**: ChainCluster merge and BlockBuilder paths                      \r\n                                                                                 \r\n### Trace replay comparison                                                      \r\n                                                                                 \r\nTrace recording (TracingTxGraph) and replay (`txgraph-replay`, `analyze_trace.py`) code: [`git@github.com:HowHsu/bitcoin.git`](https://github.com/HowHsu/bitcoin) branch `before_chaincluster`. Usage guide: [TxGraph Trace & Replay](https://howhsu.github.io/thinking-in-bitcoin/articles/txgraph-trace-replay.en.html).\r\n\r\nThe trace file is on github LFS: https://howhsu.github.io/thinking-in-bitcoin/data/txgraph.trace.4.5days.final.xz\r\n                                                                          \r\nSame trace replayed on baseline vs ChainCluster branch. Parameters: `max_cluster_count=64`, `max_cluster_size=404000`, `acceptable_cost=75000`. Total ops: 71,313,272.\r\n                                                                                 \r\n| Entry point | Baseline Total (μs) | ChainCluster Total (μs) |                  \r\n|-------------|--------------------|--------------------------|                  \r\n| DoWork | 3,595,581 | 1,297,506 |                                               \r\n| CompareMainOrder | 1,445 | 1,531 |                                             \r\n| GetAncestors | 1 | 0 |                                                         \r\n| GetDescendants | 8,543 | 8,361 |                                               \r\n| CountDistinctClusters | 575 | 2,474 |                                          \r\n| GetMainMemoryUsage | 157 | 156 |                                               \r\n| GetMainStagingDiagrams | 35,428 | 15,969 |                                     \r\n| IsOversized | 31,732 | 108,050 |                                               \r\n| StartStaging | 128 | 87 |                                                      \r\n| AbortStaging | 0 | 0 |                                                         \r\n| CommitStaging | 9,300 | 10,777 |                                               \r\n| **TOTAL** | **3,682,890** | **1,444,911** |                                    \r\n                                                                                 \r\nMutations (not timed): ADD_TX 1,764,814, REMOVE_TX 33,050, ADD_DEP 791,630, SET_FEE 0, UNLINK_REF 1,764,814.\r\n                                                                                 \r\n### Trace analysis                                                               \r\n                                                                                 \r\n`analyze_trace.py` on the same trace file (`/tmp/txgraph.trace`).                \r\n                                                                                 \r\n**Note on oversized clusters:** Clusters with size > 64 appear because the trace captures graph state at discrete snapshots (e.g. after each CommitStaging). Split is triggered lazily by DoWork/ApplyDependencies; at snapshot time, some clusters may not yet have been processed and thus exceed `max_cluster_count`.\r\n                                                                                 \r\n**Note on peak state:** Peak state is the snapshot with the most transactions (27,512), not necessarily the one with the most chain clusters.\r\n                                                                                 \r\n```                                                                              \r\nTrace format version: 1                                                          \r\nParameters: max_cluster_count=64 max_cluster_size=404000 acceptable_cost=75000   \r\n                                                                                 \r\nProcessed 71313273 operations, 1763516 CommitStagings                            \r\nPeak mempool size: 27512 transactions (at op #51503379)                          \r\nUnstaged mutations: 0 ADD_TX, 0 ADD_DEP, 0 REMOVE_TX, 1764814 UNLINK_REF         \r\n                                                                                 \r\nEdge sanity check (final state): OK - all edges reference live transactions         \r\nEdge sanity check (peak state): OK - all edges reference live transactions          \r\n```                                                                              \r\n                                                                                 \r\n**Peak state** (27,512 transactions, 8,596 clusters):                            \r\n                                                                                 \r\n| Size | Clusters | Chains | Non-chain | Chain% |                                \r\n|------|----------|--------|-----------|--------|                                \r\n| 1 | 7,628 | 7,628 | 0 | 100.0% |                                               \r\n| 2 | 575 | 575 | 0 | 100.0% |                                                   \r\n| 3 | 103 | 72 | 31 | 69.9% |                                                    \r\n| 4 | 75 | 58 | 17 | 77.3% |                                                     \r\n| 5 | 21 | 18 | 3 | 85.7% |                                                      \r\n| 6 | 9 | 4 | 5 | 44.4% |                                                        \r\n| 7 | 12 | 9 | 3 | 75.0% |                                                       \r\n| 8 | 4 | 1 | 3 | 25.0% |                                                        \r\n| 9 | 31 | 30 | 1 | 96.8% |                                                      \r\n| 10 | 25 | 23 | 2 | 92.0% |                                                     \r\n| 13 | 1 | 1 | 0 | 100.0% |                                                      \r\n| 16 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 20 | 2 | 2 | 0 | 100.0% |                                                      \r\n| 24 | 10 | 9 | 1 | 90.0% |                                                      \r\n| 25 | 90 | 87 | 3 | 96.7% |                                                     \r\n| 26 | 3 | 0 | 3 | 0.0% |                                                        \r\n| 29 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 33 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 48 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 51 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 59 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 14464 | 1 | 0 | 1 | 0.0% |                                                     \r\n| **TOTAL** | **8,596** | **8,517** | **79** | **99.1%** |                       \r\n                                                                                 \r\n- Transactions in chain clusters: 12,355 (44.9%)                                 \r\n- Transactions in non-chain clusters: 15,157 (55.1%)                             \r\n- Transactions with dependencies: 19,884 (72.3%)                                 \r\n- **Excluding size=1 clusters:** 4,727 in chains (23.8%), 15,157 in non-chains (76.2%), of 19,884 txs \r\n- 1 cluster of size 14,464 exceeds `max_cluster_count=64` (oversized)            \r\n\r\n**Final state** (6,079 transactions, 4,665 clusters):                            \r\n                                                                                 \r\n| Size | Clusters | Chains | Non-chain | Chain% |                                \r\n|------|----------|--------|-----------|--------|                                \r\n| 1 | 4,269 | 4,269 | 0 | 100.0% |                                               \r\n| 2 | 285 | 285 | 0 | 100.0% |                                                   \r\n| 3 | 68 | 44 | 24 | 64.7% |                                                     \r\n| 4 | 24 | 9 | 15 | 37.5% |                                                      \r\n| 5 | 6 | 4 | 2 | 66.7% |                                                        \r\n| 6 | 4 | 1 | 3 | 25.0% |                                                        \r\n| 7 | 3 | 0 | 3 | 0.0% |                                                         \r\n| 8 | 1 | 0 | 1 | 0.0% |                                                         \r\n| 10 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 26 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 54 | 1 | 0 | 1 | 0.0% |                                                        \r\n| 286 | 1 | 0 | 1 | 0.0% |                                                       \r\n| 481 | 1 | 0 | 1 | 0.0% |                                                       \r\n| **TOTAL** | **4,665** | **4,612** | **53** | **98.9%** |                       \r\n                                                                                 \r\n- Transactions in chain clusters: 5,033 (82.8%)                                  \r\n- Transactions in non-chain clusters: 1,046 (17.2%)                              \r\n- Transactions with dependencies: 1,810 (29.8%)                                  \r\n- **Excluding size=1 clusters:** 764 in chains (42.2%), 1,046 in non-chains (57.8%), of 1,810 txs\r\n- 2 clusters (sizes 286, 481) exceed `max_cluster_count=64`       \r\n\r\nThe trace file is about 0.5 GB, I'll find a place to upload it soon.               \r\n      \r\n### Memory Analysis\r\nAs per @instagibbs 's comment, I make some memory tests, the results are in below article:\r\nhttps://howhsu.github.io/thinking-in-bitcoin/articles/chain-cluster-memory.en.html\r\n   \r\n### No-chain mempool \r\nAs @instagibbs  points out, mempool usage patterns may evolve over time. We should evaluate the impact of this optimization in the no-chain scenario (i.e., when there are no chains of size ≥ 3; chains of size 2 are typically CPFP cases). Below link is the comparison and results.\r\nhttps://howhsu.github.io/thinking-in-bitcoin/articles/chain-cluster-nochain-baseline.en.html\r\nIn short, chaincluster is ~21% faster, which is most likely caused by size=2 chains.\r\n    \r\n\r\n### Compare with PR #34643 \r\nhttps://howhsu.github.io/thinking-in-bitcoin/articles/chain-linearize-vs-chaincluster.en.html\r\nCompare with the previous chain linearize idea. In short, chaincluster branch is about 15.5% faster.\r\n\r\n\r\n### Overhead of `IsOversized` and `CountDistinctClusters`\r\nThe increase in overhead for these two components is caused by chunk computation in `Updated`. This logic was moved from `DoWork` to `IsOversized` and `CountDistinctClusters` as part of the chain cluster design. For more details, see: [https://howhsu.github.io/thinking-in-bitcoin/articles/chain-isoversized-chunk-overhead.en.html](https://howhsu.github.io/thinking-in-bitcoin/articles/chain-isoversized-chunk-overhead.en.html)\r\n\r\n ### Bench Environment                                                    \r\n                                                                                 \r\nThe above results were obtained on the test machine.                             \r\n                                                                                 \r\n#### Hardware                                                                     \r\n                                                                                 \r\n| Item | Value |                                                                 \r\n|------|-------|                                                                 \r\n| CPU | Intel Core i5-13600KF (14 cores, 20 threads) |                           \r\n| Memory | 32 GB |                                                               \r\n                                                                                 \r\n#### Host OS                                                                      \r\n                                                                                 \r\n| Item | Value |                                                                 \r\n|------|-------|                                                                 \r\n| OS | Ubuntu 24.04 LTS (Noble Numbat) |                                         \r\n| Docker | 28.4.0 |                                                              \r\n                                                                                 \r\n#### Docker Container                                                             \r\n                                                                                 \r\n| Item | Value |                                                                 \r\n|------|-------|                                                                                                                   \r\n| Base OS | Debian 12 (bookworm) |                                               \r\n| GCC | 12.2.0 |                                                                 \r\n| CMake | 3.25.1 | \r\n\r\n                                                                   \r\n### Fuzz testing                                                                 \r\n                                                                                 \r\n| Check | Result |                                                               \r\n|-------|--------|                                                               \r\n| Crash files | None |                                                           \r\n| Error log | No assert / ERROR / deadly signal |                                \r\n| Workers | All 8 finished normally |                                            \r\n| Total runs | ~39.6M |                                                          \r\n| Duration | 36001 s (~10 h) |                                                   \r\n                                                                                 \r\n** Fuzz Environment**                                                                  \r\n                                                                                 \r\n| Item | Value |                                                                 \r\n|------|--------|                                                                \r\n| Host kernel | Linux 6.17.0-14-generic (Ubuntu) |                               \r\n| Container OS | Debian GNU/Linux 12 (bookworm) |                                \r\n| Architecture | x86_64 |                                                        \r\n| Compiler | Clang 20.1.8 |                                                      \r\n| Fuzzer | libFuzzer |                                                           \r\n| Sanitizers | AddressSanitizer, UndefinedBehaviorSanitizer |                    \r\n| Target | `txgraph` |                                                           \r\n| Corpus | `fuzz_corpus/txgraph` |                      ",
+      "state": "open",
+      "user": "HowHsu",
+      "created_at": "2026-03-13T13:44:43Z",
+      "updated_at": "2026-04-09T08:53:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34821",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 16738,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 991865101,
+      "number": 25573,
+      "title": "guix: produce a `-static-pie` bitcoind",
+      "body": "Use Guix to produce a `-static-pie` bitcoind using GCC `14.3.0` and glibc `2.43`. Using glibc for static builds, would be less of a leap compared to switching to musl libc (POC in #23203).\r\n\r\n[`-static-pie`](https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html)\r\n> Produce a static position independent executable on targets that support it.\r\nA static position independent executable is similar to a static executable,\r\nbut can be loaded at any address without a dynamic linker.\r\n\r\n```bash\r\n# file bitcoind\r\n\tELF 64-bit LSB pie executable, x86-64, version 1 (GNU/Linux), static-pie linked, for GNU/Linux 3.2.0, stripped\r\n\r\n# ldd bitcoind\r\n\tstatically linked\r\n```\r\n\r\nBased on #34757.\r\nFixes #19075.",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2022-07-08T16:49:48Z",
+      "updated_at": "2026-04-09T08:33:43Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/25573",
+      "labels": [
+        "Build system"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 736,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3418820453,
+      "number": 34858,
+      "title": "test: Use NodeClockContext in more tests",
+      "body": "Currently mocktime is written to a global, which may leak between sub-tests (albeit some tests try to reset the mocktime on a best-effort basis). Also, when advancing it, one has to keep a counter variable around.\r\n\r\nFix both issues by using the recently added `NodeClockContext`, which resets the mocktime once it goes out of scope. Also, it has a method to advance the mocktime by a delta.",
+      "state": "open",
+      "user": "maflcko",
+      "created_at": "2026-03-19T08:09:01Z",
+      "updated_at": "2026-04-09T08:27:56Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34858",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 432,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 2732065267,
+      "number": 33160,
+      "title": "bench: Add more realistic Coin Selection Bench",
+      "body": "Adds a Coin Selection benchmark that doesn’t just test a worst case of one of the algorithms but exercises coin selection to to select inputs for a variety of different targets from a large number of UTXOs.",
+      "state": "open",
+      "user": "murchandamus",
+      "created_at": "2025-08-09T02:17:59Z",
+      "updated_at": "2026-04-09T08:26:16Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/33160",
+      "labels": [
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 253,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3243034362,
+      "number": 34495,
+      "title": "Replace boost signals with minimal compatible implementation",
+      "body": "This drops our dependency on `boost::signals2`, leaving `boost::multi_index` as the only remaining boost dependency for bitcoind.\r\n\r\n`boost::signals2` is a complex beast, but we only use a small portion of it. Namely: it's a way for multiple subscribers to connect to the same event, and the ability to later disconnect individual subscribers from that event.\r\n\r\n`btcsignals` adheres to the subset of the `boost::signals2` API that we currently use, and thus is a drop-in replacement. Rather than implementing a complex `slot` tracking class that we never used anyway (and which was much more useful in the days before std::function existed), callbacks are simply wrapped directly in `std::function`s.\r\n\r\nThe new tests work with either `boost::signals2` or the new `btcsignals` implementation. Reviewers can verify\r\nfunctional equivalency by running the tests in the commit that introduces them against `boost::signals2`, then again with `btcsignals`.\r\n\r\nThe majority of the commits in this PR are preparation and cleanup. Once `boost::signals2` is no longer needed, it is removed from depends. Additionally, a few CMake targets no longer need boost includes as they were previously only required for signals.\r\n\r\nI think this is actually pretty straightforward to review. I kept things simple, including keeping types unmovable/uncopyable where possible rather than trying to define those semantics. In doing so, the new implementation has even fewer type requirements than boost, which I believe is due to a boost bug. I've opened a PR upstream for that to attempt to maintain parity between the implementations.\r\n\r\nSee individual commits for more details.\r\n\r\nCloses #26442.",
+      "state": "closed",
+      "user": "theuni",
+      "created_at": "2026-02-03T21:27:43Z",
+      "updated_at": "2026-04-09T08:25:57Z",
+      "merged_at": "2026-04-09T08:25:57Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34495",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1736,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 3487460321,
+      "number": 34998,
+      "title": "ci: add --extended when using --usecli",
+      "body": "The current CI doesn't cover the case of running all tests with `--extended` if using `--usecli`.\r\nThis led to a test failing (`feature_index_prune.py`) if run with `--usecli` and the CI not catching it.\r\nSee #34991 for context.\r\n\r\nThe CI obviously will fail in this PR until #34991 is merged into master.\r\n\r\n~I don't know if this is the best approach; I just looked for a ci using `--usecli` and added the `--extended` flag to cover these scenarios.~\r\nI just added `--usecli` to a test that was using `--extended` as sugested in https://github.com/bitcoin/bitcoin/pull/34998#issuecomment-4186737767\r\nI'm open to changing the approach.",
+      "state": "open",
+      "user": "polespinasa",
+      "created_at": "2026-04-03T20:37:54Z",
+      "updated_at": "2026-04-09T08:21:51Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34998",
+      "labels": [
+        "Tests",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 674,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3494488444,
+      "number": 35016,
+      "title": "net: deduplicate private broadcast state and snapshot types",
+      "body": "Follow-up cleanup in the private broadcast subsystem.\r\n\r\nThis change removes duplication between the internal queue state\r\n(SendStatus, TxSendStatus) and the snapshot types exported to\r\nPeerManager / RPC / tests (PeerSendInfo, TxBroadcastInfo).\r\n\r\n- Remove PeerSendInfo, reuse SendStatus directly in TxBroadcastInfo\r\n- Simplify TxBroadcastInfo to {tx, TxSendStatus status}\r\n- Simplify GetBroadcastInfo() from field-by-field copy to direct snapshot\r\n- JSON output of getprivatebroadcastinfo is unchanged\r\n\r\nNo behavioral changes intended.",
+      "state": "open",
+      "user": "takeshikurosawaa",
+      "created_at": "2026-04-06T18:52:41Z",
+      "updated_at": "2026-04-09T08:15:36Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/35016",
+      "labels": [
+        "P2P",
+        "CI failed"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 597,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3187823761,
+      "number": 34342,
+      "title": "cli: Replace libevent usage with simple http client",
+      "body": "Part of the effort to remove the libevent dependency altogether, see #31194\r\n\r\nThis takes the [`HTTPHeaders` class](https://github.com/bitcoin/bitcoin/pull/32061/commits/d549f01caab659f1c431ccabf0f5ff1800debcfe) from #32061 and puts it into [`common/http.h|cpp`](https://github.com/bitcoin/bitcoin/pull/34342/commits/634d4dcfa428f17f0a12c2e2742c2c08e2345033). While it would not be strictly required for that PR to go in first, it might be better to review it first or simultaneously.\r\n\r\nOtherwise the change itself replaces the libevent-based HTTP client with a simple synchronous implementation which uses the `Sock` class directly.",
+      "state": "open",
+      "user": "fjahr",
+      "created_at": "2026-01-19T13:27:54Z",
+      "updated_at": "2026-04-09T06:39:47Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34342",
+      "labels": [
+        "Scripts and tools",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 686,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3435454252,
+      "number": 34905,
+      "title": "Update string and net utils for future HTTP operations",
+      "body": "This is a follow-up to #34242 and is the first few commits of #32061\r\n\r\nAs review and refinement of the replacement HTTP server progresses, some new utilities were needed and added. This PR updates those utilities as work continues on #32061.\r\n\r\n### LineReader\r\n\r\nIn order to enforce strict limits on the total size of headers in HTTPRequest, we add a method to `LineReader` to give us the total amount of data that has been read from the buffer so far. See https://github.com/bitcoin/bitcoin/pull/32061#discussion_r2949287329\r\n\r\n### CaseInsensitiveEqual\r\n\r\nHTTP headers are case-insensitive. An early version of #32061 used an unordered_map for this and therefore we needed a comparator struct. However that unordered_map was replaced by a simpler `std::vector` of `std::pair` so we can remove the struct and use methods that already exist in the codebase.\r\n\r\n### StringToBytes\r\n\r\n`StringToBuffer` was introduced in #34242 to test LineReader but review of #32061 indicated that it would be more optimal to return a span of bytes instead of a vector. See https://github.com/bitcoin/bitcoin/pull/32061#discussion_r2892431378\r\n\r\n### Split DynSock constructor for two usecases: listening / accepting sockets\r\n\r\nSee https://github.com/bitcoin/bitcoin/pull/32061#discussion_r2895891437. DynSock was introduced in #30988 and is not used anywhere in master yet. If it's used as a listening socket, it provides connected sockets. If it's used as a connected socket, it provides I/O pipes. By making the queue of connected sockets optional we can clean up the ownership / lifetime if the class members.",
+      "state": "closed",
+      "user": "pinheadmz",
+      "created_at": "2026-03-23T18:32:29Z",
+      "updated_at": "2026-04-09T05:43:53Z",
+      "merged_at": "2026-04-09T05:43:52Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34905",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1648,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3503254331,
+      "number": 35032,
+      "title": "net_processing: don't modify addrman for private broadcast connections",
+      "body": "It is best if the internal addrman database is not modified with information coming from private broadcast connections because that information can potentially later be sent via other connections.\r\n\r\ninstagibbs suggested this change, thank you!",
+      "state": "open",
+      "user": "vasild",
+      "created_at": "2026-04-08T12:57:43Z",
+      "updated_at": "2026-04-09T05:37:51Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/35032",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 315,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3407378067,
+      "number": 34838,
+      "title": "interfaces: typed receive-request APIs",
+      "body": "Right now, `RecentRequestsTableModel` deserializes raw blobs it gets back from `getAddressReceiveRequests()` using `SpanReader` with no `try/catch`. If anything in the wallet DB is malformed, the GUI crashes on startup — there's no recovery path.\r\n\r\nThis PR replaces the two raw-string methods (`getAddressReceiveRequests()` / `setAddressReceiveRequest()`) with typed ones:\r\n\r\n- `getReceiveRequests()` returns a `vector<WalletReceiveRequest>` instead of opaque blobs\r\n- `addReceiveRequest()` lets the wallet assign the ID and timestamp\r\n- `eraseReceiveRequest()` is now its own method instead of overloading the setter with an empty string\r\n\r\nSerialization still happens the same way — I added `RecipientData` / `RequestEntryData` structs in `wallet/interfaces.cpp` that are byte-identical to the Qt-side ones, so the DB format doesn't change. The difference is that deserialization is now wrapped in `try/catch` at the wallet layer, so bad entries get logged and skipped rather than taking down the GUI.\r\n\r\nCloses #34629\r\n",
+      "state": "open",
+      "user": "MkDev11",
+      "created_at": "2026-03-17T03:10:13Z",
+      "updated_at": "2026-04-09T04:41:07Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34838",
+      "labels": [
+        "Wallet",
+        "interfaces"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 1062,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2237045890,
+      "number": 31507,
+      "title": "build: Use clang-cl to build on Windows natively",
+      "body": "Building on Windows using Clang instead of the MS compiler may be beneficial, considering the issues with the latter, as outlined in https://github.com/bitcoin/bitcoin/issues/31456:\r\n\r\n>    * non-optimized codegen: [build: remove need to test for endianness #29852 (comment)](https://github.com/bitcoin/bitcoin/pull/29852#issuecomment-2049803970)\r\n> \r\n>    * compile failure: [MSVC 17.12.0 internal compiler error  #31303](https://github.com/bitcoin/bitcoin/issues/31303)\r\n> \r\n>    * legal, but brittle stdlib: [util: Drop boost posix_time in ParseISO8601DateTime #31391 (comment)](https://github.com/bitcoin/bitcoin/pull/31391#issuecomment-2510762011)\r\n> \r\n>    * unspecified issue: [refactor: Check translatable format strings at compile-time #31061 (comment)](https://github.com/bitcoin/bitcoin/pull/31061#issuecomment-2531244463)\r\n\r\nAdditionally, MSVC does not [support](https://learn.microsoft.com/en-us/cpp/assembler/inline/inline-assembler) inline assembly on the ARM and x64 processors.\r\n\r\nSo this PR:\r\n1. Closes https://github.com/bitcoin/bitcoin/issues/31456 (and addresses https://github.com/bitcoin/bitcoin/issues/14118).\r\n2. Could be an alternative to https://github.com/bitcoin/bitcoin/pull/24773.\r\n\r\n---\r\n\r\nAdditionally, clang-cl:\r\n1. Produces binaries with [better](https://github.com/bitcoin-core/secp256k1/pull/1681) performance. For example:\r\n\r\n| MSVC, block/s | clang-cl, block/s | benchmark |\r\n|--------------:|------------------:|:----------|\r\n|          7.40 |             11.52 | `ConnectBlockAllEcdsa`\r\n|          7.32 |             11.81 | `ConnectBlockAllSchnorr`\r\n|          7.38 |             11.45 | `ConnectBlockMixedEcdsaSchnorr`\r\n|         91.86 |            143.12 | `DeserializeAndCheckBlockTest`\r\n|        121.46 |            189.04 | `DeserializeBlockTest`\r\n\r\n2. Builds faster on the CI:\r\n    - [MSVC](https://github.com/bitcoin/bitcoin/actions/runs/13792522864/job/38575846787) - 20m 35s\r\n    - [clang-cl](https://github.com/bitcoin/bitcoin/actions/runs/13792522864/job/38575849680) - 12m 43s\r\n",
+      "state": "open",
+      "user": "hebasto",
+      "created_at": "2024-12-16T10:58:38Z",
+      "updated_at": "2026-04-09T04:19:52Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/31507",
+      "labels": [
+        "Windows",
+        "Build system",
+        "Needs rebase"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 2081,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3342160900,
+      "number": 34707,
+      "title": "net: keep finished private broadcast txs in memory",
+      "body": "Follow up from #34329.\r\n\r\nPrivate broadcast transaction data is removed from memory when either 1) the tx is received back from another peer and inserted into our mempool or 2) the tx is no longer acceptable to our mempool.\r\n\r\nWe want to persist this data for a number of reasons. See https://github.com/bitcoin/bitcoin/issues/30471.\r\n\r\nThis PR changes the behavior of the private broadcast queue to keep received txs in memory. The peer's address we received the tx from and the time is now also returned via `getprivatebroadcastinfo` RPC.\r\n\r\nKeeping mempool rejected txs in memory is left for a follow-up.\r\n\r\nThis is designed to facilitate follow up work including:\r\n- rebroadcasting txs that are in our mempool but have not been confirmed after a while. This can obviate rebroadcasting wallet txs if private broadcast is enabled (see https://github.com/bitcoin/bitcoin/pull/34533#issuecomment-3969991481).\r\n- adding a delay when submitting private broadcast txs so they will be broadcast at a later time (see https://github.com/bitcoin/bitcoin/issues/34118).\r\n- persisting private broadcast state to disk for resuming after restart or crash (see #34322).\r\n- expiring txs after a while so they are removed from the queue without having to manually abort.\r\n",
+      "state": "open",
+      "user": "andrewtoth",
+      "created_at": "2026-03-02T01:46:35Z",
+      "updated_at": "2026-04-09T03:12:14Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34707",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 1,
+        "positive_keywords": 1,
+        "text_length": 1309,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
+    {
+      "id": 2086428775,
+      "number": 30951,
+      "title": "net: option to disallow v1 connection on ipv4 and ipv6 peers",
+      "body": "resolves #29618.\r\n\r\nThis PR adds a config flag option `-v2onlyclearnet` which disallows outbound v1 connections on ipv4 and ipv6 networks since they're unencrypted. outbound v1 connections are still possible from tor/i2p/cjdns peers since they're encrypted networks.\r\n\r\n- v1 outbound connections to peers are not attempted\r\n- v1 reconnections are not attempted (if peer is falsely advertised as v2 peer and we attempt a v2 connection but it fails, we do not attempt a v1 reconnection when `-v2onlyclearnet` is switched on)\r\n\r\nCurrently 70% of reachable nodes in network supporting v2 (according to https://21.ninja/reachable-nodes/node-service-share/ and https://bitnodes.io/nodes). Also found 81% of addresses supporting v2 in the addrman of nodes I checked - personal node and the nodes in [peer.observer](https://peer.observer/addrman/alice). (You can use [this branch ](https://github.com/stratospher/bitcoin/commits/addrinfo_service_display/)to check the % of v2 addresses in a node's addrman.)",
+      "state": "open",
+      "user": "stratospher",
+      "created_at": "2024-09-23T12:23:48Z",
+      "updated_at": "2026-04-09T03:01:45Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/30951",
+      "labels": [
+        "P2P"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1060,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3303345951,
+      "number": 34623,
+      "title": "Update secp256k1 subtree to latest master",
+      "body": "https://github.com/bitcoin-core/secp256k1/pull/1760 was merged upstream, which improves test parallelism, and reduces overall runtime. Our longest running tests are secp256k1 tests (`secp256k1_tests`), so we might want to pull this down, to speedup all of our ctest invocations.\r\n\r\nThe new upstream code increases output verbosity, i.e the test list is now ~330, and we have output like:\r\n```bash\r\nLabel Time Summary:\r\nsecp256k1_exhaustive        =  19.52 sec*proc (1 test)\r\nsecp256k1_noverify_tests    =  45.65 sec*proc (91 tests)\r\nsecp256k1_tests             =  90.55 sec*proc (91 tests)\r\n```\r\nmaybe we can/should mute that somewhat?",
+      "state": "open",
+      "user": "fanquake",
+      "created_at": "2026-02-19T14:28:05Z",
+      "updated_at": "2026-04-09T02:28:02Z",
+      "merged_at": null,
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/34623",
+      "labels": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 677,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3502370293,
+      "number": 35031,
+      "title": "ci: Match `VCPKG_HOST_TRIPLET` to `VCPKG_TARGET_TRIPLET`",
+      "body": "Using a non-default target triplet in https://github.com/bitcoin/bitcoin/pull/34883 introduced a [regression](https://github.com/bitcoin/bitcoin/pull/34883#issuecomment-4204744932) because packages with `\"host\": true` in their vcpkg configurations were still picking up the default `x64-windows` triplet, effectively building both release and debug packages.\r\n\r\nThis PR fixes this regression by setting `VCPKG_HOST_TRIPLET` explicitly.\r\n\r\nUpstream issue: https://github.com/microsoft/vcpkg/issues/50927.",
+      "state": "closed",
+      "user": "hebasto",
+      "created_at": "2026-04-08T09:27:47Z",
+      "updated_at": "2026-04-09T02:21:49Z",
+      "merged_at": "2026-04-09T02:21:48Z",
+      "comments": 0,
+      "review_comments": 0,
+      "url": "https://github.com/bitcoin/bitcoin/pull/35031",
+      "labels": [
+        "Windows",
+        "Tests"
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 1,
+        "text_length": 560,
+        "has_nack": false,
+        "has_ack": true
+      }
+    },
     {
       "id": 2170572223,
       "number": 31260,
@@ -30,28 +437,6 @@
         "text_length": 4374,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3243034362,
-      "number": 34495,
-      "title": "Replace boost signals with minimal compatible implementation",
-      "body": "This drops our dependency on `boost::signals2`, leaving `boost::multi_index` as the only remaining boost dependency for bitcoind.\r\n\r\n`boost::signals2` is a complex beast, but we only use a small portion of it. Namely: it's a way for multiple subscribers to connect to the same event, and the ability to later disconnect individual subscribers from that event.\r\n\r\n`btcsignals` adheres to the subset of the `boost::signals2` API that we currently use, and thus is a drop-in replacement. Rather than implementing a complex `slot` tracking class that we never used anyway (and which was much more useful in the days before std::function existed), callbacks are simply wrapped directly in `std::function`s.\r\n\r\nThe new tests work with either `boost::signals2` or the new `btcsignals` implementation. Reviewers can verify\r\nfunctional equivalency by running the tests in the commit that introduces them against `boost::signals2`, then again with `btcsignals`.\r\n\r\nThe majority of the commits in this PR are preparation and cleanup. Once `boost::signals2` is no longer needed, it is removed from depends. Additionally, a few CMake targets no longer need boost includes as they were previously only required for signals.\r\n\r\nI think this is actually pretty straightforward to review. I kept things simple, including keeping types unmovable/uncopyable where possible rather than trying to define those semantics. In doing so, the new implementation has even fewer type requirements than boost, which I believe is due to a boost bug. I've opened a PR upstream for that to attempt to maintain parity between the implementations.\r\n\r\nSee individual commits for more details.\r\n\r\nCloses #26442.",
-      "state": "open",
-      "user": "theuni",
-      "created_at": "2026-02-03T21:27:43Z",
-      "updated_at": "2026-04-08T23:23:39Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34495",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1736,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -172,31 +557,6 @@
       }
     },
     {
-      "id": 3502370293,
-      "number": 35031,
-      "title": "ci: Match `VCPKG_HOST_TRIPLET` to `VCPKG_TARGET_TRIPLET`",
-      "body": "Using a non-default target triplet in https://github.com/bitcoin/bitcoin/pull/34883 introduced a [regression](https://github.com/bitcoin/bitcoin/pull/34883#issuecomment-4204744932) because packages with `\"host\": true` in their vcpkg configurations were still picking up the default `x64-windows` triplet, effectively building both release and debug packages.\r\n\r\nThis PR fixes this regression by setting `VCPKG_HOST_TRIPLET` explicitly.\r\n\r\nUpstream issue: https://github.com/microsoft/vcpkg/issues/50927.",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2026-04-08T09:27:47Z",
-      "updated_at": "2026-04-08T22:05:44Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/35031",
-      "labels": [
-        "Windows",
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 560,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3119599294,
       "number": 34124,
       "title": "validation: make `CCoinsView` a pure virtual interface",
@@ -264,28 +624,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 924,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3435454252,
-      "number": 34905,
-      "title": "Update string and net utils for future HTTP operations",
-      "body": "This is a follow-up to #34242 and is the first few commits of #32061\r\n\r\nAs review and refinement of the replacement HTTP server progresses, some new utilities were needed and added. This PR updates those utilities as work continues on #32061.\r\n\r\n### LineReader\r\n\r\nIn order to enforce strict limits on the total size of headers in HTTPRequest, we add a method to `LineReader` to give us the total amount of data that has been read from the buffer so far. See https://github.com/bitcoin/bitcoin/pull/32061#discussion_r2949287329\r\n\r\n### CaseInsensitiveEqual\r\n\r\nHTTP headers are case-insensitive. An early version of #32061 used an unordered_map for this and therefore we needed a comparator struct. However that unordered_map was replaced by a simpler `std::vector` of `std::pair` so we can remove the struct and use methods that already exist in the codebase.\r\n\r\n### StringToBytes\r\n\r\n`StringToBuffer` was introduced in #34242 to test LineReader but review of #32061 indicated that it would be more optimal to return a span of bytes instead of a vector. See https://github.com/bitcoin/bitcoin/pull/32061#discussion_r2892431378\r\n\r\n### Split DynSock constructor for two usecases: listening / accepting sockets\r\n\r\nSee https://github.com/bitcoin/bitcoin/pull/32061#discussion_r2895891437. DynSock was introduced in #30988 and is not used anywhere in master yet. If it's used as a listening socket, it provides connected sockets. If it's used as a connected socket, it provides I/O pipes. By making the queue of connected sockets optional we can clean up the ownership / lifetime if the class members.",
-      "state": "open",
-      "user": "pinheadmz",
-      "created_at": "2026-03-23T18:32:29Z",
-      "updated_at": "2026-04-08T20:49:56Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34905",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1648,
         "has_nack": false,
         "has_ack": false
       }
@@ -378,31 +716,6 @@
         "text_length": 2508,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 2086428775,
-      "number": 30951,
-      "title": "net: option to disallow v1 connection on ipv4 and ipv6 peers",
-      "body": "resolves #29618.\r\n\r\nThis PR adds a config flag option `-v2onlyclearnet` which disallows outbound v1 connections on ipv4 and ipv6 networks since they're unencrypted. outbound v1 connections are still possible from tor/i2p/cjdns peers since they're encrypted networks.\r\n\r\n- v1 outbound connections to peers are not attempted\r\n- v1 reconnections are not attempted (if peer is falsely advertised as v2 peer and we attempt a v2 connection but it fails, we do not attempt a v1 reconnection when `-v2onlyclearnet` is switched on)\r\n\r\nCurrently 70% of reachable nodes in network supporting v2 (according to https://21.ninja/reachable-nodes/node-service-share/ and https://bitnodes.io/nodes). Also found 81% of addresses supporting v2 in the addrman of nodes I checked - personal node and the nodes in [peer.observer](https://peer.observer/addrman/alice). (You can use [this branch ](https://github.com/stratospher/bitcoin/commits/addrinfo_service_display/)to check the % of v2 addresses in a node's addrman.)",
-      "state": "open",
-      "user": "stratospher",
-      "created_at": "2024-09-23T12:23:48Z",
-      "updated_at": "2026-04-08T19:08:10Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/30951",
-      "labels": [
-        "P2P",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1060,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -863,30 +1176,6 @@
       }
     },
     {
-      "id": 991865101,
-      "number": 25573,
-      "title": "guix: produce a `-static-pie` bitcoind",
-      "body": "Use Guix to produce a `-static-pie` bitcoind using GCC `14.3.0` and glibc `2.43`. Using glibc for static builds, would be less of a leap compared to switching to musl libc (POC in #23203).\r\n\r\n[`-static-pie`](https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html)\r\n> Produce a static position independent executable on targets that support it.\r\nA static position independent executable is similar to a static executable,\r\nbut can be loaded at any address without a dynamic linker.\r\n\r\n```bash\r\n# file bitcoind\r\n\tELF 64-bit LSB pie executable, x86-64, version 1 (GNU/Linux), static-pie linked, for GNU/Linux 3.2.0, stripped\r\n\r\n# ldd bitcoind\r\n\tstatically linked\r\n```\r\n\r\nBased on #34757.\r\nFixes #19075.",
-      "state": "open",
-      "user": "fanquake",
-      "created_at": "2022-07-08T16:49:48Z",
-      "updated_at": "2026-04-08T17:32:36Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/25573",
-      "labels": [
-        "Build system"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 736,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2168265902,
       "number": 31252,
       "title": "rpc: print P2WSH and P2SH redem Script in (get/decode)rawtransaction",
@@ -1266,31 +1555,6 @@
       }
     },
     {
-      "id": 2732065267,
-      "number": 33160,
-      "title": "bench: Add more realistic Coin Selection Bench",
-      "body": "Adds a Coin Selection benchmark that doesn’t just test a worst case of one of the algorithms but exercises coin selection to to select inputs for a variety of different targets from a large number of UTXOs.",
-      "state": "open",
-      "user": "murchandamus",
-      "created_at": "2025-08-09T02:17:59Z",
-      "updated_at": "2026-04-08T14:46:15Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/33160",
-      "labels": [
-        "Tests",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 253,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 2687844196,
       "number": 33043,
       "title": "[POC] wallet: Enable non-electronic (paper-based) wallet backup with codex32",
@@ -1456,28 +1720,6 @@
       }
     },
     {
-      "id": 3503254331,
-      "number": 35032,
-      "title": "net_processing: don't modify addrman for private broadcast connections",
-      "body": "It is best if the internal addrman database is not modified with information coming from private broadcast connections because that information can potentially later be sent via other connections.\r\n\r\ninstagibbs suggested this change, thank you!",
-      "state": "open",
-      "user": "vasild",
-      "created_at": "2026-04-08T12:57:43Z",
-      "updated_at": "2026-04-08T13:12:43Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/35032",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 315,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3251091686,
       "number": 34520,
       "title": "refactor: Add [[nodiscard]] to functions returning bool+mutable ref",
@@ -1596,30 +1838,6 @@
         "text_length": 1186,
         "has_nack": false,
         "has_ack": true
-      }
-    },
-    {
-      "id": 3187823761,
-      "number": 34342,
-      "title": "cli: Replace libevent usage with simple http client",
-      "body": "Part of the effort to remove the libevent dependency altogether, see #31194\r\n\r\nThis takes the [`HTTPHeaders` class](https://github.com/bitcoin/bitcoin/pull/32061/commits/d549f01caab659f1c431ccabf0f5ff1800debcfe) from #32061 and puts it into [`common/http.h|cpp`](https://github.com/bitcoin/bitcoin/pull/34342/commits/634d4dcfa428f17f0a12c2e2742c2c08e2345033). While it would not be strictly required for that PR to go in first, it might be better to review it first or simultaneously.\r\n\r\nOtherwise the change itself replaces the libevent-based HTTP client with a simple synchronous implementation which uses the `Sock` class directly.",
-      "state": "open",
-      "user": "fjahr",
-      "created_at": "2026-01-19T13:27:54Z",
-      "updated_at": "2026-04-08T11:44:05Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34342",
-      "labels": [
-        "Scripts and tools"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 686,
-        "has_nack": false,
-        "has_ack": false
       }
     },
     {
@@ -2287,31 +2505,6 @@
       }
     },
     {
-      "id": 3487460321,
-      "number": 34998,
-      "title": "ci: add --extended when using --usecli",
-      "body": "The current CI doesn't cover the case of running all tests with `--extended` if using `--usecli`.\r\nThis led to a test failing (`feature_index_prune.py`) if run with `--usecli` and the CI not catching it.\r\nSee #34991 for context.\r\n\r\nThe CI obviously will fail in this PR until #34991 is merged into master.\r\n\r\n~I don't know if this is the best approach; I just looked for a ci using `--usecli` and added the `--extended` flag to cover these scenarios.~\r\nI just added `--usecli` to a test that was using `--extended` as sugested in https://github.com/bitcoin/bitcoin/pull/34998#issuecomment-4186737767\r\nI'm open to changing the approach.",
-      "state": "open",
-      "user": "polespinasa",
-      "created_at": "2026-04-03T20:37:54Z",
-      "updated_at": "2026-04-08T05:30:11Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34998",
-      "labels": [
-        "Tests",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 674,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3501336752,
       "number": 35030,
       "title": ".",
@@ -2423,31 +2616,6 @@
         "text_length": 616,
         "has_nack": false,
         "has_ack": false
-      }
-    },
-    {
-      "id": 3407378067,
-      "number": 34838,
-      "title": "interfaces: typed receive-request APIs",
-      "body": "Right now, `RecentRequestsTableModel` deserializes raw blobs it gets back from `getAddressReceiveRequests()` using `SpanReader` with no `try/catch`. If anything in the wallet DB is malformed, the GUI crashes on startup — there's no recovery path.\r\n\r\nThis PR replaces the two raw-string methods (`getAddressReceiveRequests()` / `setAddressReceiveRequest()`) with typed ones:\r\n\r\n- `getReceiveRequests()` returns a `vector<WalletReceiveRequest>` instead of opaque blobs\r\n- `addReceiveRequest()` lets the wallet assign the ID and timestamp\r\n- `eraseReceiveRequest()` is now its own method instead of overloading the setter with an empty string\r\n\r\nSerialization still happens the same way — I added `RecipientData` / `RequestEntryData` structs in `wallet/interfaces.cpp` that are byte-identical to the Qt-side ones, so the DB format doesn't change. The difference is that deserialization is now wrapped in `try/catch` at the wallet layer, so bad entries get logged and skipped rather than taking down the GUI.\r\n\r\nCloses #34629\r\n",
-      "state": "open",
-      "user": "MkDev11",
-      "created_at": "2026-03-17T03:10:13Z",
-      "updated_at": "2026-04-08T01:30:59Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34838",
-      "labels": [
-        "Wallet",
-        "interfaces"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1062,
-        "has_nack": false,
-        "has_ack": true
       }
     },
     {
@@ -2913,31 +3081,6 @@
       }
     },
     {
-      "id": 3494488444,
-      "number": 35016,
-      "title": "net: deduplicate private broadcast state and snapshot types",
-      "body": "Follow-up cleanup in the private broadcast subsystem.\r\n\r\nThis change removes duplication between the internal queue state\r\n(SendStatus, TxSendStatus) and the snapshot types exported to\r\nPeerManager / RPC / tests (PeerSendInfo, TxBroadcastInfo).\r\n\r\n- Remove PeerSendInfo, reuse SendStatus directly in TxBroadcastInfo\r\n- Simplify TxBroadcastInfo to {tx, TxSendStatus status}\r\n- Simplify GetBroadcastInfo() from field-by-field copy to direct snapshot\r\n- JSON output of getprivatebroadcastinfo is unchanged\r\n\r\nNo behavioral changes intended.",
-      "state": "open",
-      "user": "takeshikurosawaa",
-      "created_at": "2026-04-06T18:52:41Z",
-      "updated_at": "2026-04-07T18:01:40Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/35016",
-      "labels": [
-        "P2P",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 597,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 3477329415,
       "number": 34985,
       "title": "fuzz: remove GetDescriptorChecksum from string harness",
@@ -3104,30 +3247,6 @@
       }
     },
     {
-      "id": 3342160900,
-      "number": 34707,
-      "title": "net: keep finished private broadcast txs in memory",
-      "body": "Follow up from #34329.\r\n\r\nPrivate broadcast transaction data is removed from memory when either 1) the tx is received back from another peer and inserted into our mempool or 2) the tx is no longer acceptable to our mempool.\r\n\r\nWe want to persist this data for a number of reasons. See https://github.com/bitcoin/bitcoin/issues/30471.\r\n\r\nThis PR changes the behavior of the private broadcast queue to keep received txs in memory. The peer's address we received the tx from and the time is now also returned via `getprivatebroadcastinfo` RPC.\r\n\r\nKeeping mempool rejected txs in memory is left for a follow-up.\r\n\r\nThis is designed to facilitate follow up work including:\r\n- rebroadcasting txs that are in our mempool but have not been confirmed after a while. This can obviate rebroadcasting wallet txs if private broadcast is enabled (see https://github.com/bitcoin/bitcoin/pull/34533#issuecomment-3969991481).\r\n- adding a delay when submitting private broadcast txs so they will be broadcast at a later time (see https://github.com/bitcoin/bitcoin/issues/34118).\r\n- persisting private broadcast state to disk for resuming after restart or crash (see #34322).\r\n- expiring txs after a while so they are removed from the queue without having to manually abort.\r\n",
-      "state": "open",
-      "user": "andrewtoth",
-      "created_at": "2026-03-02T01:46:35Z",
-      "updated_at": "2026-04-07T16:17:38Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34707",
-      "labels": [
-        "P2P"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 1309,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
       "id": 3456774763,
       "number": 34937,
       "title": "Fix startup failure with RLIM_INFINITY fd limits",
@@ -3170,30 +3289,6 @@
         "drama_keywords": 0,
         "positive_keywords": 0,
         "text_length": 26036,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3418820453,
-      "number": 34858,
-      "title": "test: Use NodeClockContext in more tests",
-      "body": "Currently mocktime is written to a global, which may leak between sub-tests (albeit some tests try to reset the mocktime on a best-effort basis). Also, when advancing it, one has to keep a counter variable around.\r\n\r\nFix both issues by using the recently added `NodeClockContext`, which resets the mocktime once it goes out of scope. Also, it has a method to advance the mocktime by a delta.",
-      "state": "open",
-      "user": "maflcko",
-      "created_at": "2026-03-19T08:09:01Z",
-      "updated_at": "2026-04-07T14:36:05Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34858",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 432,
         "has_nack": false,
         "has_ack": false
       }
@@ -3406,31 +3501,6 @@
         "drama_keywords": 0,
         "positive_keywords": 1,
         "text_length": 1175,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3486081205,
-      "number": 34995,
-      "title": "ci, iwyu: Fix warnings in `src/common` and treat them as errors",
-      "body": "This PR [continues](https://github.com/bitcoin/bitcoin/pull/33725#issuecomment-3466897433) the ongoing effort to enforce IWYU warnings.\r\n\r\nSee [Developer Notes](https://github.com/bitcoin/bitcoin/blob/master/doc/developer-notes.md#using-iwyu).",
-      "state": "open",
-      "user": "hebasto",
-      "created_at": "2026-04-03T11:52:21Z",
-      "updated_at": "2026-04-07T11:37:18Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34995",
-      "labels": [
-        "Refactoring",
-        "CI failed"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 307,
         "has_nack": false,
         "has_ack": false
       }
@@ -4992,140 +5062,88 @@
         "has_nack": false,
         "has_ack": false
       }
-    },
-    {
-      "id": 3209325275,
-      "number": 34405,
-      "title": "wallet: skip APS when no partial spend exists",
-      "body": "Fixes #25150\n\nAPS (Avoid Partial Spends) runs a second coin selection pass to fully spend\nUTXOs sharing a scriptPubKey. This currently runs unconditionally, even when\nthe first selection has no partial spend. Running APS unnecessarily wastes\ncomputation and can produce a worse result when there was nothing to fix.\n\nDetect partial spends by comparing selected vs available UTXO counts per\nscriptPubKey, reusing available_coins. Skip APS if none found.\n\nTest updated to create partial spend scenarios so tracepoints fire.\n\n---\n\n*Supersedes #34362 which was corrupted by a shallow clone force-push.*",
-      "state": "open",
-      "user": "8144225309",
-      "created_at": "2026-01-26T04:36:55Z",
-      "updated_at": "2026-04-02T07:42:25Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34405",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 644,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3475940232,
-      "number": 34976,
-      "title": "lint: Clarify rmtree/remove_all error message with preferred alternatives",
-      "body": "An error message without a suggestion to fix will often lead developers to come up with a creative solution to side-step the grep in the linter (such as using an `auto` alias or other style-change).\r\n\r\nTry to avoid this by mentioning a recommended solution.",
-      "state": "closed",
-      "user": "maflcko",
-      "created_at": "2026-04-01T08:25:49Z",
-      "updated_at": "2026-04-02T07:39:05Z",
-      "merged_at": "2026-04-01T20:29:11Z",
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34976",
-      "labels": [
-        "Tests"
-      ],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 331,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
-      "id": 3245237633,
-      "number": 34502,
-      "title": "wallet: remove most asserts of `WALLET_FLAG_DESCRIPTORS` flag",
-      "body": "Reasons:\r\n1. Few of the wallet methods are descriptors specific as suggested\r\nby their names, these assertions seems redundant within them.\r\n2. Since the legacy wallet can't be loaded anymore, few of these\r\nassertions are outdated now.\r\n3. Seeing too many of these assertions in the `CWallet` class while\r\nreading the code is cognitively loaded, and after a while becomes\r\nannoying for the reader.\r\n\r\nNote: Such assertions in the migration specific functions have been\r\nleft untouched because they seem necessary there.\r\n\r\n<!--\r\n*** Please remove the following help text before submitting: ***\r\n\r\nPull requests without a rationale and clear improvement may be closed\r\nimmediately.\r\n\r\nGUI-related pull requests should be opened against\r\nhttps://github.com/bitcoin-core/gui\r\nfirst. See CONTRIBUTING.md\r\n-->\r\n\r\n<!--\r\nPlease provide clear motivation for your patch and explain how it improves\r\nBitcoin Core user experience or Bitcoin Core developer experience\r\nsignificantly:\r\n\r\n* Any test improvements or new tests that improve coverage are always welcome.\r\n* All other changes should have accompanying unit tests (see `src/test/`) or\r\n  functional tests (see `test/`). Contributors should note which tests cover\r\n  modified code. If no tests exist for a region of modified code, new tests\r\n  should accompany the change.\r\n* Bug fixes are most welcome when they come with steps to reproduce or an\r\n  explanation of the potential issue as well as reasoning for the way the bug\r\n  was fixed.\r\n* Features are welcome, but might be rejected due to design or scope issues.\r\n  If a feature is based on a lot of dependencies, contributors should first\r\n  consider building the system outside of Bitcoin Core, if possible.\r\n* Refactoring changes are only accepted if they are required for a feature or\r\n  bug fix or otherwise improve developer experience significantly. For example,\r\n  most \"code style\" refactoring changes require a thorough explanation why they\r\n  are useful, what downsides they have and why they *significantly* improve\r\n  developer experience or avoid serious programming bugs. Note that code style\r\n  is often a subjective matter. Unless they are explicitly mentioned to be\r\n  preferred in the [developer notes](/doc/developer-notes.md), stylistic code\r\n  changes are usually rejected.\r\n-->\r\n\r\n<!--\r\nBitcoin Core has a thorough review process and even the most trivial change\r\nneeds to pass a lot of eyes and requires non-zero or even substantial time\r\neffort to review. There is a huge lack of active reviewers on the project, so\r\npatches often sit for a long time.\r\n-->\r\n",
-      "state": "open",
-      "user": "rkrux",
-      "created_at": "2026-02-04T10:42:07Z",
-      "updated_at": "2026-04-02T07:04:54Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34502",
-      "labels": [
-        "Wallet"
-      ],
-      "drama_signals": {
-        "drama_keywords": 1,
-        "positive_keywords": 1,
-        "text_length": 2647,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3453623526,
-      "number": 34932,
-      "title": "blockencodings: recover from cmpctblock short-id collisions",
-      "body": "When two transactions in a compact block share the same 6-byte short ID, `InitData()` currently returns `READ_STATUS_FAILED`, abandoning reconstruction entirely and falling back to a full block download. \r\n\r\nThis is unnecessarily broad. A collision only means those specific positions are ambiguous - the rest of the compact block is still usable.\r\n\r\nThis PR marks collided short IDs with a sentinel value instead of failing. Ambiguous entries are skipped during mempool/extra_txn matching and left as unavailable in `txn_available`, so they flow naturally into the existing `getblocktxn` request path. Only the collided transactions are fetched; the compact block fast path is preserved for everything else.                                         \r\n                                                                                                    \r\nSafety is unchanged: ambiguous positions are never guessed, and reconstructed blocks are still validated for merkle mutation before acceptance.",
-      "state": "closed",
-      "user": "w0xlt",
-      "created_at": "2026-03-26T20:31:32Z",
-      "updated_at": "2026-04-02T06:47:51Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34932",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 1,
-        "text_length": 1056,
-        "has_nack": false,
-        "has_ack": true
-      }
-    },
-    {
-      "id": 3480317911,
-      "number": 34990,
-      "title": ".",
-      "body": ".",
-      "state": "closed",
-      "user": "asipovska",
-      "created_at": "2026-04-02T04:25:16Z",
-      "updated_at": "2026-04-02T04:25:35Z",
-      "merged_at": null,
-      "comments": 0,
-      "review_comments": 0,
-      "url": "https://github.com/bitcoin/bitcoin/pull/34990",
-      "labels": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 3,
-        "has_nack": false,
-        "has_ack": false
-      }
     }
   ],
   "issues": [
     {
+      "id": 1432002625,
+      "number": 26442,
+      "title": "Use of undocumented/undefined boost::signals2 behavior in wallet",
+      "body": "While working on a minimal rewrite for our remaining usage of `boost::signals2` ([POC branch here](https://github.com/theuni/bitcoin/tree/replace-boost-signals)), I stumbled upon some undocumented/undefined behavior with our current usage.\r\n\r\nSpecifically the problem, introduced in #17261, is that signals aren't intended to connect to other signals. Currently this is violated in the wallet: https://github.com/bitcoin/bitcoin/blob/master/src/wallet/wallet.cpp#L3518\r\n\r\nSee the boost discussion here: https://groups.google.com/g/boost-list/c/So4i8JXneJ0\r\n\r\nOn my WIP replacement branch I implemented it by chaining the calls as suggested (and as-intended in our code):\r\nhttps://github.com/theuni/bitcoin/blob/replace-boost-signals/src/btcsignals.h#L140 . This makes tests happy, so presumably that's what's going on with boost too, though there are details (like interim disconnections) which could give us trouble in the future.\r\n\r\nRegardless of the fact that this works for now, I don't think that we should be relying on it. I haven't looked into the details, but I'm hoping it could be fixed with some simple stub functions.\r\n\r\nPing @achow101. Any easy/obvious workarounds?",
+      "state": "closed",
+      "user": "theuni",
+      "created_at": "2022-11-01T19:52:36Z",
+      "updated_at": "2026-04-09T08:25:56Z",
+      "closed_at": "2026-04-09T08:25:56Z",
+      "comments": 2,
+      "url": "https://github.com/bitcoin/bitcoin/issues/26442",
+      "labels": [
+        "Bug",
+        "Wallet"
+      ],
+      "comment_data": [],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 1244,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
+      "id": 3507789538,
+      "number": 33603,
+      "title": "Missing shell completions for the `bitcoin` command",
+      "body": "v30 introduced a new `bitcoin` command but there are no shell completions for this command in contrib/completions/{bash,fish}\n\n* https://github.com/bitcoin/bitcoin/tree/master/contrib/completions/bash\n* https://github.com/bitcoin/bitcoin/tree/master/contrib/completions/fish",
+      "state": "closed",
+      "user": "prusnak",
+      "created_at": "2025-10-12T19:51:53Z",
+      "updated_at": "2026-04-09T06:27:01Z",
+      "closed_at": "2026-04-09T06:27:01Z",
+      "comments": 3,
+      "url": "https://github.com/bitcoin/bitcoin/issues/33603",
+      "labels": [
+        "Feature"
+      ],
+      "comment_data": [
+        {
+          "id": 4211925031,
+          "user": "fanquake",
+          "body": "#33385 was merged, so there is at least one completion now. More will likely be added with #33747.",
+          "created_at": "2026-04-09T06:27:01Z",
+          "drama_signals": {
+            "drama_keywords": 0,
+            "positive_keywords": 0,
+            "text_length": 98,
+            "has_nack": false,
+            "has_ack": false
+          }
+        }
+      ],
+      "drama_signals": {
+        "drama_keywords": 0,
+        "positive_keywords": 0,
+        "text_length": 326,
+        "has_nack": false,
+        "has_ack": false
+      }
+    },
+    {
       "id": 2627141112,
       "number": 31194,
       "title": "Remove libevent as a dependency (HTTP / cli / torcontrol)",
-      "body": "Next PRs for review:\n\n- [x] https://github.com/bitcoin/bitcoin/pull/32408\n- [x] https://github.com/bitcoin/bitcoin/pull/32862\n- [x] https://github.com/bitcoin/bitcoin/pull/32747\n- [x] https://github.com/bitcoin/bitcoin/pull/34242\n- [x] https://github.com/bitcoin/bitcoin/pull/34158\n- [ ] https://github.com/bitcoin/bitcoin/pull/34905\n- [ ] https://github.com/bitcoin/bitcoin/pull/34772\n- [ ] https://github.com/bitcoin/bitcoin/pull/32061\n- [ ] https://github.com/bitcoin/bitcoin/pull/34342\n\nThere is also a proof-of-concept branch including the above work as well as total removal of libevent from the build system:\n\n- [ ] https://github.com/bitcoin/bitcoin/pull/34411\n\n## Immediate advantages\n### UNIX domain sockets for JSON-RPC\n- Old feature request: https://github.com/bitcoin/bitcoin/issues/5029\n- UNIX sockets have been added to [ZMQ](https://github.com/bitcoin/bitcoin/pull/27679) and [Tor proxy](https://github.com/bitcoin/bitcoin/pull/27375) already \n- UNIX sockets with libevent [doesn't work](https://github.com/bitcoin/bitcoin/issues/5029#issuecomment-2203469108)\n### Remove a dependency\n- libevent hasn't had a release since 2020\n- [libevent is currently looking for new maintainers](github.com/libevent/libevent/issues/1812), a bit of a red flag\n- The [xz utils backdoor](https://en.wikipedia.org/wiki/XZ_Utils_backdoor) raised some concern among contributors in the [2024/04/18 IRC meeting](https://www.erisian.com.au/bitcoin-core-dev/log-2024-04-18.html#l-198)\n\n## Current libevent usage in the project\nSee [this report](https://gist.github.com/fjahr/c0c339a4b5021ae815d5bcff42e9fc57) by @fjahr. A few of these have already been addressed, like https://github.com/bitcoin/bitcoin/pull/29904\n",
+      "body": "Next PRs for review:\n\n- [x] https://github.com/bitcoin/bitcoin/pull/32408\n- [x] https://github.com/bitcoin/bitcoin/pull/32862\n- [x] https://github.com/bitcoin/bitcoin/pull/32747\n- [x] https://github.com/bitcoin/bitcoin/pull/34242\n- [x] https://github.com/bitcoin/bitcoin/pull/34158\n- [x] https://github.com/bitcoin/bitcoin/pull/34905\n- [ ] https://github.com/bitcoin/bitcoin/pull/34772\n- [ ] https://github.com/bitcoin/bitcoin/pull/32061\n- [ ] https://github.com/bitcoin/bitcoin/pull/34342\n\nThere is also a proof-of-concept branch including the above work as well as total removal of libevent from the build system:\n\n- [ ] https://github.com/bitcoin/bitcoin/pull/34411\n\n## Immediate advantages\n### UNIX domain sockets for JSON-RPC\n- Old feature request: https://github.com/bitcoin/bitcoin/issues/5029\n- UNIX sockets have been added to [ZMQ](https://github.com/bitcoin/bitcoin/pull/27679) and [Tor proxy](https://github.com/bitcoin/bitcoin/pull/27375) already \n- UNIX sockets with libevent [doesn't work](https://github.com/bitcoin/bitcoin/issues/5029#issuecomment-2203469108)\n### Remove a dependency\n- libevent hasn't had a release since 2020\n- [libevent is currently looking for new maintainers](github.com/libevent/libevent/issues/1812), a bit of a red flag\n- The [xz utils backdoor](https://en.wikipedia.org/wiki/XZ_Utils_backdoor) raised some concern among contributors in the [2024/04/18 IRC meeting](https://www.erisian.com.au/bitcoin-core-dev/log-2024-04-18.html#l-198)\n\n## Current libevent usage in the project\nSee [this report](https://gist.github.com/fjahr/c0c339a4b5021ae815d5bcff42e9fc57) by @fjahr. A few of these have already been addressed, like https://github.com/bitcoin/bitcoin/pull/29904\n",
       "state": "open",
       "user": "pinheadmz",
       "created_at": "2024-10-31T15:25:23Z",
-      "updated_at": "2026-04-09T01:44:04Z",
+      "updated_at": "2026-04-09T05:46:31Z",
       "closed_at": null,
       "comments": 14,
       "url": "https://github.com/bitcoin/bitcoin/issues/31194",
       "labels": [
         "RPC/REST/ZMQ",
-        "P2P"
+        "P2P",
+        "Tracking Issue"
       ],
       "comment_data": [],
       "drama_signals": {
@@ -5630,19 +5648,6 @@
       ],
       "comment_data": [
         {
-          "id": 4175117211,
-          "user": "maflcko",
-          "body": "> It is not something that will stop people from using old versions, as usage statistics show.\n\nRight, of course everyone is free to do whatever they want. However, there are no auto-updates, so I think updates should be easy, both for self-compilation, as well as for the release binaries, so that most users have an option to update if they wish.\n\nI know running the release binaries is unrelated to self-compilation, but the glibc bump may have been too early, so it may be good to not repeat the same mistake for self-compilation. Ref:\n\n> [432](https://www.erisian.com.au/bitcoin-core-dev/log-2025-09-18.html#l-432)2025-09-18T16:26:54  `<darosior> achow101: the nodl boxes are stuck because of our glibc bump in 28`\n\nStill unrelated, but I wonder if and how that resolved by now.\n\n> Who do we want to treat as second class citizens.\n\n\nI think we should make it straightforward for users to compile and update the software on commonly used and supported operating systems. What that means specifically, depends on the operating system, but for Ubuntu, I'd say it is what they call \"Standard Support\".\n\nTo give some more stats: I know the snap ships the release binaries, but I think the Ubuntu distribution is likely similar to those self-compiling. (Obviously, every non-Ubuntu distro isn't representative, as snap is usually only found on Ubuntu). The stats currently show 22.04 at second place, after 24.04:\n\nhttps://snapcraft.io/bitcoin-core\n\n<img width=\"1262\" height=\"1442\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/16bcfa6b-2536-41c3-bb47-38dcd04caa9c\" />",
-          "created_at": "2026-04-02T06:59:51Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 0,
-            "text_length": 1582,
-            "has_nack": false,
-            "has_ack": false
-          }
-        },
-        {
           "id": 4178299249,
           "user": "hebasto",
           "body": "> So we need to make a decision which of those stake holders should be treated as first class citizens, and which are treated as second class citizens.\n\nHere is my vision for a multi-tier support model for _build_ platforms.\n\n## Tier 1\n\nPlatforms that meet the following criteria:\n\n1. Documented build notes in this repository.\n2. CI jobs in this repository.\n3. The latest two releases, unless documented otherwise. For Ubuntu, this means the two most recent LTS releases. For Windows 11, it means the two most recent versions.\n\n### Our promise / User expectations\n\n1. All build tools are available either by default or via a standard, platform-specific installation routine with no extra configuration steps.\n2. All dependencies for dynamically linked binaries are available via the default package manager.\n3. Building statically linked native binaries with depends works out of the box (not applicable to Windows).\n\n## Tier 2\n\nSame as Tier 1, except that CI jobs are hosted elsewhere.\n\n### Our promise / User expectations\n\nSame as Tier 1, but on a best-effort basis.\n\n## Tier 3\n\nSame as Tier 2, but there are no documented build notes in this repository.\n\n### Our promise / User expectations\n\nNo promises.\n",
@@ -5758,19 +5763,6 @@
         "CI failed"
       ],
       "comment_data": [
-        {
-          "id": 4172504387,
-          "user": "maflcko",
-          "body": "Though, now that I have  a reproducer, I checked commit b75223bfb37247f227d8581de7d68ac2f1a1e97d from https://github.com/bitcoin/bitcoin/pull/32061 100 times, and it was passing, so maybe the bug is in libevent after all?\n\n<!--\n\n\n### Bug Summary: Intermittent RPC Deadlock on Large Payloads (Bitcoin Core / libevent)\n\n**The Symptoms:**\n* **Error:** Intermittent 30-second `TimeoutError` in Python functional tests (`rpc_echo_payload.py`, `testmempoolaccept`).\n* **Trigger:** Sending consecutive, large JSON-RPC POST payloads (780KB - 4MB) over HTTP/1.1 Keep-Alive connections.\n* **Environment:** Heavily hardware/software dependent. Surfaced consistently on fast AMD CPUs (AMD Ryzen 9 7950X3D, EPYC, Milan).\n\n**Diagnostics & Network Traces:**\n* **TCP Zero Window:** `tcpdump` reveals Python sends the HTTP headers and a large chunk of the body (e.g., 64KB), after which the `bitcoind` server replies with a TCP Zero Window (`win 0`).\n* **Zero Window Probes:** Because the window is closed, Python's TCP stack enters a probe state, sending 1-byte payloads every ~200ms.\n* **No Packet Drops:** `tc -s qdisc show dev lo` confirmed there were 0 dropped packets on the local loopback interface, ruling out an OS-level queue overflow.\n* **Server State (`bitcoind`):** Worker threads are completely idle. The RPC request never reaches the application layer.\n* **Libevent State (`epoll`):** Libevent debug logs show the HTTP thread waking up from `epoll_wait` every ~200ms (perfectly matching the client's TCP probes). It reads the tiny probe, fails to trigger a bulk drain of the socket, and goes back to sleep.\n\n**Attempted Client-Side Mitigations:**\n* **Forcing `Connection: close`:** Disabling Keep-Alive entirely bypasses the bug, isolating the issue to Keep-Alive request boundary handling.\n* **Disabling Nagle's Algorithm (`TCP_NODELAY`):** We properly subclassed `http.client.HTTPConnection` to disable Nagle's algorithm. *(Note: an earlier attempt to manually call `connect()` caused an `Errno 49 EADDRNOTAVAIL` socket leak on macOS).* However, **disabling Nagle did not fix the deadlock**, proving this was not a standard Silly Window Syndrome / Delayed ACK network clash. \n\n**Root Cause & Resolution:**\n* **The Fix:** Replacing `libevent` (specifically its `evhttp` server implementation) with a re-implemented HTTP server entirely resolved the issue. \n* **The Root Cause:** The bug is a Keep-Alive state machine / buffering flaw deep inside `libevent` (`evhttp`). \n* **The Mechanism:** When a fast CPU combined with Python's optimized `sendall()` blasts the end of one large request and the beginning of the next into the kernel simultaneously, `evhttp` fails to cleanly transition its internal `evbuffer` state. The `libevent` state machine gets stuck and stops reading from the OS socket. This causes the Linux kernel's receive buffer to fill up, which triggers the `win 0` TCP advertisement, resulting in a permanent deadlock until the Python client times out 30 seconds later.",
-          "created_at": "2026-04-01T19:33:47Z",
-          "drama_signals": {
-            "drama_keywords": 0,
-            "positive_keywords": 1,
-            "text_length": 2984,
-            "has_nack": false,
-            "has_ack": true
-          }
-        },
         {
           "id": 4176528563,
           "user": "rkrux",
@@ -6524,31 +6516,6 @@
       }
     },
     {
-      "id": 1432002625,
-      "number": 26442,
-      "title": "Use of undocumented/undefined boost::signals2 behavior in wallet",
-      "body": "While working on a minimal rewrite for our remaining usage of `boost::signals2` ([POC branch here](https://github.com/theuni/bitcoin/tree/replace-boost-signals)), I stumbled upon some undocumented/undefined behavior with our current usage.\r\n\r\nSpecifically the problem, introduced in #17261, is that signals aren't intended to connect to other signals. Currently this is violated in the wallet: https://github.com/bitcoin/bitcoin/blob/master/src/wallet/wallet.cpp#L3518\r\n\r\nSee the boost discussion here: https://groups.google.com/g/boost-list/c/So4i8JXneJ0\r\n\r\nOn my WIP replacement branch I implemented it by chaining the calls as suggested (and as-intended in our code):\r\nhttps://github.com/theuni/bitcoin/blob/replace-boost-signals/src/btcsignals.h#L140 . This makes tests happy, so presumably that's what's going on with boost too, though there are details (like interim disconnections) which could give us trouble in the future.\r\n\r\nRegardless of the fact that this works for now, I don't think that we should be relying on it. I haven't looked into the details, but I'm hoping it could be fixed with some simple stub functions.\r\n\r\nPing @achow101. Any easy/obvious workarounds?",
-      "state": "open",
-      "user": "theuni",
-      "created_at": "2022-11-01T19:52:36Z",
-      "updated_at": "2026-04-03T01:35:00Z",
-      "closed_at": null,
-      "comments": 2,
-      "url": "https://github.com/bitcoin/bitcoin/issues/26442",
-      "labels": [
-        "Bug",
-        "Wallet"
-      ],
-      "comment_data": [],
-      "drama_signals": {
-        "drama_keywords": 0,
-        "positive_keywords": 0,
-        "text_length": 1244,
-        "has_nack": false,
-        "has_ack": false
-      }
-    },
-    {
       "id": 4079116665,
       "number": 34827,
       "title": "31.0 RC Testing Guide Feedback",
@@ -6637,9 +6604,9 @@
     }
   ],
   "summary": {
-    "total_prs": 214,
-    "total_issues": 35,
-    "total_comments": 51,
+    "total_prs": 212,
+    "total_issues": 36,
+    "total_comments": 50,
     "unique_participants": 93
   }
 }
